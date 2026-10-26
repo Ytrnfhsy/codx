@@ -638,7 +638,6 @@ impl Game {
             C2S::JoinTeam(choice) => self.on_join_team(id, choice),
             C2S::SetLoadout(l) => {
                 let l = l.sanitized();
-                let can = self.can_spawn(id);
                 if let Some(p) = self.pm(id) {
                     p.next_loadout = Some(l);
                     if !p.has_loadout {
@@ -646,7 +645,7 @@ impl Game {
                         p.loadout = l;
                     }
                 }
-                if can && self.p(id).map(|p| self.time >= p.respawn_at).unwrap_or(false) {
+                if self.can_spawn(id) && self.p(id).map(|p| self.time >= p.respawn_at).unwrap_or(false) {
                     self.spawn_player(id, false);
                 }
             }
@@ -1138,7 +1137,8 @@ impl Game {
                     pos: p.body.pos.to_array(),
                     yaw: p.yaw,
                     pitch: p.pitch,
-                    stance: p.body.stance.to_u8(),
+                    // bit 7: Dead Silence (no footstep sounds)
+                    stance: p.body.stance.to_u8() | if p.has_perk3(Perk3::DeadSilence) { 0x80 } else { 0 },
                     weapon: p.weapon().id,
                     flags: f,
                 }

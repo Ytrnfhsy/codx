@@ -110,7 +110,7 @@ impl Default for ServerConfig {
             max_players: 18,
             password: String::new(),
             rcon_password: String::new(),
-            motd: "Ласкаво просимо! Грай чесно 🙂".into(),
+            motd: "Ласкаво просимо! Грай чесно :)".into(),
             rotation: vec![
                 RotationEntry { map: "depot".into(), mode: "tdm".into() },
                 RotationEntry { map: "market".into(), mode: "sab".into() },

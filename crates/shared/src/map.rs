@@ -71,6 +71,10 @@ impl Map {
     pub fn center(&self) -> Vec2 {
         (self.min + self.max) * 0.5
     }
+    /// Colour of the ground slab (used for the terrain outside the playable area).
+    pub fn ground_color(&self) -> [u8; 3] {
+        self.boxes.iter().find(|b| b.min.y < -0.5).map(|b| b.color).unwrap_or([120, 170, 90])
+    }
 }
 
 /// An opening in a wall, measured along the wall and from the wall's base.

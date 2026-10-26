@@ -10,12 +10,12 @@ path = "src/main.rs"
 
 [features]
 default = ["audio"]
-audio = ["macroquad/audio"]
+audio = []
 
 [dependencies]
 toon_shared = { path = "../shared" }
 toon_server = { path = "../server" }
-macroquad = { version = "0.4.16", default-features = false }
+macroquad = { version = "0.4.16", default-features = false, features = ["audio"] }
 serde.workspace = true
 serde_json.workspace = true
 bincode.workspace = true
