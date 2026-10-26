@@ -1,0 +1,1194 @@
+//! Authoritative game state: players, match flow, spawning, input validation and snapshots.
+
+use crate::bots::Bot;
+use crate::config::ServerConfig;
+use crate::nav::Nav;
+use glam::{vec3, Vec3};
+use std::collections::VecDeque;
+use std::net::SocketAddr;
+use toon_shared::consts::*;
+use toon_shared::map::{Map, MapId};
+use toon_shared::physics::{body_box, Body, Stance, World};
+use toon_shared::protocol::*;
+use toon_shared::rng::Rng;
+use toon_shared::weapons::{Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
+use toon_shared::{maps, Mode, Team};
+
+pub const PREROUND_FIRST: f64 = 8.0;
+pub const PREROUND_NEXT: f64 = 5.0;
+pub const ROUND_END_TIME: f64 = 6.0;
+pub const POSTMATCH_TIME: f64 = 12.0;
+
+#[derive(Clone, Copy, Debug)]
+pub struct WState {
+    pub id: WeaponId,
+    pub mag: u16,
+    pub reserve: u16,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct HistEntry {
+    pub t: f64,
+    pub pos: Vec3,
+    pub yaw: f32,
+    pub stance: Stance,
+}
+
+pub struct Player {
+    pub id: u8,
+    pub name: String,
+    pub addr: Option<SocketAddr>,
+    pub ip: String,
+    pub bot: Option<Box<Bot>>,
+    pub team: Team,
+    pub alive: bool,
+    pub hp: f32,
+    pub body: Body,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub flags: u8,
+    pub slot: u8,
+    pub loadout: Loadout,
+    pub has_loadout: bool,
+    pub next_loadout: Option<Loadout>,
+    pub weapons: [WState; 2],
+    pub grenades: u8,
+    pub shot_budget: f32,
+    pub reload_end: Option<f64>,
+    pub switch_end: f64,
+    pub melee_ready: f64,
+    pub last_damage: f64,
+    pub last_shot: f64,
+    pub kills: u16,
+    pub deaths: u16,
+    pub assists: u16,
+    pub score: i32,
+    pub streak: u32,
+    pub rewards: Vec<Killstreak>,
+    pub attackers: Vec<(u8, f64)>,
+    pub respawn_at: f64,
+    pub life: u16,
+    pub ping: f32,
+    pub last_seq: u32,
+    pub move_budget: f32,
+    pub history: VecDeque<HistEntry>,
+    pub rcon: bool,
+    pub rcon_fails: u32,
+    pub progress: f32,
+    pub joined_at: f64,
+    pub chat_budget: f32,
+}
+
+impl Player {
+    pub fn new(id: u8, name: String, addr: Option<SocketAddr>, now: f64) -> Player {
+        let l = DEFAULT_CLASSES[0].1;
+        Player {
+            id,
+            name,
+            ip: addr.map(|a| a.ip().to_string()).unwrap_or_else(|| "bot".into()),
+            addr,
+            bot: None,
+            team: Team::Spectator,
+            alive: false,
+            hp: MAX_HEALTH,
+            body: Body::default(),
+            yaw: 0.0,
+            pitch: 0.0,
+            flags: 0,
+            slot: 0,
+            loadout: l,
+            has_loadout: false,
+            next_loadout: None,
+            weapons: [
+                WState { id: l.primary, mag: 0, reserve: 0 },
+                WState { id: l.secondary, mag: 0, reserve: 0 },
+            ],
+            grenades: 0,
+            shot_budget: 1.0,
+            reload_end: None,
+            switch_end: 0.0,
+            melee_ready: 0.0,
+            last_damage: -100.0,
+            last_shot: -100.0,
+            kills: 0,
+            deaths: 0,
+            assists: 0,
+            score: 0,
+            streak: 0,
+            rewards: Vec::new(),
+            attackers: Vec::new(),
+            respawn_at: 0.0,
+            life: 0,
+            ping: 0.05,
+            last_seq: 0,
+            move_budget: 2.0,
+            history: VecDeque::new(),
+            rcon: false,
+            rcon_fails: 0,
+            progress: 0.0,
+            joined_at: now,
+            chat_budget: 5.0,
+        }
+    }
+    pub fn is_bot(&self) -> bool {
+        self.bot.is_some()
+    }
+    pub fn eye(&self) -> Vec3 {
+        self.body.pos + vec3(0.0, self.body.stance.eye(), 0.0)
+    }
+    pub fn chest(&self) -> Vec3 {
+        self.body.pos + vec3(0.0, self.body.stance.height() * 0.62, 0.0)
+    }
+    pub fn weapon(&self) -> &WState {
+        &self.weapons[self.slot as usize & 1]
+    }
+    pub fn weapon_mut(&mut self) -> &mut WState {
+        &mut self.weapons[self.slot as usize & 1]
+    }
+    pub fn has_perk2(&self, p: Perk2) -> bool {
+        self.loadout.perk2 == p
+    }
+    pub fn has_perk3(&self, p: Perk3) -> bool {
+        self.loadout.perk3 == p
+    }
+    /// Position/yaw/stance at a past time (lag compensation).
+    pub fn rewound(&self, t: f64) -> (Vec3, f32, Stance) {
+        let h = &self.history;
+        if h.is_empty() {
+            return (self.body.pos, self.yaw, self.body.stance);
+        }
+        if t >= h.back().unwrap().t {
+            return (self.body.pos, self.yaw, self.body.stance);
+        }
+        for i in (0..h.len()).rev() {
+            if h[i].t <= t {
+                let a = h[i];
+                let b = if i + 1 < h.len() { h[i + 1] } else { return (a.pos, a.yaw, a.stance) };
+                let k = ((t - a.t) / (b.t - a.t).max(1e-6)) as f32;
+                return (a.pos.lerp(b.pos, k), a.yaw, if k < 0.5 { a.stance } else { b.stance });
+            }
+        }
+        let a = h.front().unwrap();
+        (a.pos, a.yaw, a.stance)
+    }
+}
+
+pub enum Dest {
+    All,
+    Team(Team),
+    One(u8),
+}
+
+pub struct Grenade {
+    pub id: u16,
+    pub owner: u8,
+    pub pos: Vec3,
+    pub vel: Vec3,
+    pub explode_at: f64,
+}
+
+pub struct Heli {
+    pub id: u16,
+    pub owner: u8,
+    pub team: Team,
+    pub angle: f32,
+    pub pos: Vec3,
+    pub yaw: f32,
+    pub hp: f32,
+    pub until: f64,
+    pub next_shot: f64,
+    pub next_target: f64,
+    pub target: Option<u8>,
+}
+
+pub struct PendingBlast {
+    pub at: f64,
+    pub pos: Vec3,
+    pub radius: f32,
+    pub damage: f32,
+    pub owner: Option<u8>,
+    pub cause: toon_shared::weapons::Cause,
+}
+
+pub struct Sab {
+    pub pos: Vec3,
+    pub carrier: Option<u8>,
+    pub owner: Option<Team>,
+    /// Site (by defending team) where the bomb is planted.
+    pub planted_at: Option<Team>,
+    pub explode_at: f64,
+    pub plant: Option<(u8, f64)>,
+    pub defuse: Option<(u8, f64)>,
+    pub dropped_since: f64,
+    pub overtime_end: f64,
+}
+
+pub struct Game {
+    pub cfg: ServerConfig,
+    pub map: Map,
+    pub world: World,
+    pub nav: Nav,
+    pub mode: Mode,
+    pub players: Vec<Option<Player>>,
+    pub state: MatchState,
+    pub state_end: f64,
+    pub round_end: f64,
+    pub scores: [i32; 2],
+    pub overtime: bool,
+    pub round: u32,
+    pub time: f64,
+    pub tick: u32,
+    pub rng: Rng,
+    pub grenades: Vec<Grenade>,
+    pub helis: Vec<Heli>,
+    pub blasts: Vec<PendingBlast>,
+    pub next_ent: u16,
+    pub uav_until: [f64; 2],
+    pub sab: Sab,
+    pub rotation_idx: usize,
+    pub outbox: Vec<(Dest, S2C, bool)>,
+    pub shots: Vec<ShotFx>,
+    pub log: VecDeque<String>,
+    pub bans: crate::admin::Bans,
+    /// Players to disconnect (id, reason) — handled by the network layer.
+    pub kicked: Vec<(u8, String)>,
+    pub next_housekeeping: f64,
+    pub match_started: bool,
+    /// Where `save` writes the config.
+    pub cfg_path: Option<std::path::PathBuf>,
+}
+
+impl Game {
+    pub fn new(cfg: ServerConfig) -> Game {
+        let (map_id, mode) = cfg.rotation[0].resolve();
+        let map = maps::build(map_id);
+        let world = World::from_map(&map);
+        let nav = Nav::build(&map, &world);
+        let bans = crate::admin::Bans::load(&cfg.data_dir);
+        let sab = Sab {
+            pos: map.bomb,
+            carrier: None,
+            owner: None,
+            planted_at: None,
+            explode_at: 0.0,
+            plant: None,
+            defuse: None,
+            dropped_since: 0.0,
+            overtime_end: 0.0,
+        };
+        let mut g = Game {
+            cfg,
+            map,
+            world,
+            nav,
+            mode,
+            players: (0..MAX_PLAYERS).map(|_| None).collect(),
+            state: MatchState::Warmup,
+            state_end: 0.0,
+            round_end: 0.0,
+            scores: [0, 0],
+            overtime: false,
+            round: 0,
+            time: 0.0,
+            tick: 0,
+            rng: Rng::from_time(),
+            grenades: Vec::new(),
+            helis: Vec::new(),
+            blasts: Vec::new(),
+            next_ent: 1,
+            uav_until: [0.0; 2],
+            sab,
+            rotation_idx: 0,
+            outbox: Vec::new(),
+            shots: Vec::new(),
+            log: VecDeque::new(),
+            bans,
+            kicked: Vec::new(),
+            next_housekeeping: 0.0,
+            match_started: false,
+            cfg_path: None,
+        };
+        g.logf(format!("Карта: {} ({})", g.map.name, g.mode.name()));
+        g
+    }
+
+    // ---------------------------------------------------------------- utilities
+
+    pub fn logf(&mut self, s: String) {
+        println!("[game] {s}");
+        self.log.push_back(s);
+        while self.log.len() > 300 {
+            self.log.pop_front();
+        }
+    }
+
+    pub fn send(&mut self, to: u8, msg: S2C) {
+        self.outbox.push((Dest::One(to), msg, true));
+    }
+    pub fn broadcast(&mut self, msg: S2C) {
+        self.outbox.push((Dest::All, msg, true));
+    }
+    pub fn send_team(&mut self, team: Team, msg: S2C) {
+        self.outbox.push((Dest::Team(team), msg, true));
+    }
+    pub fn center_all(&mut self, text: impl Into<String>, secs: f32) {
+        self.broadcast(S2C::Center { text: text.into(), secs });
+    }
+
+    pub fn p(&self, id: u8) -> Option<&Player> {
+        self.players.get(id as usize).and_then(|p| p.as_ref())
+    }
+    pub fn pm(&mut self, id: u8) -> Option<&mut Player> {
+        self.players.get_mut(id as usize).and_then(|p| p.as_mut())
+    }
+    pub fn ids(&self) -> Vec<u8> {
+        self.players.iter().flatten().map(|p| p.id).collect()
+    }
+    pub fn humans(&self) -> usize {
+        self.players.iter().flatten().filter(|p| !p.is_bot()).count()
+    }
+    pub fn team_count(&self, t: Team) -> usize {
+        self.players.iter().flatten().filter(|p| p.team == t).count()
+    }
+    pub fn settings(&self) -> GameSettings {
+        GameSettings {
+            score_limit: self.cfg.tdm.score_limit,
+            time_limit: match self.mode {
+                Mode::Tdm => self.cfg.tdm.time_limit,
+                Mode::Sab => self.cfg.sab.time_limit,
+            },
+            rounds_to_win: self.cfg.sab.rounds_to_win,
+            friendly_fire: self.cfg.friendly_fire,
+            plant_time: self.cfg.sab.plant_time,
+            defuse_time: self.cfg.sab.defuse_time,
+            bomb_timer: self.cfg.sab.bomb_timer,
+        }
+    }
+    pub fn new_ent_id(&mut self) -> u16 {
+        self.next_ent = self.next_ent.wrapping_add(1).max(1);
+        self.next_ent
+    }
+
+    // ---------------------------------------------------------------- connections
+
+    pub fn sanitize_name(&self, raw: &str, skip: Option<u8>) -> String {
+        let mut name: String = raw.chars().filter(|c| !c.is_control()).take(20).collect::<String>().trim().to_string();
+        if name.is_empty() {
+            name = "Гравець".into();
+        }
+        let taken = |n: &str| self.players.iter().flatten().any(|p| Some(p.id) != skip && p.name == n);
+        if !taken(&name) {
+            return name;
+        }
+        for i in 2..100 {
+            let n = format!("{name}({i})");
+            if !taken(&n) {
+                return n;
+            }
+        }
+        name
+    }
+
+    /// Handles a `Hello` from a new address. Returns the player id or a reject reason.
+    pub fn connect(&mut self, addr: SocketAddr, name: &str, password: &str, version: u16) -> Result<u8, String> {
+        if version != PROTOCOL_VERSION {
+            return Err(format!("Версія гри не збігається (сервер {PROTOCOL_VERSION}, клієнт {version}). Онови гру."));
+        }
+        let ip = addr.ip().to_string();
+        if let Some(b) = self.bans.find(&ip) {
+            return Err(format!("Тебе заблоковано на цьому сервері: {}", b.reason));
+        }
+        if !self.cfg.password.is_empty() && password != self.cfg.password {
+            return Err("Невірний пароль сервера".into());
+        }
+        if self.humans() >= self.cfg.max_players {
+            return Err("Сервер заповнений".into());
+        }
+        // make room by removing a bot if needed
+        if self.players.iter().flatten().count() >= self.cfg.max_players {
+            if let Some(bot) = self.players.iter().flatten().find(|p| p.is_bot()).map(|p| p.id) {
+                self.remove_player(bot, None);
+            }
+        }
+        let Some(slot) = self.players.iter().position(|p| p.is_none()) else {
+            return Err("Сервер заповнений".into());
+        };
+        let id = slot as u8;
+        let name = self.sanitize_name(name, None);
+        self.players[slot] = Some(Player::new(id, name.clone(), Some(addr), self.time));
+        self.send(
+            id,
+            S2C::Welcome {
+                id,
+                server_name: self.cfg.name.clone(),
+                motd: self.cfg.motd.clone(),
+                map: self.map.id,
+                mode: self.mode,
+                settings: self.settings(),
+            },
+        );
+        self.broadcast(S2C::Chat { from: String::new(), team: Team::Spectator, text: format!("{name} приєднався до гри"), team_only: false });
+        self.logf(format!("+ {name} ({ip}) підключився як #{id}"));
+        Ok(id)
+    }
+
+    pub fn remove_player(&mut self, id: u8, reason: Option<&str>) {
+        let Some(p) = self.players[id as usize].take() else { return };
+        if self.sab.carrier == Some(id) {
+            self.sab.carrier = None;
+            self.sab.pos = p.body.pos;
+            self.sab.dropped_since = self.time;
+        }
+        if !p.is_bot() {
+            let text = match reason {
+                Some(r) => format!("{} покинув гру ({r})", p.name),
+                None => format!("{} покинув гру", p.name),
+            };
+            self.broadcast(S2C::Chat { from: String::new(), team: Team::Spectator, text: text.clone(), team_only: false });
+            self.logf(format!("- {text}"));
+        }
+    }
+
+    pub fn add_bot(&mut self) -> Option<u8> {
+        let total = self.players.iter().flatten().count();
+        if total >= self.cfg.max_players {
+            return None;
+        }
+        let slot = self.players.iter().position(|p| p.is_none())?;
+        let id = slot as u8;
+        let base = crate::bots::BOT_NAMES[self.rng.below(crate::bots::BOT_NAMES.len())];
+        let name = self.sanitize_name(&format!("[Бот] {base}"), None);
+        let mut p = Player::new(id, name, None, self.time);
+        p.bot = Some(Box::new(Bot::new(self.cfg.bot_skill, &mut self.rng)));
+        let class = DEFAULT_CLASSES[self.rng.below(DEFAULT_CLASSES.len())].1;
+        p.loadout = class;
+        p.has_loadout = true;
+        self.players[slot] = Some(p);
+        let team = self.auto_team(id);
+        self.set_team(id, team, false);
+        Some(id)
+    }
+
+    pub fn auto_team(&self, id: u8) -> Team {
+        let count = |t: Team| self.players.iter().flatten().filter(|p| p.id != id && p.team == t).count();
+        let (a, b) = (count(Team::Allies), count(Team::Axis));
+        if a < b {
+            Team::Allies
+        } else if b < a {
+            Team::Axis
+        } else {
+            let score = |t: Team| self.scores[t.index()];
+            if score(Team::Allies) <= score(Team::Axis) {
+                Team::Allies
+            } else {
+                Team::Axis
+            }
+        }
+    }
+
+    pub fn set_team(&mut self, id: u8, team: Team, notify: bool) {
+        let Some(p) = self.pm(id) else { return };
+        if p.team == team {
+            return;
+        }
+        let was_alive = p.alive;
+        p.team = team;
+        p.alive = false;
+        p.streak = 0;
+        p.respawn_at = 0.0;
+        let name = p.name.clone();
+        if was_alive {
+            self.drop_bomb_if_carrier(id);
+        }
+        self.send(id, S2C::TeamSet(team));
+        if notify {
+            self.broadcast(S2C::Chat { from: String::new(), team, text: format!("{name} → {}", team.name()), team_only: false });
+        }
+    }
+
+    /// Bots fill the server up to `cfg.bots` players, keeping teams balanced.
+    fn manage_bots(&mut self) {
+        let humans_playing = self.players.iter().flatten().filter(|p| !p.is_bot() && p.team.is_playing()).count();
+        let bots: Vec<u8> = self.players.iter().flatten().filter(|p| p.is_bot()).map(|p| p.id).collect();
+        let want = self.cfg.bots.saturating_sub(humans_playing);
+        if bots.len() < want {
+            self.add_bot();
+        } else if bots.len() > want {
+            // remove a bot from the bigger team
+            let big = if self.team_count(Team::Allies) >= self.team_count(Team::Axis) { Team::Allies } else { Team::Axis };
+            let victim = bots.iter().copied().find(|&b| self.p(b).map(|p| p.team) == Some(big)).unwrap_or(bots[0]);
+            self.remove_player(victim, None);
+        }
+        // balance bots between teams
+        let (a, b) = (self.team_count(Team::Allies), self.team_count(Team::Axis));
+        if a.abs_diff(b) > 1 {
+            let (big, small) = if a > b { (Team::Allies, Team::Axis) } else { (Team::Axis, Team::Allies) };
+            if let Some(bot) = self.players.iter().flatten().find(|p| p.is_bot() && p.team == big && !p.alive).map(|p| p.id) {
+                self.set_team(bot, small, false);
+            } else if let Some(bot) = self.players.iter().flatten().find(|p| p.is_bot() && p.team == big).map(|p| p.id) {
+                self.set_team(bot, small, false);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- spawning
+
+    pub fn can_spawn(&self, id: u8) -> bool {
+        let Some(p) = self.p(id) else { return false };
+        if p.alive || !p.team.is_playing() || !p.has_loadout {
+            return false;
+        }
+        match self.state {
+            MatchState::PostMatch | MatchState::RoundEnd => false,
+            MatchState::Playing => !(self.mode == Mode::Sab && self.overtime),
+            _ => true,
+        }
+    }
+
+    pub fn respawn_delay(&self) -> f32 {
+        match self.mode {
+            Mode::Tdm => self.cfg.tdm.respawn_delay,
+            Mode::Sab => self.cfg.sab.respawn_delay,
+        }
+    }
+
+    /// Picks a spawn point: far from enemies, out of their sight, near teammates.
+    fn pick_spawn(&mut self, id: u8, side_only: bool) -> (Vec3, f32) {
+        let team = self.p(id).map(|p| p.team).unwrap_or(Team::Allies);
+        let side = if side_only || self.mode == Mode::Sab || self.state != MatchState::Playing { true } else { false };
+        let cands: Vec<_> = if side && team.is_playing() {
+            self.map.spawns[team.index()].clone()
+        } else {
+            self.map.all_spawns().copied().collect()
+        };
+        let mut best = (f32::NEG_INFINITY, cands[0]);
+        for s in &cands {
+            let mut score = self.rng.range(0.0, 3.0);
+            let mut min_enemy = 60.0f32;
+            let mut min_friend = 60.0f32;
+            for p in self.players.iter().flatten() {
+                if !p.alive || p.id == id {
+                    continue;
+                }
+                let d = p.body.pos.distance(s.pos);
+                if d < 1.5 {
+                    score -= 200.0;
+                }
+                if p.team == team {
+                    min_friend = min_friend.min(d);
+                } else {
+                    min_enemy = min_enemy.min(d);
+                    if d < 45.0 && self.world.line_of_sight(p.eye(), s.pos + vec3(0.0, 1.5, 0.0)) {
+                        score -= 40.0;
+                    }
+                }
+            }
+            score += min_enemy.min(40.0);
+            if !side {
+                score -= min_friend.min(40.0) * 0.25;
+            }
+            if score > best.0 {
+                best = (score, *s);
+            }
+        }
+        (best.1.pos + vec3(0.0, 0.02, 0.0), best.1.yaw)
+    }
+
+    pub fn spawn_player(&mut self, id: u8, side_only: bool) {
+        let (pos, yaw) = self.pick_spawn(id, side_only);
+        let time = self.time;
+        let Some(p) = self.pm(id) else { return };
+        if let Some(l) = p.next_loadout.take() {
+            p.loadout = l;
+        }
+        let l = p.loadout;
+        p.alive = true;
+        p.hp = MAX_HEALTH;
+        p.body = Body { pos, vel: Vec3::ZERO, on_ground: true, stance: Stance::Stand };
+        p.yaw = yaw;
+        p.pitch = 0.0;
+        p.flags = 0;
+        p.slot = 0;
+        p.weapons = [
+            WState { id: l.primary, mag: l.primary.def().mag, reserve: l.reserve_for(l.primary) },
+            WState { id: l.secondary, mag: l.secondary.def().mag, reserve: l.reserve_for(l.secondary) },
+        ];
+        p.grenades = l.grenades();
+        p.reload_end = None;
+        p.switch_end = time + 0.3;
+        p.shot_budget = 1.0;
+        p.attackers.clear();
+        p.life = p.life.wrapping_add(1);
+        p.history.clear();
+        p.move_budget = 1.0;
+        p.last_damage = -100.0;
+        p.progress = 0.0;
+        let life = p.life;
+        if let Some(b) = p.bot.as_mut() {
+            b.on_spawn();
+        }
+        self.send(id, S2C::Spawned { pos: pos.to_array(), yaw, life, loadout: l });
+    }
+
+    // ---------------------------------------------------------------- client messages
+
+    pub fn handle(&mut self, id: u8, msg: C2S) {
+        match msg {
+            C2S::Hello { .. } => {}
+            C2S::JoinTeam(choice) => self.on_join_team(id, choice),
+            C2S::SetLoadout(l) => {
+                let l = l.sanitized();
+                let can = self.can_spawn(id);
+                if let Some(p) = self.pm(id) {
+                    p.next_loadout = Some(l);
+                    if !p.has_loadout {
+                        p.has_loadout = true;
+                        p.loadout = l;
+                    }
+                }
+                if can && self.p(id).map(|p| self.time >= p.respawn_at).unwrap_or(false) {
+                    self.spawn_player(id, false);
+                }
+            }
+            C2S::Spawn => {
+                if self.can_spawn(id) && self.p(id).map(|p| self.time >= p.respawn_at).unwrap_or(false) {
+                    self.spawn_player(id, false);
+                }
+            }
+            C2S::Input(inp) => self.on_input(id, inp),
+            C2S::Fire { weapon, origin, dirs } => {
+                let dirs: Vec<Vec3> = dirs.iter().map(|d| Vec3::from_array(*d)).collect();
+                self.fire(id, weapon, Vec3::from_array(origin), &dirs);
+            }
+            C2S::Reload => self.start_reload(id),
+            C2S::Switch(slot) => self.switch_weapon(id, slot),
+            C2S::Grenade { origin, dir, cook } => self.throw_grenade(id, Vec3::from_array(origin), Vec3::from_array(dir), cook),
+            C2S::Melee => self.melee(id),
+            C2S::UseKillstreak { target } => self.use_killstreak(id, target),
+            C2S::Chat { text, team_only } => self.on_chat(id, text, team_only),
+            C2S::Rcon { password, cmd } => self.on_rcon(id, &password, &cmd),
+            C2S::Pong(ms) => {
+                let now_ms = (self.time * 1000.0) as u32;
+                if let Some(p) = self.pm(id) {
+                    let rtt = now_ms.wrapping_sub(ms) as f32 / 1000.0;
+                    if rtt < 2.0 {
+                        p.ping = p.ping * 0.7 + rtt * 0.3;
+                    }
+                }
+            }
+            C2S::Disconnect => {}
+        }
+    }
+
+    fn on_join_team(&mut self, id: u8, choice: Option<Team>) {
+        let target = match choice {
+            None => self.auto_team(id),
+            Some(t) => t,
+        };
+        if target.is_playing() && self.cfg.auto_balance && choice.is_some() {
+            let other = target.enemy();
+            let count = |t: Team| self.players.iter().flatten().filter(|p| p.id != id && p.team == t).count();
+            let mine = count(target) + 1;
+            let theirs = count(other);
+            if mine > theirs + 1 {
+                // try to swap a bot out instead of refusing
+                if let Some(bot) = self.players.iter().flatten().find(|p| p.is_bot() && p.team == target).map(|p| p.id) {
+                    self.set_team(bot, other, false);
+                } else {
+                    self.send(id, S2C::Center { text: "Команда переповнена — автобаланс".into(), secs: 3.0 });
+                    let t = self.auto_team(id);
+                    self.set_team(id, t, true);
+                    return;
+                }
+            }
+        }
+        if self.p(id).map(|p| p.team) == Some(target) {
+            self.send(id, S2C::TeamSet(target));
+            return;
+        }
+        self.set_team(id, target, true);
+    }
+
+    fn on_input(&mut self, id: u8, inp: InputState) {
+        let frozen = self.state == MatchState::PreRound || self.state == MatchState::PostMatch;
+        let world = &self.world;
+        let Some(p) = self.players[id as usize].as_mut() else { return };
+        if inp.seq <= p.last_seq && p.last_seq - inp.seq < 1_000_000 {
+            return;
+        }
+        p.last_seq = inp.seq;
+        p.yaw = inp.yaw;
+        p.pitch = inp.pitch.clamp(-1.55, 1.55);
+        if !p.alive || inp.life != p.life {
+            return;
+        }
+        p.flags = inp.flags & (flags::SPRINT | flags::ADS | flags::ON_GROUND | flags::USE);
+        let new = Vec3::from_array(inp.pos);
+        if !new.is_finite() {
+            return;
+        }
+        let stance = Stance::from_u8(inp.stance);
+        let old = p.body.pos;
+        let dh = vec3(new.x - old.x, 0.0, new.z - old.z).length();
+        let dy = (new.y - old.y).abs();
+        let mut ok = dh <= p.move_budget + 0.25 && dy <= 4.0;
+        if frozen && dh > 0.05 {
+            ok = false;
+        }
+        if ok {
+            let mut bb = body_box(new, stance.height());
+            bb.min += Vec3::splat(0.03);
+            bb.max -= Vec3::splat(0.03);
+            if world.overlaps(&bb) {
+                ok = false;
+            }
+        }
+        if ok {
+            p.move_budget = (p.move_budget - dh).max(0.0);
+            p.body.pos = new;
+            p.body.vel = Vec3::from_array(inp.vel);
+            p.body.stance = stance;
+            p.body.on_ground = inp.flags & flags::ON_GROUND != 0;
+        } else {
+            let life = p.life;
+            let pos = p.body.pos.to_array();
+            self.outbox.push((Dest::One(id), S2C::Correction { pos, life }, true));
+        }
+    }
+
+    fn on_chat(&mut self, id: u8, text: String, team_only: bool) {
+        let text: String = text.chars().filter(|c| !c.is_control()).take(120).collect();
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        let Some(p) = self.pm(id) else { return };
+        if p.chat_budget < 1.0 {
+            return;
+        }
+        p.chat_budget -= 1.0;
+        let (from, team) = (p.name.clone(), p.team);
+        self.logf(format!("{}{from}: {text}", if team_only { "(команда) " } else { "" }));
+        let msg = S2C::Chat { from, team, text, team_only };
+        if team_only {
+            self.send_team(team, msg);
+        } else {
+            self.broadcast(msg);
+        }
+    }
+
+    fn on_rcon(&mut self, id: u8, password: &str, cmd: &str) {
+        let ok = {
+            let Some(p) = self.p(id) else { return };
+            !self.cfg.rcon_password.is_empty() && p.rcon_fails < 5 && password == self.cfg.rcon_password
+        };
+        if !ok {
+            if let Some(p) = self.pm(id) {
+                p.rcon_fails += 1;
+            }
+            self.send(id, S2C::RconReply("RCON: невірний пароль або адміністрування вимкнено".into()));
+            return;
+        }
+        let name = self.p(id).map(|p| p.name.clone()).unwrap_or_default();
+        self.logf(format!("RCON від {name}: {cmd}"));
+        let reply = crate::admin::exec(self, cmd);
+        self.send(id, S2C::RconReply(reply));
+    }
+
+    // ---------------------------------------------------------------- match flow
+
+    fn ready_to_start(&self) -> bool {
+        let playing = self.players.iter().flatten().filter(|p| p.team.is_playing()).count();
+        playing >= self.cfg.min_players
+            && self.team_count(Team::Allies) > 0
+            && self.team_count(Team::Axis) > 0
+            && self.players.iter().flatten().any(|p| !p.is_bot())
+    }
+
+    pub fn start_match(&mut self) {
+        self.scores = [0, 0];
+        self.round = 0;
+        self.match_started = true;
+        for p in self.players.iter_mut().flatten() {
+            p.kills = 0;
+            p.deaths = 0;
+            p.assists = 0;
+            p.score = 0;
+            p.streak = 0;
+            p.rewards.clear();
+        }
+        self.start_round(PREROUND_FIRST);
+    }
+
+    fn start_round(&mut self, pre: f64) {
+        self.round += 1;
+        self.state = MatchState::PreRound;
+        self.state_end = self.time + pre;
+        self.overtime = false;
+        self.grenades.clear();
+        self.helis.clear();
+        self.blasts.clear();
+        self.uav_until = [0.0; 2];
+        self.reset_bomb();
+        for id in self.ids() {
+            if let Some(p) = self.pm(id) {
+                p.alive = false;
+                p.respawn_at = 0.0;
+            }
+            if self.can_spawn(id) {
+                self.spawn_player(id, true);
+            }
+        }
+        let text = match self.mode {
+            Mode::Tdm => format!("{} — {}", self.mode.name(), self.map.name),
+            Mode::Sab => format!("{} — раунд {}", self.mode.name(), self.round),
+        };
+        self.center_all(text, pre as f32);
+    }
+
+    pub fn reset_bomb(&mut self) {
+        self.sab.pos = self.map.bomb;
+        self.sab.carrier = None;
+        self.sab.owner = None;
+        self.sab.planted_at = None;
+        self.sab.plant = None;
+        self.sab.defuse = None;
+        self.sab.dropped_since = self.time;
+    }
+
+    pub fn end_match(&mut self, winner: Option<Team>, reason: &str) {
+        if self.state == MatchState::PostMatch {
+            return;
+        }
+        self.state = MatchState::PostMatch;
+        self.state_end = self.time + POSTMATCH_TIME;
+        let text = match winner {
+            Some(t) => format!("{} перемагають! {reason}", t.name()),
+            None => format!("Нічия! {reason}"),
+        };
+        self.logf(format!("Матч завершено: {text} ({}:{})", self.scores[0], self.scores[1]));
+        self.broadcast(S2C::MatchEnd { winner, text });
+    }
+
+    pub fn round_win(&mut self, winner: Option<Team>, reason: &str) {
+        if self.state != MatchState::Playing {
+            return;
+        }
+        if let Some(t) = winner {
+            self.scores[t.index()] += 1;
+        }
+        let text = match winner {
+            Some(t) => format!("{} виграли раунд — {reason}", t.name()),
+            None => format!("Раунд нічийний — {reason}"),
+        };
+        self.logf(text.clone());
+        if let Some(t) = winner {
+            if self.scores[t.index()] >= self.cfg.sab.rounds_to_win as i32 {
+                self.end_match(Some(t), reason);
+                return;
+            }
+        }
+        self.state = MatchState::RoundEnd;
+        self.state_end = self.time + ROUND_END_TIME;
+        self.broadcast(S2C::RoundEnd { winner, text });
+    }
+
+    /// Switches map/mode immediately (admin or rotation).
+    pub fn change_map(&mut self, map: MapId, mode: Mode) {
+        self.map = maps::build(map);
+        self.world = World::from_map(&self.map);
+        self.nav = Nav::build(&self.map, &self.world);
+        self.mode = mode;
+        self.state = MatchState::Warmup;
+        self.match_started = false;
+        self.scores = [0, 0];
+        self.overtime = false;
+        self.grenades.clear();
+        self.helis.clear();
+        self.blasts.clear();
+        self.reset_bomb();
+        for p in self.players.iter_mut().flatten() {
+            p.alive = false;
+            p.respawn_at = 0.0;
+            p.kills = 0;
+            p.deaths = 0;
+            p.assists = 0;
+            p.score = 0;
+            p.streak = 0;
+            p.rewards.clear();
+            if let Some(b) = p.bot.as_mut() {
+                b.on_spawn();
+            }
+        }
+        let settings = self.settings();
+        self.broadcast(S2C::MapChange { map, mode, settings });
+        self.logf(format!("Зміна карти: {} ({})", self.map.name, mode.name()));
+        for id in self.ids() {
+            if self.can_spawn(id) {
+                self.spawn_player(id, true);
+            }
+        }
+    }
+
+    pub fn next_map(&mut self) {
+        self.rotation_idx = (self.rotation_idx + 1) % self.cfg.rotation.len();
+        let (m, mode) = self.cfg.rotation[self.rotation_idx].resolve();
+        self.change_map(m, mode);
+    }
+
+    fn update_state(&mut self, dt: f32) {
+        match self.state {
+            MatchState::Warmup => {
+                if self.ready_to_start() {
+                    self.start_match();
+                }
+            }
+            MatchState::PreRound => {
+                if self.time >= self.state_end {
+                    self.state = MatchState::Playing;
+                    let limit = match self.mode {
+                        Mode::Tdm => self.cfg.tdm.time_limit,
+                        Mode::Sab => self.cfg.sab.time_limit,
+                    };
+                    self.round_end = self.time + limit as f64 * 60.0;
+                    self.center_all("В БІЙ!", 1.5);
+                }
+            }
+            MatchState::Playing => {
+                if self.mode == Mode::Sab && self.sab.planted_at.is_some() {
+                    // the round clock stops while the bomb ticks
+                    self.round_end += dt as f64;
+                }
+                if self.time >= self.round_end && !self.overtime {
+                    match self.mode {
+                        Mode::Tdm => {
+                            let w = if self.scores[0] > self.scores[1] {
+                                Some(Team::Allies)
+                            } else if self.scores[1] > self.scores[0] {
+                                Some(Team::Axis)
+                            } else {
+                                None
+                            };
+                            self.end_match(w, "Час вийшов");
+                        }
+                        Mode::Sab => {
+                            self.overtime = true;
+                            self.sab.overtime_end = self.time + self.cfg.sab.overtime_limit as f64 * 60.0;
+                            self.center_all("ОВЕРТАЙМ! Відродження вимкнено", 4.0);
+                        }
+                    }
+                }
+                if self.mode == Mode::Sab {
+                    self.update_sab();
+                }
+            }
+            MatchState::RoundEnd => {
+                if self.time >= self.state_end {
+                    self.start_round(PREROUND_NEXT);
+                }
+            }
+            MatchState::PostMatch => {
+                if self.time >= self.state_end {
+                    self.next_map();
+                }
+            }
+        }
+    }
+
+    pub fn time_left(&self) -> f32 {
+        match self.state {
+            MatchState::Playing => {
+                if self.overtime {
+                    0.0
+                } else {
+                    (self.round_end - self.time).max(0.0) as f32
+                }
+            }
+            MatchState::Warmup => 0.0,
+            _ => (self.state_end - self.time).max(0.0) as f32,
+        }
+    }
+
+    // ---------------------------------------------------------------- tick
+
+    pub fn tick(&mut self, dt: f32) {
+        self.time += dt as f64;
+        self.tick = self.tick.wrapping_add(1);
+        self.update_state(dt);
+
+        // bots
+        for id in self.ids() {
+            if self.p(id).map(|p| p.is_bot()).unwrap_or(false) {
+                self.update_bot(id, dt);
+            }
+        }
+
+        let time = self.time;
+        let mut fell = Vec::new();
+        let mut auto_spawn = Vec::new();
+        for p in self.players.iter_mut().flatten() {
+            let max_speed = SPRINT_SPEED * 1.2;
+            p.move_budget = (p.move_budget + max_speed * dt).min(3.0);
+            p.chat_budget = (p.chat_budget + dt * 0.5).min(5.0);
+            if !p.alive {
+                if p.team.is_playing() && p.has_loadout && p.respawn_at > 0.0 {
+                    let wait = if p.is_bot() { 0.0 } else { 3.0 };
+                    if time >= p.respawn_at + wait {
+                        auto_spawn.push(p.id);
+                    }
+                }
+                continue;
+            }
+            let def = p.weapon().id.def();
+            p.shot_budget = (p.shot_budget + dt * def.rpm / 60.0).min(2.0);
+            if let Some(end) = p.reload_end {
+                if time >= end {
+                    let mag_max = p.weapon().id.def().mag;
+                    let w = p.weapon_mut();
+                    let take = (mag_max - w.mag).min(w.reserve);
+                    w.mag += take;
+                    w.reserve -= take;
+                    p.reload_end = None;
+                }
+            }
+            if time - p.last_damage > REGEN_DELAY as f64 && p.hp < MAX_HEALTH {
+                p.hp = (p.hp + REGEN_RATE * dt).min(MAX_HEALTH);
+            }
+            if p.body.pos.y < -15.0 {
+                fell.push(p.id);
+            }
+            p.history.push_back(HistEntry { t: time, pos: p.body.pos, yaw: p.yaw, stance: p.body.stance });
+            while p.history.len() > 40 {
+                p.history.pop_front();
+            }
+        }
+        for id in fell {
+            self.kill(id, None, toon_shared::weapons::Cause::Fall, false);
+        }
+        for id in auto_spawn {
+            if self.can_spawn(id) {
+                self.spawn_player(id, false);
+            }
+        }
+
+        self.update_grenades(dt);
+        self.update_blasts();
+        self.update_helis(dt);
+
+        if self.time >= self.next_housekeeping {
+            self.next_housekeeping = self.time + 1.0;
+            self.manage_bots();
+            let rows = self.scoreboard();
+            self.outbox.push((Dest::All, S2C::Scoreboard(rows), false));
+            let ms = (self.time * 1000.0) as u32;
+            self.outbox.push((Dest::All, S2C::Ping(ms), false));
+        }
+    }
+
+    pub fn scoreboard(&self) -> Vec<ScoreRow> {
+        self.players
+            .iter()
+            .flatten()
+            .map(|p| ScoreRow {
+                id: p.id,
+                name: p.name.clone(),
+                team: p.team,
+                score: p.score,
+                kills: p.kills,
+                deaths: p.deaths,
+                assists: p.assists,
+                ping: if p.is_bot() { 0 } else { (p.ping * 1000.0) as u16 },
+                bot: p.is_bot(),
+                alive: p.alive,
+            })
+            .collect()
+    }
+
+    /// Builds the snapshot for one recipient.
+    pub fn snapshot_for(&self, id: u8) -> Snapshot {
+        let me = self.p(id);
+        let my_team = me.map(|p| p.team).unwrap_or(Team::Spectator);
+        let uav = my_team.is_playing() && self.uav_until[my_team.index()] > self.time;
+        let players = self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| p.team.is_playing())
+            .map(|p| {
+                let mut f = p.flags;
+                if p.reload_end.is_some() {
+                    f |= flags::RELOADING;
+                }
+                if self.mode == Mode::Sab && self.sab.carrier == Some(p.id) {
+                    f |= flags::HAS_BOMB;
+                }
+                if self.time - p.last_shot < 0.15 {
+                    f |= flags::FIRING;
+                }
+                if p.team != my_team && p.alive {
+                    let uav_vis = uav && !p.has_perk2(Perk2::UavJammer);
+                    if uav_vis || self.time - p.last_shot < RADAR_PING_TIME as f64 {
+                        f |= flags::ON_RADAR;
+                    }
+                }
+                PlayerSnap {
+                    id: p.id,
+                    team: p.team,
+                    alive: p.alive,
+                    pos: p.body.pos.to_array(),
+                    yaw: p.yaw,
+                    pitch: p.pitch,
+                    stance: p.body.stance.to_u8(),
+                    weapon: p.weapon().id,
+                    flags: f,
+                }
+            })
+            .collect();
+        let me_snap = match me {
+            Some(p) => MeSnap {
+                alive: p.alive,
+                hp: p.hp,
+                slot: p.slot,
+                ammo: [(p.weapons[0].mag, p.weapons[0].reserve), (p.weapons[1].mag, p.weapons[1].reserve)],
+                grenades: p.grenades,
+                streak: p.streak as u16,
+                rewards: p.rewards.clone(),
+                respawn_in: (p.respawn_at - self.time).max(0.0) as f32,
+                uav,
+                ack_seq: p.last_seq,
+                progress: p.progress,
+            },
+            None => MeSnap::default(),
+        };
+        let mut ents = Vec::new();
+        for g in &self.grenades {
+            ents.push(EntSnap::Grenade { id: g.id, pos: g.pos.to_array() });
+        }
+        for h in &self.helis {
+            ents.push(EntSnap::Heli { id: h.id, pos: h.pos.to_array(), yaw: h.yaw, team: h.team });
+        }
+        let bomb = if self.mode == Mode::Sab && self.state != MatchState::Warmup {
+            Some(BombSnap {
+                pos: self.sab.pos.to_array(),
+                carrier: self.sab.carrier,
+                planted_at: self.sab.planted_at,
+                timer: if self.sab.planted_at.is_some() { (self.sab.explode_at - self.time).max(0.0) as f32 } else { 0.0 },
+                owner: self.sab.owner,
+            })
+        } else {
+            None
+        };
+        Snapshot {
+            tick: self.tick,
+            state: self.state,
+            time_left: self.time_left(),
+            scores: self.scores,
+            overtime: self.overtime,
+            players,
+            me: me_snap,
+            ents,
+            bomb,
+            shots: self.shots.clone(),
+        }
+    }
+}

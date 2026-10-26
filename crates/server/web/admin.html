@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toon Warfare — адмінка</title>
+<style>
+  :root { --bg:#1d2333; --panel:#283149; --panel2:#323d5a; --text:#f3f1ea; --muted:#a8b0c8; --acc:#ffc94a; --red:#ff6b5e; --blue:#5aa8ff; --green:#5ed38b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display:flex; align-items:center; gap:16px; padding:14px 20px; background:#141927; border-bottom:4px solid var(--acc); }
+  header h1 { margin:0; font-size:22px; letter-spacing:1px; }
+  header .sub { color: var(--muted); }
+  main { padding: 18px; display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .card { background: var(--panel); border-radius: 14px; padding: 14px 16px; box-shadow: 0 4px 0 #0005; }
+  .card h2 { margin: 0 0 10px; font-size: 17px; color: var(--acc); }
+  .wide { grid-column: 1 / -1; }
+  table { width:100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 6px 6px; text-align:left; border-bottom: 1px solid #ffffff14; }
+  th { color: var(--muted); font-weight: 600; }
+  button, select, input { font: inherit; border-radius: 8px; border: 2px solid #0006; padding: 6px 10px; background: var(--panel2); color: var(--text); }
+  button { cursor:pointer; background: var(--acc); color:#222; font-weight:700; }
+  button.small { padding: 3px 8px; font-size: 12px; }
+  button.danger { background: var(--red); color:#fff; }
+  button.ghost { background: var(--panel2); color: var(--text); }
+  .row { display:flex; gap:8px; flex-wrap: wrap; align-items:center; margin-bottom: 8px; }
+  .t0 { color: var(--blue); font-weight:700; } .t1 { color: var(--red); font-weight:700; } .t2 { color: var(--muted); }
+  pre { background:#111624; padding:10px; border-radius:10px; max-height: 300px; overflow:auto; white-space: pre-wrap; font-size: 13px; margin:0; }
+  .stat { display:flex; gap:18px; flex-wrap:wrap; font-size: 15px; }
+  .stat b { color: var(--acc); }
+  #login { max-width: 360px; margin: 12vh auto; }
+  label { color: var(--muted); font-size: 13px; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid2 input { width:100%; }
+  .err { color: var(--red); min-height: 20px; }
+  .bot { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header><h1>🎯 TOON WARFARE</h1><span class="sub">панель адміністратора</span><span style="flex:1"></span><button id="logout" class="ghost" hidden>Вийти</button></header>
+
+<div id="login" class="card">
+  <h2>Вхід</h2>
+  <p class="sub">Введи <code>rcon_password</code> з файлу <code>server.json</code>.</p>
+  <div class="row"><input id="pass" type="password" placeholder="RCON-пароль" style="flex:1"><button id="go">Увійти</button></div>
+  <div id="lerr" class="err"></div>
+</div>
+
+<main id="app" hidden>
+  <section class="card wide">
+    <h2 id="sname">Сервер</h2>
+    <div class="stat" id="stats"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>Гравці</h2>
+    <table><thead><tr><th>#</th><th>Ім'я</th><th>Команда</th><th>Очки</th><th>В/С/Д</th><th>Пінг</th><th>IP</th><th>Дії</th></tr></thead><tbody id="players"></tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>Карта і режим</h2>
+    <div class="row">
+      <select id="map"><option value="depot">Депо</option><option value="market">Ринок</option><option value="cargo">Вантаж</option></select>
+      <select id="mode"><option value="tdm">Командний бій</option><option value="sab">Саботаж</option></select>
+      <button data-act="changemap">Змінити</button>
+    </div>
+    <div class="row">
+      <button class="ghost" data-cmd="nextmap">Наступна карта</button>
+      <button class="ghost" data-cmd="restart">Перезапуск матчу</button>
+      <button class="danger" data-cmd="endround">Завершити матч</button>
+    </div>
+    <label>Ротація</label>
+    <pre id="rotation"></pre>
+  </section>
+
+  <section class="card">
+    <h2>Налаштування</h2>
+    <div class="grid2">
+      <label>Ліміт вбивств (TDM)<input id="s_scorelimit" type="number" min="1"></label>
+      <label>Ліміт часу TDM, хв<input id="s_timelimit" type="number" min="1" step="0.5"></label>
+      <label>Час раунду Sab, хв<input id="s_sabtime" type="number" min="1" step="0.5"></label>
+      <label>Раундів для перемоги<input id="s_rounds" type="number" min="1"></label>
+      <label>Таймер бомби, с<input id="s_bombtimer" type="number" min="5"></label>
+      <label>Макс. гравців<input id="s_maxplayers" type="number" min="2" max="32"></label>
+      <label>Боти (заповнення до)<input id="s_bots" type="number" min="0" max="32"></label>
+      <label>Складність ботів 0..1<input id="s_botskill" type="number" min="0" max="1" step="0.1"></label>
+      <label><input id="s_ff" type="checkbox" style="width:auto"> Вогонь по своїх</label>
+      <label><input id="s_autobalance" type="checkbox" style="width:auto"> Автобаланс</label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button data-act="apply">Застосувати</button>
+      <button class="ghost" data-cmd="save">Зберегти у файл</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Повідомлення і консоль</h2>
+    <div class="row"><input id="say" placeholder="Повідомлення всім гравцям" style="flex:1"><button data-act="say">Надіслати</button></div>
+    <div class="row"><input id="cmd" placeholder="Команда (help)" style="flex:1"><button data-act="cmd">Виконати</button></div>
+    <pre id="out">Напиши help для списку команд.</pre>
+  </section>
+
+  <section class="card">
+    <h2>Бани</h2>
+    <table><thead><tr><th>IP</th><th>Ім'я</th><th>Причина</th><th></th></tr></thead><tbody id="bans"></tbody></table>
+  </section>
+
+  <section class="card wide">
+    <h2>Журнал</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+let token = sessionStorage.getItem("tw_token") || "";
+const $ = (id) => document.getElementById(id);
+const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = String(text); if (cls) e.className = cls; return e; };
+
+async function api(path, body) {
+  const opt = { method: body ? "POST" : "GET", headers: { "X-Token": token } };
+  if (body) { opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
+  const r = await fetch(path, opt);
+  if (r.status === 401 && path !== "/api/login") { showLogin(); throw new Error("unauthorized"); }
+  return r.json();
+}
+
+function showLogin() { $("login").hidden = false; $("app").hidden = true; $("logout").hidden = true; }
+function showApp() { $("login").hidden = true; $("app").hidden = false; $("logout").hidden = false; refresh(); }
+
+$("go").onclick = async () => {
+  $("lerr").textContent = "";
+  try {
+    const r = await api("/api/login", { password: $("pass").value });
+    if (r.token) { token = r.token; sessionStorage.setItem("tw_token", token); showApp(); }
+    else $("lerr").textContent = r.error || "Помилка";
+  } catch (e) { $("lerr").textContent = "Сервер недоступний"; }
+};
+$("pass").addEventListener("keydown", (e) => { if (e.key === "Enter") $("go").click(); });
+$("logout").onclick = async () => { try { await api("/api/logout", {}); } catch (e) {} token = ""; sessionStorage.removeItem("tw_token"); showLogin(); };
+
+async function run(cmd) {
+  const r = await api("/api/cmd", { cmd });
+  $("out").textContent = "> " + cmd + "\n" + (r.output ?? r.error ?? "");
+  refresh();
+  return r;
+}
+
+let settingsLoaded = false;
+async function refresh() {
+  if ($("app").hidden) return;
+  let s;
+  try { s = await api("/api/state"); } catch (e) { return; }
+  const i = s.info;
+  $("sname").textContent = i.name;
+  const st = $("stats"); st.replaceChildren();
+  const add = (k, v) => { const d = el("span", k + ": "); d.append(el("b", v)); st.append(d); };
+  add("Карта", i.map); add("Режим", i.mode); add("Стан", i.state);
+  add("Рахунок", i.scores[0] + " : " + i.scores[1]);
+  add("Гравці", i.players + " + " + i.bots + " ботів / " + i.max_players);
+  add("Залишилось", Math.floor(i.time_left / 60) + ":" + String(Math.floor(i.time_left % 60)).padStart(2, "0"));
+  add("Порт", i.port);
+
+  const tb = $("players"); tb.replaceChildren();
+  for (const p of s.players) {
+    const tr = el("tr");
+    tr.append(el("td", p.id));
+    const name = el("td", p.name); if (p.bot) name.append(el("span", " бот", "bot")); tr.append(name);
+    tr.append(el("td", p.team, "t" + p.team_id));
+    tr.append(el("td", p.score));
+    tr.append(el("td", p.kills + "/" + p.deaths + "/" + p.assists));
+    tr.append(el("td", p.bot ? "—" : p.ping));
+    tr.append(el("td", p.ip));
+    const td = el("td");
+    const b = (label, cmd, cls) => { const x = el("button", label, "small " + (cls || "ghost")); x.onclick = () => run(cmd); td.append(x, " "); };
+    b("→Сині", "team " + p.id + " allies"); b("→Червоні", "team " + p.id + " axis"); b("→Глядачі", "team " + p.id + " spec");
+    b("Вбити", "kill " + p.id);
+    const k = el("button", "Кік", "small danger"); k.onclick = () => { const r = prompt("Причина кіку:", ""); if (r !== null) run("kick " + p.id + " " + r); }; td.append(k, " ");
+    if (!p.bot) { const bn = el("button", "Бан", "small danger"); bn.onclick = () => { const r = prompt("Причина бану:", ""); if (r !== null) run("ban " + p.id + " " + r); }; td.append(bn); }
+    tr.append(td); tb.append(tr);
+  }
+
+  $("rotation").textContent = s.rotation.map((r, k) => (k === s.rotation_idx ? "▶ " : "  ") + (k + 1) + ". " + r).join("\n");
+  const bans = $("bans"); bans.replaceChildren();
+  for (const bnn of s.bans) {
+    const tr = el("tr"); tr.append(el("td", bnn.ip), el("td", bnn.name), el("td", bnn.reason));
+    const td = el("td"); const u = el("button", "Розбанити", "small"); u.onclick = () => run("unban " + bnn.ip); td.append(u); tr.append(td); bans.append(tr);
+  }
+  $("log").textContent = s.log.join("\n");
+
+  if (!settingsLoaded) {
+    const c = s.settings;
+    $("s_scorelimit").value = c.score_limit; $("s_timelimit").value = c.time_limit; $("s_sabtime").value = c.sab_time;
+    $("s_rounds").value = c.rounds; $("s_bombtimer").value = c.bomb_timer; $("s_maxplayers").value = c.max_players;
+    $("s_bots").value = c.bots; $("s_botskill").value = c.bot_skill; $("s_ff").checked = c.friendly_fire; $("s_autobalance").checked = c.auto_balance;
+    $("map").value = i.map_id; $("mode").value = i.mode_id;
+    settingsLoaded = true;
+  }
+}
+
+document.addEventListener("click", async (e) => {
+  const t = e.target;
+  if (!(t instanceof HTMLElement)) return;
+  if (t.dataset.cmd) {
+    if (t.dataset.cmd === "endround" && !confirm("Завершити матч?")) return;
+    run(t.dataset.cmd);
+  }
+  const act = t.dataset.act;
+  if (act === "changemap") run("map " + $("map").value + " " + $("mode").value);
+  if (act === "say" && $("say").value.trim()) { run("say " + $("say").value); $("say").value = ""; }
+  if (act === "cmd" && $("cmd").value.trim()) { run($("cmd").value); $("cmd").value = ""; }
+  if (act === "apply") {
+    const cmds = [
+      "set scorelimit " + $("s_scorelimit").value, "set timelimit " + $("s_timelimit").value,
+      "set sabtime " + $("s_sabtime").value, "set rounds " + $("s_rounds").value,
+      "set bombtimer " + $("s_bombtimer").value, "set maxplayers " + $("s_maxplayers").value,
+      "set botskill " + $("s_botskill").value, "set ff " + ($("s_ff").checked ? 1 : 0),
+      "set autobalance " + ($("s_autobalance").checked ? 1 : 0), "bots " + $("s_bots").value,
+    ];
+    const outs = [];
+    for (const c of cmds) { const r = await api("/api/cmd", { cmd: c }); outs.push(r.output); }
+    $("out").textContent = outs.join("\n") + "\n(Ліміти часу застосуються з наступного раунду/матчу)";
+    refresh();
+  }
+});
+$("cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") document.querySelector('[data-act="cmd"]').click(); });
+$("say").addEventListener("keydown", (e) => { if (e.key === "Enter") document.querySelector('[data-act="say"]').click(); });
+
+setInterval(refresh, 2000);
+if (token) showApp(); else showLogin();
+</script>
+</body>
+</html>
