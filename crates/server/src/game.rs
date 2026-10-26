@@ -704,6 +704,16 @@ impl Game {
                     }
                 }
             }
+            C2S::DropProtection => {
+                let time = self.time;
+                if let Some(p) = self.pm(id) {
+                    if p.alive && p.protected_until > time {
+                        p.protected_until = 0.0;
+                        // the weapon needs a moment to come up
+                        p.switch_end = p.switch_end.max(time + 0.2);
+                    }
+                }
+            }
             C2S::Disconnect => {}
         }
     }
@@ -1174,7 +1184,8 @@ impl Game {
                     // bit 7: Dead Silence (no footstep sounds)
                     stance: p.body.stance.to_u8()
                         | if p.has_perk3(Perk3::DeadSilence) { stance_bits::SILENT } else { 0 }
-                        | if p.alive && p.protected_until > self.time { stance_bits::PROTECTED } else { 0 },
+                        // only teammates see the shield: it must not give away enemies
+                        | if p.alive && p.team == my_team && p.protected_until > self.time { stance_bits::PROTECTED } else { 0 },
                     weapon: p.weapon().id,
                     flags: f,
                 }

@@ -169,11 +169,10 @@ fn bots_do_not_see_behind_them() {
 }
 
 #[test]
-fn spawn_protection_blocks_damage_until_shooting() {
+fn spawn_protection_rules() {
     let (mut g, human) = game(0.5, 2, 9, 3.0);
     wait_playing(&mut g);
     g.kill(human, None, toon_shared::weapons::Cause::World, false);
-    g.handle(human, C2S::Spawn);
     for _ in 0..(10.0 / TICK_DT) as usize {
         g.tick(TICK_DT);
         g.handle(human, C2S::Spawn);
@@ -183,17 +182,40 @@ fn spawn_protection_blocks_damage_until_shooting() {
     }
     assert!(g.p(human).unwrap().alive);
     let pos = g.p(human).unwrap().body.pos;
+    // invulnerable
     g.damage(human, None, 500.0, toon_shared::weapons::Cause::Grenade, false, pos);
     assert!(g.p(human).unwrap().alive, "protected player died");
     assert!(g.snapshot_for(human).me.protected > 2.0);
-    // shooting ends the protection
-    let w = g.p(human).unwrap().weapon().id;
-    let eye = g.p(human).unwrap().eye();
-    g.p(human).unwrap();
-    for _ in 0..30 {
-        g.tick(TICK_DT); // let the weapon come up after spawning
+    // ...but cannot attack while protected
+    for _ in 0..20 {
+        g.tick(TICK_DT); // weapon raise after spawning
     }
+    let (w, eye, mag) = {
+        let p = g.p(human).unwrap();
+        (p.weapon().id, p.eye(), p.weapon().mag)
+    };
     g.fire(human, w, eye, &[glam::Vec3::NEG_Z]);
+    g.throw_grenade(human, eye, glam::Vec3::NEG_Z, 0.0);
+    let p = g.p(human).unwrap();
+    assert_eq!(p.weapon().mag, mag, "a protected player fired");
+    assert_eq!(p.shots_fired, 0);
+    assert!(g.grenades.is_empty(), "a protected player threw a grenade");
+    // the shield is visible to teammates only
+    use toon_shared::protocol::stance_bits::PROTECTED;
+    let bot = g.players.iter().flatten().find(|p| p.is_bot()).unwrap().id;
+    let enemy_view = g.snapshot_for(bot);
+    let me_seen = enemy_view.players.iter().find(|p| p.id == human).unwrap();
+    assert_eq!(me_seen.stance & PROTECTED, 0, "enemies must not see the shield");
+    let own_view = g.snapshot_for(human);
+    assert_ne!(own_view.players.iter().find(|p| p.id == human).unwrap().stance & PROTECTED, 0);
+    // giving the protection up makes us vulnerable and able to shoot
+    g.handle(human, C2S::DropProtection);
+    for _ in 0..10 {
+        g.tick(TICK_DT);
+    }
+    let eye = g.p(human).unwrap().eye();
+    g.fire(human, w, eye, &[glam::Vec3::NEG_Z]);
+    assert_eq!(g.p(human).unwrap().weapon().mag, mag - 1);
     g.damage(human, None, 500.0, toon_shared::weapons::Cause::Grenade, false, pos);
-    assert!(!g.p(human).unwrap().alive, "protection should end after shooting");
+    assert!(!g.p(human).unwrap().alive, "protection should be gone");
 }

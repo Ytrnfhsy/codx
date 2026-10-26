@@ -76,6 +76,10 @@ impl Game {
         if p.shot_budget < 0.8 {
             return;
         }
+        // invulnerable players can't attack (they must drop the protection first)
+        if time < p.protected_until {
+            return;
+        }
         // weapons need a moment to come up after sprinting (heavier ones longer)
         if time - p.last_sprint < (def.sprint_out_time * 0.5) as f64 {
             return;
@@ -83,7 +87,6 @@ impl Game {
         p.shot_budget -= 1.0;
         p.weapon_mut().mag -= 1;
         p.last_shot = time;
-        p.protected_until = 0.0; // attacking ends spawn protection
         let eye = p.eye();
         let look = look_dir(p.yaw, p.pitch);
         let origin = if origin.is_finite() && origin.distance(eye) < 1.2 { origin } else { eye };
@@ -335,11 +338,10 @@ impl Game {
         }
         let time = self.time;
         let Some(p) = self.pm(id) else { return };
-        if !p.alive || p.grenades == 0 || !dir.is_finite() || dir.length_squared() < 0.1 {
+        if !p.alive || p.grenades == 0 || !dir.is_finite() || dir.length_squared() < 0.1 || time < p.protected_until {
             return;
         }
         p.grenades -= 1;
-        p.protected_until = 0.0;
         let eye = p.eye();
         let origin = if origin.is_finite() && origin.distance(eye) < 1.2 { origin } else { eye };
         let vel = dir.normalize() * GRENADE_SPEED + p.body.vel * 0.5;
@@ -432,11 +434,10 @@ impl Game {
         }
         let time = self.time;
         let Some(p) = self.pm(id) else { return };
-        if !p.alive || time < p.melee_ready {
+        if !p.alive || time < p.melee_ready || time < p.protected_until {
             return;
         }
         p.melee_ready = time + MELEE_COOLDOWN as f64;
-        p.protected_until = 0.0;
         let eye = p.eye();
         let fwd = look_dir(p.yaw, p.pitch);
         let team = p.team;
@@ -468,7 +469,7 @@ impl Game {
         }
         let time = self.time;
         let Some(p) = self.pm(id) else { return };
-        if !p.alive {
+        if !p.alive || time < p.protected_until {
             return;
         }
         let Some(&k) = p.rewards.last() else { return };

@@ -126,6 +126,8 @@ pub struct GameClient {
     sprint_end: f64,
     /// Duration of the current weapon raise (for the animation).
     pub switch_dur: f32,
+    /// We already asked the server to drop our spawn protection.
+    protection_dropped: bool,
     pub last_fire: f64,
     pub stamina: f32,
     pub sprinting: bool,
@@ -312,6 +314,7 @@ impl GameClient {
             recoil_accum: 0.0,
             sprint_end: -10.0,
             switch_dur: 0.5,
+            protection_dropped: false,
             last_fire: -10.0,
             stamina: Tuning::default().movement.sprint_time,
             sprinting: false,
@@ -457,6 +460,7 @@ impl GameClient {
                 self.ads_t = 0.0;
                 self.shot_streak = 0;
                 self.recoil_accum = 0.0;
+                self.protection_dropped = false;
                 self.stamina = self.sprint_max();
                 self.cooking = None;
                 self.death_info = None;
@@ -752,6 +756,11 @@ impl GameClient {
 
     pub fn scoped(&self) -> bool {
         self.weapon().def().scoped && self.ads_t > 0.85
+    }
+
+    /// Spawn protection active (and not given up yet).
+    pub fn is_protected(&self) -> bool {
+        self.alive && !self.protection_dropped && self.me.protected > 0.0
     }
 
     /// Stats of the weapon in hand.
@@ -1050,11 +1059,26 @@ impl GameClient {
                 }
             }
             let trig_down = can_act && is_mouse_button_down(MouseButton::Left);
-            let trig_pressed = trig_down && !self.trigger_was_down;
+            // also catch very quick clicks (press + release within one frame)
+            let trig_pressed = can_act && (is_mouse_button_pressed(MouseButton::Left) || (trig_down && !self.trigger_was_down));
             self.trigger_was_down = trig_down;
+            // spawn protection: you can't be hurt, so you can't attack either.
+            // Any attack key gives the protection up instead (no shot is fired).
+            if self.is_protected() {
+                if trig_pressed || pressed(KeyCode::G) || pressed(KeyCode::V) || pressed(KeyCode::Key5) || pressed(KeyCode::Key4) {
+                    self.protection_dropped = true;
+                    self.net.send(C2S::DropProtection);
+                    self.next_fire = now + 0.25;
+                    self.melee_ready = self.melee_ready.max(now + 0.25);
+                    self.throw_until = self.throw_until.max(now + 0.25);
+                    self.trigger_was_down = true; // the click must not also fire
+                }
+                // fall through with attacks blocked below
+            }
+            let shielded = self.is_protected();
             let trigger = if def.auto { trig_down } else { trig_pressed };
             let raising = now - self.sprint_end < def.sprint_out_time as f64;
-            let busy = self.reload_until.is_some() || now < self.switch_until || now < self.melee_until || now < self.throw_until || self.sprinting || raising || self.cooking.is_some();
+            let busy = shielded || self.reload_until.is_some() || now < self.switch_until || now < self.melee_until || now < self.throw_until || self.sprinting || raising || self.cooking.is_some();
             if trigger && !busy && now >= self.next_fire {
                 let (_, mag, res) = self.weapons[self.slot as usize];
                 if mag > 0 {
@@ -1075,7 +1099,7 @@ impl GameClient {
                 self.start_reload();
             }
             // grenade (hold G to cook)
-            if pressed(KeyCode::G) && self.grenades > 0 && self.cooking.is_none() && now >= self.throw_until {
+            if !shielded && pressed(KeyCode::G) && self.grenades > 0 && self.cooking.is_none() && now >= self.throw_until {
                 self.cooking = Some(now);
                 self.reload_until = None;
             }
@@ -1095,7 +1119,7 @@ impl GameClient {
                     }
                 }
             }
-            if pressed(KeyCode::V) && now >= self.melee_ready {
+            if !shielded && pressed(KeyCode::V) && now >= self.melee_ready {
                 self.melee_ready = now + MELEE_COOLDOWN as f64;
                 self.melee_until = now + 0.45;
                 self.reload_until = None;
@@ -1105,7 +1129,7 @@ impl GameClient {
                 }
             }
             self.using = key(KeyCode::F);
-            if pressed(KeyCode::Key5) || pressed(KeyCode::Key4) {
+            if !shielded && (pressed(KeyCode::Key5) || pressed(KeyCode::Key4)) {
                 match self.me.rewards.last() {
                     Some(Killstreak::Airstrike) => self.overlay = Overlay::Airstrike,
                     Some(_) => self.net.send(C2S::UseKillstreak { target: None }),

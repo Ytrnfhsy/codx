@@ -22,6 +22,15 @@ impl Fonts {
         let mut bold = load_ttf_font_from_bytes(include_bytes!("../../../assets/fonts/DejaVuSans-Bold.ttf")).expect("font");
         regular.set_filter(FilterMode::Linear);
         bold.set_filter(FilterMode::Linear);
+        let mut chars: Vec<char> = (32u8..127).map(|c| c as char).collect();
+        chars.extend("АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯабвгґдеєжзиіїйклмнопрстуфхцчшщьюя'—·«»…×°☠✦★▮▄▁".chars());
+        // grow each atlas to its final size while it is still empty (growing later re-packs every glyph)
+        regular.populate_font_cache(&['W'], 1100);
+        bold.populate_font_cache(&['W'], 1100);
+        for size in [12u16, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 30, 34] {
+            regular.populate_font_cache(&chars, size);
+            bold.populate_font_cache(&chars, size);
+        }
         Fonts { regular, bold }
     }
 }

@@ -231,6 +231,7 @@ impl Game {
         let reloading = me.reload_end.is_some();
         let grenades = me.grenades;
         let vel = me.body.vel;
+        let protected_me = me.protected_until > time;
         let skill = (self.cfg.bot_skill + bot.skill_offset).clamp(0.0, 1.0);
         let sk = SkillProfile::new(skill);
         let walk_speed = self.tuning.movement.walk_speed;
@@ -373,7 +374,15 @@ impl Game {
             bot.was_ads = ads;
             let tol = sk.fire_tolerance + 0.5 / dist_to_target.max(1.0);
             let in_range = class != WeaponClass::Shotgun || dist_to_target < 20.0;
-            if time - bot.seen_at > sk.reaction as f64 && aim_err_angle < tol && mag > 0 && !reloading && in_range {
+            let reacted = time - bot.seen_at > sk.reaction as f64;
+            if reacted && protected_me {
+                // like a player: give up spawn protection to start fighting
+                if let Some(p) = self.pm(id) {
+                    p.protected_until = 0.0;
+                    p.switch_end = p.switch_end.max(time + 0.2);
+                }
+            }
+            if reacted && !protected_me && aim_err_angle < tol && mag > 0 && !reloading && in_range {
                 let can = if def.auto {
                     if time > bot.burst_until && time > bot.pause_until {
                         // weak bots spray long bursts, good ones tap
@@ -409,7 +418,7 @@ impl Game {
                 }
             }
             // grenade
-            if grenades > 0 && time > bot.nade_ready && (9.0..24.0).contains(&dist_to_target) && self.rng.chance(lerp(0.004, 0.015, skill)) {
+            if !protected_me && grenades > 0 && time > bot.nade_ready && (9.0..24.0).contains(&dist_to_target) && self.rng.chance(lerp(0.004, 0.015, skill)) {
                 bot.nade_ready = time + 15.0;
                 if let Some((_, chest, _, _, _)) = target {
                     let d = chest - eye;

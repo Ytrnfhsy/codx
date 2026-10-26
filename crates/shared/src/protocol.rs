@@ -44,6 +44,8 @@ pub enum C2S {
     Chat { text: String, team_only: bool },
     Rcon { password: String, cmd: String },
     Pong(u32),
+    /// Give up spawn protection early (so you can fight).
+    DropProtection,
     Disconnect,
 }
 

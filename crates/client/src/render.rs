@@ -164,7 +164,7 @@ pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, v
         let muzzle = models::add_soldier(&mut m, &pose);
         let floor = g.world.floor_below(r.pos + vec3(0.0, 0.3, 0.0), 3.0).unwrap_or(r.pos.y);
         blob_shadow(&mut shadows, vec3(r.pos.x, floor + 0.03, r.pos.z), 0.5);
-        if r.protected {
+        if r.protected && r.team == my_team {
             // spawn protection: a soft pulsing bubble in team colour
             let c = crate::models::team_look(r.team).helmet;
             let pulse = 0.5 + 0.5 * ((now * 5.0) as f32).sin();
