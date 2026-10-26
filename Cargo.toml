@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/shared", "crates/server", "crates/client"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+glam = "0.27"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1.3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+
+# Fast-enough debug builds for a game
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

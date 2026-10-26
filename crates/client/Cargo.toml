@@ -1,0 +1,21 @@
+[package]
+name = "toon_client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "toon-warfare"
+path = "src/main.rs"
+
+[features]
+default = ["audio"]
+audio = ["macroquad/audio"]
+
+[dependencies]
+toon_shared = { path = "../shared" }
+toon_server = { path = "../server" }
+macroquad = { version = "0.4.16", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+bincode.workspace = true
