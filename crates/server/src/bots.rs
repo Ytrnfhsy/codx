@@ -186,7 +186,7 @@ impl Game {
         }
 
         // ---- goal selection
-        let (goal, mut use_key) = self.bot_goal(id, &mut bot, team, pos);
+        let (goal, mut use_key, urgent) = self.bot_goal(id, &mut bot, team, pos);
         let fighting = target.is_some() && !(use_key && self.p(id).map(|p| p.progress > 0.5).unwrap_or(false));
         if fighting {
             use_key = false;
@@ -237,7 +237,7 @@ impl Game {
         let mut sprint = false;
         let mut jump = false;
         let mut stance = Stance::Stand;
-        if fighting {
+        if fighting && !urgent {
             if time > bot.strafe_until {
                 bot.strafe_until = time + self.rng.range(0.6, 1.6) as f64;
                 bot.strafe = if self.rng.chance(0.5) { 1.0 } else { -1.0 };
@@ -277,7 +277,16 @@ impl Game {
             } else if flat_d > 0.8 {
                 move_dir = vec3(g.x - pos.x, 0.0, g.z - pos.z).normalize_or_zero();
             }
-            sprint = flat_d > 8.0 && !use_key;
+            sprint = flat_d > 8.0 && !use_key && !fighting;
+            if fighting {
+                // run-and-gun towards the objective
+                if time > bot.strafe_until {
+                    bot.strafe_until = time + self.rng.range(0.5, 1.2) as f64;
+                    bot.strafe = if self.rng.chance(0.5) { 1.0 } else { -1.0 };
+                }
+                let side = vec3(-move_dir.z, 0.0, move_dir.x) * bot.strafe * 0.35;
+                move_dir = (move_dir + side).normalize_or_zero();
+            }
             if use_key {
                 move_dir = Vec3::ZERO;
                 stance = Stance::Crouch;
@@ -356,53 +365,55 @@ impl Game {
         }
     }
 
-    /// Where the bot wants to go, and whether it should hold "use" (plant/defuse).
-    fn bot_goal(&mut self, id: u8, bot: &mut crate::bots::Bot, team: Team, pos: Vec3) -> (Option<Vec3>, bool) {
+    /// Where the bot wants to go, whether to hold "use", and whether the objective is urgent
+    /// enough to keep moving while under fire.
+    fn bot_goal(&mut self, id: u8, bot: &mut crate::bots::Bot, team: Team, pos: Vec3) -> (Option<Vec3>, bool, bool) {
         let time = self.time;
         if self.mode == Mode::Sab && self.state == MatchState::Playing {
             let s = &self.sab;
             if let Some(site) = s.planted_at {
                 if site == team {
                     let near = pos.distance(s.pos) < 1.4;
-                    return (Some(s.pos), near);
+                    return (Some(s.pos), near, true);
                 }
                 // guard our planted bomb
-                return (Some(self.guard_point(bot, s.pos, 7.0)), false);
+                return (Some(self.guard_point(bot, s.pos, 7.0)), false, false);
             }
             match s.carrier {
                 Some(c) if c == id => {
                     let site = self.map.sites[team.enemy().index()];
                     let near = pos.distance(site) < 1.6;
-                    return (Some(site), near);
+                    return (Some(site), near, true);
                 }
                 Some(c) => {
                     let cpos = self.p(c).map(|p| p.body.pos).unwrap_or(s.pos);
                     let carrier_team = self.p(c).map(|p| p.team);
                     if carrier_team == Some(team) {
                         let site = self.map.sites[team.enemy().index()];
-                        let g = if id % 2 == 0 { cpos } else { site };
-                        return (Some(self.guard_point(bot, g, 4.0)), false);
+                        let g = if id.is_multiple_of(2) { cpos } else { site };
+                        return (Some(self.guard_point(bot, g, 4.0)), false, false);
                     }
-                    return (Some(cpos), false);
+                    return (Some(cpos), false, false);
                 }
                 None => {
-                    if s.owner.is_none() || s.owner == Some(team) || id % 3 != 0 {
-                        return (Some(s.pos), false);
+                    if s.owner.is_none() || s.owner == Some(team) || !id.is_multiple_of(3) {
+                        let close = pos.distance(s.pos) < 20.0;
+                        return (Some(s.pos), false, close);
                     }
                     let mine = self.map.sites[team.index()];
-                    return (Some(self.guard_point(bot, mine, 6.0)), false);
+                    return (Some(self.guard_point(bot, mine, 6.0)), false, false);
                 }
             }
         }
         // deathmatch-style hunting / roaming
         if let Some((p, t)) = bot.last_seen {
             if time - t < 4.0 && pos.distance(p) > 2.0 {
-                return (Some(p), false);
+                return (Some(p), false, false);
             }
         }
         if let Some((_, from, t)) = bot.attacked_by {
             if time - t < 3.0 {
-                return (Some(from), false);
+                return (Some(from), false, false);
             }
         }
         let reached = bot.roam_goal.map(|g| vec3(g.x - pos.x, 0.0, g.z - pos.z).length() < 2.0).unwrap_or(true);
@@ -421,7 +432,7 @@ impl Game {
             };
             bot.roam_goal = Some(enemy.unwrap_or_else(|| self.nav.random_point(&mut self.rng)));
         }
-        (bot.roam_goal, false)
+        (bot.roam_goal, false, false)
     }
 
     fn guard_point(&mut self, bot: &mut crate::bots::Bot, around: Vec3, r: f32) -> Vec3 {

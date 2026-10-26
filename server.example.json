@@ -1,0 +1,52 @@
+{
+  "name": "Toon Warfare сервер",
+  "bind": "0.0.0.0",
+  "port": 27015,
+  "max_players": 18,
+  "password": "",
+  "rcon_password": "",
+  "motd": "Ласкаво просимо! Грай чесно :)",
+  "rotation": [
+    {
+      "map": "depot",
+      "mode": "tdm"
+    },
+    {
+      "map": "market",
+      "mode": "sab"
+    },
+    {
+      "map": "cargo",
+      "mode": "tdm"
+    },
+    {
+      "map": "depot",
+      "mode": "sab"
+    },
+    {
+      "map": "market",
+      "mode": "tdm"
+    }
+  ],
+  "tdm": {
+    "score_limit": 75,
+    "time_limit": 10.0,
+    "respawn_delay": 3.0
+  },
+  "sab": {
+    "time_limit": 10.0,
+    "rounds_to_win": 2,
+    "bomb_timer": 30.0,
+    "plant_time": 5.0,
+    "defuse_time": 5.0,
+    "respawn_delay": 5.0,
+    "overtime_limit": 4.0
+  },
+  "friendly_fire": false,
+  "auto_balance": true,
+  "bots": 6,
+  "bot_skill": 0.5,
+  "min_players": 2,
+  "http_enabled": true,
+  "data_dir": "data"
+}

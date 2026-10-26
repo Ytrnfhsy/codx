@@ -95,10 +95,6 @@ impl NetClient {
             self.flush();
         }
     }
-
-    pub fn bytes(&self) -> (u64, u64) {
-        (self.chan.bytes_sent, self.chan.bytes_recv)
-    }
 }
 
 #[derive(Clone, Debug)]

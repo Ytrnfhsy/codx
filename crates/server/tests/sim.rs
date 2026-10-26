@@ -9,10 +9,10 @@ use toon_shared::weapons::DEFAULT_CLASSES;
 use toon_shared::{Mode, Team};
 
 fn setup(map: MapId, mode: Mode) -> (Game, u8) {
-    let mut cfg = ServerConfig::default();
-    cfg.bots = 8;
-    cfg.data_dir = std::env::temp_dir().join("tw-test").to_string_lossy().into();
+    let cfg = ServerConfig { bots: 8, data_dir: std::env::temp_dir().join("tw-test").to_string_lossy().into(), ..Default::default() };
     let mut g = Game::new(cfg);
+    // deterministic bots (names, skill, decisions) so the simulation is reproducible
+    g.rng = toon_shared::rng::Rng::new(1234);
     g.change_map(map, mode);
     // a passive human spectator-ish player on a team so the match starts
     let id = g.connect("127.0.0.1:5000".parse().unwrap(), "Тестер", "", toon_shared::consts::PROTOCOL_VERSION).unwrap();
@@ -56,13 +56,17 @@ fn tdm_bots_fight() {
     assert!(g.players.iter().flatten().filter(|p| p.is_bot()).count() >= 7, "bots should fill the server");
     assert_ne!(g.state, MatchState::Warmup, "match should have started");
     assert!(st.kills >= 8, "only {} kills in 150s", st.kills);
+    // bots that joined mid-match must spawn too
+    for p in g.players.iter().flatten().filter(|p| p.is_bot()) {
+        assert!(p.alive || p.deaths > 0, "{} never spawned", p.name);
+    }
     assert!(g.scores[0] + g.scores[1] > 0);
 }
 
 #[test]
 fn sab_bots_play_objective() {
-    let (mut g, _) = setup(MapId::Cargo, Mode::Sab);
-    let st = run(&mut g, 420.0);
+    let (mut g, _) = setup(MapId::Depot, Mode::Sab);
+    let st = run(&mut g, 900.0);
     println!("kills={} plants={} rounds={} end={} scores={:?}", st.kills, st.plants, st.round_ends, st.match_end, g.scores);
     assert!(st.plants >= 1, "bots never planted the bomb");
     assert!(st.round_ends + st.match_end as usize >= 1);

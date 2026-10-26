@@ -555,7 +555,7 @@ impl Game {
     /// Picks a spawn point: far from enemies, out of their sight, near teammates.
     fn pick_spawn(&mut self, id: u8, side_only: bool) -> (Vec3, f32) {
         let team = self.p(id).map(|p| p.team).unwrap_or(Team::Allies);
-        let side = if side_only || self.mode == Mode::Sab || self.state != MatchState::Playing { true } else { false };
+        let side = side_only || self.mode == Mode::Sab || self.state != MatchState::Playing;
         let cands: Vec<_> = if side && team.is_playing() {
             self.map.spawns[team.index()].clone()
         } else {
@@ -833,6 +833,7 @@ impl Game {
             if let Some(p) = self.pm(id) {
                 p.alive = false;
                 p.respawn_at = 0.0;
+                p.progress = 0.0;
             }
             if self.can_spawn(id) {
                 self.spawn_player(id, true);
@@ -1030,7 +1031,7 @@ impl Game {
             p.move_budget = (p.move_budget + max_speed * dt).min(3.0);
             p.chat_budget = (p.chat_budget + dt * 0.5).min(5.0);
             if !p.alive {
-                if p.team.is_playing() && p.has_loadout && p.respawn_at > 0.0 {
+                if p.team.is_playing() && p.has_loadout {
                     let wait = if p.is_bot() { 0.0 } else { 3.0 };
                     if time >= p.respawn_at + wait {
                         auto_spawn.push(p.id);

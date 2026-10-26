@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Toon Warfare — game client.
 
 mod audio;
@@ -38,6 +39,8 @@ struct Args {
     bots: Option<usize>,
     look: Option<(f32, f32)>,
     spec_pos: Option<Vec3>,
+    render_scale: Option<f32>,
+    rcon: Option<String>,
     width: i32,
     height: i32,
 }
@@ -100,6 +103,14 @@ fn parse_args() -> Args {
                     let v: Vec<f32> = s.split(',').filter_map(|x| x.parse().ok()).collect();
                     (v.len() == 3).then(|| vec3(v[0], v[1], v[2]))
                 });
+                i += 1;
+            }
+            "--rcon" => {
+                a.rcon = next;
+                i += 1;
+            }
+            "--render-scale" => {
+                a.render_scale = next.and_then(|s| s.parse().ok());
                 i += 1;
             }
             "--size" => {
@@ -199,6 +210,9 @@ async fn amain(args: Args) {
     if let Some(n) = &args.name {
         settings.name = n.clone();
     }
+    if let Some(r) = args.render_scale {
+        settings.render_scale = r;
+    }
     let audio = audio::Audio::load(settings.volume, !args.no_sound).await;
     let backdrop = {
         let map = toon_shared::maps::build(MapId::Market);
@@ -212,6 +226,7 @@ async fn amain(args: Args) {
     let mut fps = 60.0f32;
     let start = get_time();
     let mut auto_done = false;
+    let mut low_res: Option<RenderTarget> = None;
     prevent_quit();
 
     let host = |settings: &Settings, args: &Args| -> Result<toon_server::ServerHandle, String> {
@@ -221,7 +236,7 @@ async fn amain(args: Args) {
         cfg.port = hs.port;
         cfg.bots = args.bots.unwrap_or(hs.bots);
         cfg.bot_skill = hs.bot_skill;
-        cfg.rcon_password = hs.rcon.clone();
+        cfg.rcon_password = args.rcon.clone().unwrap_or(hs.rcon.clone());
         cfg.password = hs.password.clone();
         cfg.max_players = hs.max_players;
         cfg.min_players = 1;
@@ -351,7 +366,7 @@ async fn amain(args: Args) {
                     settings.remember_server(address);
                     settings.save();
                     let net = std::mem::replace(net, NetClient::connect("127.0.0.1:1", "", "").expect("dummy socket"));
-                    let mut g = GameClient::new(net, address.clone(), w, &settings, rest);
+                    let mut g = GameClient::new(net, w, &settings, rest);
                     if let Some((y, p)) = args.look {
                         g.yaw = y;
                         g.pitch = p;
@@ -438,10 +453,28 @@ async fn amain(args: Args) {
                 }
 
                 g.update(dt, &settings, Some(&audio));
-                let view = render::make_view(g, &settings);
+                // optional low-resolution 3D for weak GPUs
+                let scale = settings.render_scale.clamp(0.4, 1.0);
+                let target = if scale < 0.99 {
+                    let (tw, th) = ((screen_width() * scale).max(64.0) as u32, (screen_height() * scale).max(64.0) as u32);
+                    if low_res.as_ref().map(|t: &RenderTarget| (t.texture.width() as u32, t.texture.height() as u32) != (tw, th)).unwrap_or(true) {
+                        let rt = render_target_ex(tw, th, RenderTargetParams { sample_count: 1, depth: true });
+                        rt.texture.set_filter(FilterMode::Linear);
+                        low_res = Some(rt);
+                    }
+                    low_res.clone()
+                } else {
+                    low_res = None;
+                    None
+                };
+                let view = render::make_view(g, &settings, target.clone());
                 let tags = render::render_world(g, &mats, &settings, &view);
-                render::render_viewmodel(g, &mats, &settings);
+                render::render_viewmodel(g, &mats, &settings, target.clone());
                 set_default_camera();
+                if let Some(rt) = &target {
+                    clear_background(BLACK);
+                    draw_texture_ex(&rt.texture, 0.0, 0.0, WHITE, DrawTextureParams { dest_size: Some(vec2(screen_width(), screen_height())), flip_y: true, ..Default::default() });
+                }
                 let mut ui = ui::Ui { fonts: &fonts, mouse: vec2(mx, my), clicked: is_mouse_button_pressed(MouseButton::Left), down: is_mouse_button_down(MouseButton::Left), focus: &mut focus, chars: &chars_for_ui, backspace, enter, hot: false };
                 if let Some(hud::HudAction::Leave) = g.draw_hud(&mut ui, &view, &tags, &mut settings, fps) {
                     g.disconnect();

@@ -55,6 +55,8 @@ pub struct Settings {
     pub fullscreen: bool,
     /// Draw cartoon outlines on characters (slightly slower).
     pub outlines: bool,
+    /// 3D resolution scale (0.5 = half resolution, much faster on weak GPUs).
+    pub render_scale: f32,
     pub custom: Vec<CustomClass>,
     pub last_class: usize,
     pub recent: Vec<String>,
@@ -74,6 +76,7 @@ impl Default for Settings {
             show_fps: true,
             fullscreen: false,
             outlines: true,
+            render_scale: 1.0,
             custom: (1..=3)
                 .map(|i| CustomClass { name: format!("Мій клас {i}"), loadout: DEFAULT_CLASSES[(i - 1) % DEFAULT_CLASSES.len()].1 })
                 .collect(),

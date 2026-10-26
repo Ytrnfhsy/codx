@@ -59,6 +59,7 @@ pub const HELP: &str = "Команди:
   team <id|ім'я> <allies|axis|spec> — перевести гравця
   kill <id|ім'я>             — вбити гравця
   bots <n>                   — заповнювати сервер ботами до n гравців
+  givestreak <id|ім'я> <uav|airstrike|heli> — видати кілстрік
   set <ключ> <значення>      — scorelimit, timelimit, sabtime, rounds, bombtimer, planttime,
                                defusetime, ff, autobalance, maxplayers, password, name, motd, botskill
   save                       — зберегти налаштування у файл
@@ -259,6 +260,24 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 }
             }
             format!("Сервер заповнюватиметься ботами до {} гравців", g.cfg.bots)
+        }
+        "givestreak" => {
+            let (Some(who), Some(k)) = (args.next(), args.next()) else {
+                return "Використання: givestreak <id|ім'я> <uav|airstrike|heli>".into();
+            };
+            let streak = match k.to_lowercase().as_str() {
+                "uav" => toon_shared::weapons::Killstreak::Uav,
+                "airstrike" | "air" => toon_shared::weapons::Killstreak::Airstrike,
+                "heli" | "helicopter" => toon_shared::weapons::Killstreak::Helicopter,
+                _ => return "Кілстрік: uav | airstrike | heli".into(),
+            };
+            let Some(id) = find_player(g, who) else { return format!("Гравця «{who}» не знайдено") };
+            if let Some(p) = g.pm(id) {
+                p.rewards.retain(|r| *r != streak);
+                p.rewards.push(streak);
+            }
+            g.send(id, S2C::StreakReady(streak));
+            format!("Видано: {}", streak.name())
         }
         "set" => {
             let (Some(key), Some(_)) = (args.next(), rest.split_once(char::is_whitespace)) else {

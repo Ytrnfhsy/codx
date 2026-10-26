@@ -13,11 +13,10 @@ use toon_shared::physics::{Body, MoveInput, Stance, World};
 use toon_shared::protocol::*;
 use toon_shared::ray::ray_player;
 use toon_shared::rng::Rng;
-use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponClass, WeaponId, DEFAULT_CLASSES};
+use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
 use toon_shared::{look_dir, maps, wrap_angle, yaw_basis, Mode, Team};
 
 pub struct Remote {
-    pub id: u8,
     pub buf: VecDeque<(f64, PlayerSnap)>,
     pub team: Team,
     pub pos: Vec3,
@@ -74,10 +73,8 @@ pub struct Welcome {
 
 pub struct GameClient {
     pub net: NetClient,
-    pub address: String,
     pub my_id: u8,
     pub server_name: String,
-    pub motd: String,
     pub map: Map,
     pub world: World,
     pub map_mesh: ToonMesh,
@@ -160,7 +157,6 @@ pub struct GameClient {
     pub leave: Option<String>,
     pub rng: Rng,
     pub now: f64,
-    pub last_grenades: HashMap<u16, Vec3>,
     pub prev_state: MatchState,
     pub mouse_delta: Vec2,
     pub class_choice: usize,
@@ -252,7 +248,7 @@ pub fn build_sky(map: &Map) -> MeshBuilder {
 }
 
 impl GameClient {
-    pub fn new(net: NetClient, address: String, w: Welcome, settings: &Settings, pending: Vec<S2C>) -> GameClient {
+    pub fn new(net: NetClient, w: Welcome, settings: &Settings, pending: Vec<S2C>) -> GameClient {
         let map = maps::build(w.map);
         let world = World::from_map(&map);
         let map_mesh = build_map_mesh(&map);
@@ -261,10 +257,8 @@ impl GameClient {
         let spec = vec3(map.center().x, 15.0, map.max.y);
         let mut g = GameClient {
             net,
-            address,
             my_id: w.id,
             server_name: w.server_name,
-            motd: w.motd.clone(),
             map,
             world,
             map_mesh,
@@ -342,7 +336,6 @@ impl GameClient {
             leave: None,
             rng: Rng::from_time(),
             now: get_time(),
-            last_grenades: HashMap::new(),
             prev_state: MatchState::Warmup,
             mouse_delta: Vec2::ZERO,
             class_choice: settings.last_class,
@@ -623,7 +616,6 @@ impl GameClient {
             }
             seen.push(p.id);
             let r = self.remotes.entry(p.id).or_insert_with(|| Remote {
-                id: p.id,
                 buf: VecDeque::new(),
                 team: p.team,
                 pos: Vec3::from_array(p.pos),
@@ -1289,14 +1281,6 @@ impl GameClient {
             }
         }
         (pos, self.yaw, self.pitch - 0.4 * t)
-    }
-
-    pub fn is_enemy(&self, t: Team) -> bool {
-        t.is_playing() && t != self.team
-    }
-
-    pub fn weapon_class(&self) -> WeaponClass {
-        self.weapon().def().class
     }
 }
 

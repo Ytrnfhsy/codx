@@ -53,7 +53,22 @@ impl Game {
         }
         let time = self.time;
         let Some(p) = self.pm(id) else { return };
-        if !p.alive || p.weapon().id != weapon || p.weapon().mag == 0 || p.reload_end.is_some() || time < p.switch_end - 0.15 {
+        // The client finishes reloads/switches by its own clock, which runs ahead of ours by
+        // roughly the one-way latency; accept shots that arrive slightly "early".
+        let slack = (p.ping * 0.5 + 0.12).min(0.35) as f64;
+        if let Some(end) = p.reload_end {
+            if time >= end - slack {
+                let mag_max = p.weapon().id.def().mag;
+                let w = p.weapon_mut();
+                let take = (mag_max - w.mag).min(w.reserve);
+                w.mag += take;
+                w.reserve -= take;
+                p.reload_end = None;
+            } else {
+                return;
+            }
+        }
+        if !p.alive || p.weapon().id != weapon || p.weapon().mag == 0 || time < p.switch_end - slack {
             return;
         }
         if p.shot_budget < 0.8 {

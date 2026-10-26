@@ -76,10 +76,10 @@ impl Nav {
         if self.walkable(c.0, c.1) {
             return Some(c);
         }
-        for r in 1..6 {
+        for r in 1..6i32 {
             for dj in -r..=r {
                 for di in -r..=r {
-                    if (di as i32).abs() != r && (dj as i32).abs() != r {
+                    if di.abs() != r && dj.abs() != r {
                         continue;
                     }
                     if self.walkable(c.0 + di, c.1 + dj) {

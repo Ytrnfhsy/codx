@@ -131,7 +131,6 @@ pub struct SoldierPose {
     /// 0..1 amount of walking.
     pub walk: f32,
     pub sprint: bool,
-    pub ads: bool,
     /// Seconds since death (None = alive).
     pub dead: Option<f32>,
     pub has_bomb: bool,
@@ -267,7 +266,7 @@ pub fn add_heli(m: &mut ToonMesh, pos: Vec3, yaw: f32, team: Team, t: f32) {
     }
     m.boxed(&(base * Mat4::from_translation(vec3(0.0, 1.2, 0.0))), vec3(0.2, 0.25, 0.2), METAL, 0.04);
     for k in 0..2 {
-        let r = base * Mat4::from_translation(vec3(0.0, 1.45, 0.0)) * Mat4::from_rotation_y(t * 25.0 + k as f32 * 1.5708);
+        let r = base * Mat4::from_translation(vec3(0.0, 1.45, 0.0)) * Mat4::from_rotation_y(t * 25.0 + k as f32 * std::f32::consts::FRAC_PI_2);
         m.boxed(&r, vec3(0.18, 0.03, 4.2), [40, 40, 46], 0.03);
     }
     let tr = base * Mat4::from_translation(vec3(0.25, 0.9, 4.8)) * Mat4::from_rotation_x(t * 30.0);

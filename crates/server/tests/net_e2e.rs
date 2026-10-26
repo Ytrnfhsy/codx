@@ -43,13 +43,15 @@ impl Client {
 #[test]
 fn join_move_and_shoot_over_udp() {
     let port = 27900 + (std::process::id() % 50) as u16;
-    let mut cfg = ServerConfig::default();
-    cfg.port = port;
-    cfg.http_enabled = false;
-    cfg.bots = 2;
-    cfg.min_players = 1;
-    cfg.data_dir = std::env::temp_dir().join("tw-e2e").to_string_lossy().into();
-    cfg.rotation = vec![toon_server::config::RotationEntry { map: "cargo".into(), mode: "tdm".into() }];
+    let cfg = ServerConfig {
+        port,
+        http_enabled: false,
+        bots: 2,
+        min_players: 1,
+        data_dir: std::env::temp_dir().join("tw-e2e").to_string_lossy().into(),
+        rotation: vec![toon_server::config::RotationEntry { map: "cargo".into(), mode: "tdm".into() }],
+        ..Default::default()
+    };
     let server = toon_server::start(cfg, None).expect("server starts");
 
     // info query

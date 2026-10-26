@@ -29,6 +29,31 @@ impl View {
     }
 }
 
+/// Camera for the first-person weapon: its depth range is squashed into the very front of
+/// the depth buffer, so the gun never clips into walls and no depth clear is needed.
+struct ViewmodelCamera(Camera3D);
+
+impl macroquad::camera::Camera for ViewmodelCamera {
+    fn matrix(&self) -> Mat4 {
+        let squash = Mat4::from_cols(
+            vec4(1.0, 0.0, 0.0, 0.0),
+            vec4(0.0, 1.0, 0.0, 0.0),
+            vec4(0.0, 0.0, 0.01, 0.0),
+            vec4(0.0, 0.0, -0.99, 1.0),
+        );
+        squash * self.0.matrix()
+    }
+    fn depth_enabled(&self) -> bool {
+        true
+    }
+    fn render_pass(&self) -> Option<macroquad::texture::RenderPass> {
+        self.0.render_pass()
+    }
+    fn viewport(&self) -> Option<(i32, i32, i32, i32)> {
+        None
+    }
+}
+
 pub struct NameTag {
     pub pos: Vec3,
     pub name: String,
@@ -40,7 +65,7 @@ fn fog_color(g: &GameClient) -> Color {
     Color::from_rgba(g.map.fog[0], g.map.fog[1], g.map.fog[2], 255)
 }
 
-pub fn make_view(g: &GameClient, settings: &Settings) -> View {
+pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarget>) -> View {
     let (pos, yaw, pitch) = g.camera();
     let aspect = screen_width() / screen_height().max(1.0);
     let hfov = settings.fov.clamp(60.0, 120.0).to_radians();
@@ -58,7 +83,7 @@ pub fn make_view(g: &GameClient, settings: &Settings) -> View {
         fovy,
         aspect: None,
         projection: Projection::Perspective,
-        render_target: None,
+        render_target: target,
         viewport: None,
         z_near: 0.05,
         z_far: 600.0,
@@ -70,8 +95,8 @@ pub fn make_view(g: &GameClient, settings: &Settings) -> View {
 /// Renders the world. Returns name tags for the HUD.
 pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, view: &View) -> Vec<NameTag> {
     let fog = fog_color(g);
-    clear_background(fog);
     set_camera(&view.cam);
+    clear_background(fog);
     mats.set_view(view.pos, fog, 55.0, 230.0);
 
     // sky (follows the camera, no fog)
@@ -131,7 +156,6 @@ pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, v
             phase: r.phase,
             walk: r.walk,
             sprint: r.flags & flags::SPRINT != 0,
-            ads: r.flags & flags::ADS != 0,
             dead,
             has_bomb,
             blink: ((now * 0.37 + id as f64 * 0.31).fract()) < 0.035,
@@ -206,26 +230,23 @@ fn blob_shadow(m: &mut crate::mesh::MeshBuilder, c: Vec3, r: f32) {
 }
 
 /// First-person weapon and hands, drawn after clearing depth so it never clips into walls.
-pub fn render_viewmodel(g: &mut GameClient, mats: &Materials, settings: &Settings) {
+pub fn render_viewmodel(g: &mut GameClient, mats: &Materials, settings: &Settings, target: Option<RenderTarget>) {
     if !g.alive || g.scoped() {
         return;
     }
-    let cam = Camera3D {
+    let cam = ViewmodelCamera(Camera3D {
         position: Vec3::ZERO,
         target: vec3(0.0, 0.0, -1.0),
         up: Vec3::Y,
         fovy: 62f32.to_radians(),
         aspect: None,
         projection: Projection::Perspective,
-        render_target: None,
+        render_target: target,
         viewport: None,
         z_near: 0.01,
         z_far: 10.0,
-    };
+    });
     set_camera(&cam);
-    unsafe {
-        get_internal_gl().quad_context.clear(None, Some(1.0), None);
-    }
     mats.set_view(Vec3::ZERO, Color::new(0.0, 0.0, 0.0, 1.0), 100.0, 200.0);
 
     let now = g.now;

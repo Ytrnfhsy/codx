@@ -2,7 +2,6 @@
 
 use macroquad::prelude::*;
 
-pub const BG: Color = Color::new(0.11, 0.13, 0.2, 1.0);
 pub const PANEL: Color = Color::new(0.16, 0.19, 0.29, 0.94);
 pub const PANEL2: Color = Color::new(0.22, 0.26, 0.38, 1.0);
 pub const ACCENT: Color = Color::new(1.0, 0.79, 0.29, 1.0);

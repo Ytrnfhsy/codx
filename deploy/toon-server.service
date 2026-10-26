@@ -1,0 +1,18 @@
+# Copy to /etc/systemd/system/toon-server.service, then:
+#   sudo useradd -r -m -d /opt/toon toon
+#   sudo cp target/release/toon-server /opt/toon/
+#   sudo systemctl enable --now toon-server
+[Unit]
+Description=Toon Warfare dedicated server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=toon
+WorkingDirectory=/opt/toon
+ExecStart=/opt/toon/toon-server --config /opt/toon/server.json
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

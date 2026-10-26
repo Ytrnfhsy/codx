@@ -49,6 +49,7 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
     ui.toggle("Інвертувати Y", &mut s.invert_y, x, y + 150.0);
     ui.toggle("Показувати FPS і пінг", &mut s.show_fps, x, y + 186.0);
     ui.toggle("Мультяшні контури (вимкни на дуже слабких ПК)", &mut s.outlines, x, y + 222.0);
+    s.render_scale = (ui.slider("Масштаб рендеру (менше = швидше)", s.render_scale * 100.0, 40.0, 100.0, x, y + 280.0, w, "{}%") / 5.0).round() * 5.0 / 100.0;
 }
 
 pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_running: Option<u16>) -> Option<MenuAction> {
@@ -177,10 +178,10 @@ pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_runni
             }
         }
         Page::Settings => {
-            ui.panel(x, y, pw, 400.0);
+            ui.panel(x, y, pw, 450.0);
             ui.bold("Налаштування", x + 24.0, y + 40.0, 26, ACCENT);
             settings_widgets(ui, s, x + 24.0, y + 90.0, pw - 48.0);
-            if ui.button("Зберегти", x + pw - 200.0, y + 340.0, 176.0, 44.0) {
+            if ui.button("Зберегти", x + pw - 200.0, y + 390.0, 176.0, 44.0) {
                 s.save();
                 st.page = Page::Main;
             }

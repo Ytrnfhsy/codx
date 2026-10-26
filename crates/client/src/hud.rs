@@ -699,10 +699,10 @@ impl GameClient {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 480.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.18);
-                ui.panel(x, y, pw, 420.0);
+                ui.panel(x, y, pw, 470.0);
                 ui.bold("Налаштування", x + 24.0, y + 44.0, 26, ACCENT);
                 crate::menu::settings_widgets(ui, settings, x + 24.0, y + 90.0, pw - 48.0);
-                if ui.button("Готово", x + pw - 180.0, y + 360.0, 156.0, 44.0) {
+                if ui.button("Готово", x + pw - 180.0, y + 410.0, 156.0, 44.0) {
                     settings.save();
                     self.overlay = Overlay::Pause;
                 }
