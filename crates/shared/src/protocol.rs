@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 
 pub type V3 = [f32; 3];
 
+/// Extra bits packed into `PlayerSnap::stance` (low 2 bits are the stance).
+pub mod stance_bits {
+    pub const PROTECTED: u8 = 0x40;
+    pub const SILENT: u8 = 0x80;
+}
+
 pub mod flags {
     pub const SPRINT: u8 = 1;
     pub const ADS: u8 = 2;
@@ -97,6 +103,8 @@ pub struct MeSnap {
     pub ack_seq: u32,
     /// Plant/defuse progress 0..1 when we are doing it.
     pub progress: f32,
+    /// Seconds of spawn protection left.
+    pub protected: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

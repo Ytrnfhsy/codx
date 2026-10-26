@@ -66,7 +66,8 @@ pub const HELP: &str = "Команди:
   tune <шлях> <значення>     — змінити: tune movement.sprint_speed 8; tune m249.rpm 850
   tune reset [movement|<зброя>|all]         — повернути заводські значення
   set <ключ> <значення>      — scorelimit, timelimit, sabtime, rounds, bombtimer, planttime,
-                               defusetime, ff, autobalance, maxplayers, password, name, motd, botskill
+                               defusetime, ff, autobalance, maxplayers, password, name, motd,
+                               botskill (0..1 або easy/normal/hard/veteran), spawnprotect (секунди)
   save                       — зберегти налаштування у файл
   help                       — ця довідка";
 
@@ -335,8 +336,12 @@ fn set_var(g: &mut Game, key: &str, v: &str) -> String {
             Ok(n) if n >= 0.5 => g.cfg.sab.defuse_time = n,
             _ => return bad(),
         },
-        "botskill" => match num {
-            Ok(n) => g.cfg.bot_skill = n.clamp(0.0, 1.0),
+        "botskill" => match crate::bots::parse_skill(v) {
+            Some(n) => g.cfg.bot_skill = n,
+            None => return format!("botskill: число 0..1 або easy | normal | hard | veteran"),
+        },
+        "spawnprotect" | "spawnprotection" => match num {
+            Ok(n) if (0.0..=30.0).contains(&n) => g.cfg.spawn_protection = n,
             _ => return bad(),
         },
         "maxplayers" => match num {

@@ -137,6 +137,19 @@ impl GameClient {
             ui.centered("ОВЕРТАЙМ — без відродження", cx, 110.0, 22, BAD);
         }
 
+        // own spawn protection
+        if self.alive && self.me.protected > 0.0 && self.overlay == Overlay::None && matches!(self.state, MatchState::Playing | MatchState::Warmup) {
+            let a = (self.me.protected / 3.0).clamp(0.25, 1.0);
+            let c = Color::new(0.45, 0.75, 1.0, 0.18 * a);
+            for i in 0..6 {
+                let band = 40.0 - i as f32 * 6.0;
+                draw_rectangle(0.0, 0.0, w, band, c);
+                draw_rectangle(0.0, h - band, w, band, c);
+            }
+            ui.centered(&format!("Захист після відродження: {:.1} с", self.me.protected), cx, h * 0.78, 20, Color::new(0.6, 0.85, 1.0, 1.0));
+            ui.centered("постріл, граната чи ніж знімають захист", cx, h * 0.78 + 22.0, 14, MUTED);
+        }
+
         // death screen
         if !self.alive && self.team.is_playing() && self.state != MatchState::PostMatch && self.overlay == Overlay::None {
             if let Some((killer, cause, _)) = &self.death_info {

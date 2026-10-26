@@ -33,7 +33,7 @@ impl Default for HostSettings {
             mode: "tdm".into(),
             map: "depot".into(),
             bots: 6,
-            bot_skill: 0.5,
+            bot_skill: 0.4,
             rcon: String::new(),
             password: String::new(),
             max_players: 12,

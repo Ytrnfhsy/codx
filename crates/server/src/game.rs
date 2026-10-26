@@ -61,6 +61,11 @@ pub struct Player {
     pub last_shot: f64,
     /// Last time an input had the sprint flag (weapon raise delay).
     pub last_sprint: f64,
+    /// Invulnerable until this time (spawn protection).
+    pub protected_until: f64,
+    /// Accuracy stats for this match.
+    pub shots_fired: u32,
+    pub shots_hit: u32,
     pub kills: u16,
     pub deaths: u16,
     pub assists: u16,
@@ -113,6 +118,9 @@ impl Player {
             last_damage: -100.0,
             last_shot: -100.0,
             last_sprint: -100.0,
+            protected_until: 0.0,
+            shots_fired: 0,
+            shots_hit: 0,
             kills: 0,
             deaths: 0,
             assists: 0,
@@ -475,7 +483,7 @@ impl Game {
         let base = crate::bots::BOT_NAMES[self.rng.below(crate::bots::BOT_NAMES.len())];
         let name = self.sanitize_name(&format!("[Бот] {base}"), None);
         let mut p = Player::new(id, name, None, self.time);
-        p.bot = Some(Box::new(Bot::new(self.cfg.bot_skill, &mut self.rng)));
+        p.bot = Some(Box::new(Bot::new(&mut self.rng)));
         let class = DEFAULT_CLASSES[self.rng.below(DEFAULT_CLASSES.len())].1;
         p.loadout = class;
         p.has_loadout = true;
@@ -613,6 +621,9 @@ impl Game {
     pub fn spawn_player(&mut self, id: u8, side_only: bool) {
         let (pos, yaw) = self.pick_spawn(id, side_only);
         let time = self.time;
+        // protection counts from the moment fighting is possible
+        let protect_from = if self.state == MatchState::PreRound { self.state_end } else { time };
+        let protected_until = protect_from + self.cfg.spawn_protection as f64;
         let tuning = &self.tuning;
         let Some(p) = self.players[id as usize].as_mut() else { return };
         if let Some(l) = p.next_loadout.take() {
@@ -636,6 +647,7 @@ impl Game {
         p.shot_budget = 1.0;
         p.attackers.clear();
         p.life = p.life.wrapping_add(1);
+        p.protected_until = protected_until;
         p.history.clear();
         p.move_budget = 1.0;
         p.last_damage = -100.0;
@@ -1160,7 +1172,9 @@ impl Game {
                     yaw: p.yaw,
                     pitch: p.pitch,
                     // bit 7: Dead Silence (no footstep sounds)
-                    stance: p.body.stance.to_u8() | if p.has_perk3(Perk3::DeadSilence) { 0x80 } else { 0 },
+                    stance: p.body.stance.to_u8()
+                        | if p.has_perk3(Perk3::DeadSilence) { stance_bits::SILENT } else { 0 }
+                        | if p.alive && p.protected_until > self.time { stance_bits::PROTECTED } else { 0 },
                     weapon: p.weapon().id,
                     flags: f,
                 }
@@ -1179,6 +1193,7 @@ impl Game {
                 uav,
                 ack_seq: p.last_seq,
                 progress: p.progress,
+                protected: (p.protected_until - self.time).max(0.0) as f32,
             },
             None => MeSnap::default(),
         };

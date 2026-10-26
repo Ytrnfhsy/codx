@@ -83,6 +83,7 @@ impl Game {
         p.shot_budget -= 1.0;
         p.weapon_mut().mag -= 1;
         p.last_shot = time;
+        p.protected_until = 0.0; // attacking ends spawn protection
         let eye = p.eye();
         let look = look_dir(p.yaw, p.pitch);
         let origin = if origin.is_finite() && origin.distance(eye) < 1.2 { origin } else { eye };
@@ -126,6 +127,12 @@ impl Game {
                 self.shots.push(ShotFx { id, weapon, from: origin.to_array(), to: (origin + d * dist).to_array(), flesh });
             }
         }
+        if let Some(p) = self.pm(id) {
+            p.shots_fired += 1;
+            if !per_victim.is_empty() {
+                p.shots_hit += 1;
+            }
+        }
         for (v, dmg, head) in per_victim {
             self.damage(v, Some(id), dmg, Cause::Weapon(weapon), head, origin);
         }
@@ -146,6 +153,10 @@ impl Game {
         let att_team = attacker.and_then(|a| self.p(a)).map(|a| a.team);
         let Some(v) = self.pm(victim) else { return };
         if !v.alive {
+            return;
+        }
+        // spawn protection: nothing but falling out of the world hurts
+        if time < v.protected_until && !matches!(cause, Cause::Fall | Cause::World) {
             return;
         }
         if let Some(a) = attacker {
@@ -328,6 +339,7 @@ impl Game {
             return;
         }
         p.grenades -= 1;
+        p.protected_until = 0.0;
         let eye = p.eye();
         let origin = if origin.is_finite() && origin.distance(eye) < 1.2 { origin } else { eye };
         let vel = dir.normalize() * GRENADE_SPEED + p.body.vel * 0.5;
@@ -424,6 +436,7 @@ impl Game {
             return;
         }
         p.melee_ready = time + MELEE_COOLDOWN as f64;
+        p.protected_until = 0.0;
         let eye = p.eye();
         let fwd = look_dir(p.yaw, p.pitch);
         let team = p.team;

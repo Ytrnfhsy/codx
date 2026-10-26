@@ -89,7 +89,8 @@
       <label>Таймер бомби, с<input id="s_bombtimer" type="number" min="5"></label>
       <label>Макс. гравців<input id="s_maxplayers" type="number" min="2" max="32"></label>
       <label>Боти (заповнення до)<input id="s_bots" type="number" min="0" max="32"></label>
-      <label>Складність ботів 0..1<input id="s_botskill" type="number" min="0" max="1" step="0.1"></label>
+      <label>Складність ботів<select id="s_botskill"><option value="0.1">Легкі</option><option value="0.4">Звичайні</option><option value="0.7">Важкі</option><option value="1">Ветерани</option></select></label>
+      <label>Захист після відродження, с<input id="s_spawnprotect" type="number" min="0" max="30" step="0.5"></label>
       <label><input id="s_ff" type="checkbox" style="width:auto"> Вогонь по своїх</label>
       <label><input id="s_autobalance" type="checkbox" style="width:auto"> Автобаланс</label>
     </div>
@@ -212,7 +213,8 @@ async function refresh() {
     const c = s.settings;
     $("s_scorelimit").value = c.score_limit; $("s_timelimit").value = c.time_limit; $("s_sabtime").value = c.sab_time;
     $("s_rounds").value = c.rounds; $("s_bombtimer").value = c.bomb_timer; $("s_maxplayers").value = c.max_players;
-    $("s_bots").value = c.bots; $("s_botskill").value = c.bot_skill; $("s_ff").checked = c.friendly_fire; $("s_autobalance").checked = c.auto_balance;
+    $("s_bots").value = c.bots; $("s_botskill").value = String([0.1, 0.4, 0.7, 1].reduce((a, b) => Math.abs(b - c.bot_skill) < Math.abs(a - c.bot_skill) ? b : a));
+    $("s_spawnprotect").value = c.spawn_protection; $("s_ff").checked = c.friendly_fire; $("s_autobalance").checked = c.auto_balance;
     $("map").value = i.map_id; $("mode").value = i.mode_id;
     settingsLoaded = true;
   }
@@ -234,7 +236,7 @@ document.addEventListener("click", async (e) => {
       "set scorelimit " + $("s_scorelimit").value, "set timelimit " + $("s_timelimit").value,
       "set sabtime " + $("s_sabtime").value, "set rounds " + $("s_rounds").value,
       "set bombtimer " + $("s_bombtimer").value, "set maxplayers " + $("s_maxplayers").value,
-      "set botskill " + $("s_botskill").value, "set ff " + ($("s_ff").checked ? 1 : 0),
+      "set botskill " + $("s_botskill").value, "set spawnprotect " + $("s_spawnprotect").value, "set ff " + ($("s_ff").checked ? 1 : 0),
       "set autobalance " + ($("s_autobalance").checked ? 1 : 0), "bots " + $("s_bots").value,
     ];
     const outs = [];

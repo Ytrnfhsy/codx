@@ -27,6 +27,8 @@ pub struct Remote {
     pub weapon: WeaponId,
     pub flags: u8,
     pub silent: bool,
+    /// Spawn protection active.
+    pub protected: bool,
     pub alive: bool,
     pub phase: f32,
     pub walk: f32,
@@ -654,6 +656,7 @@ impl GameClient {
                 weapon: p.weapon,
                 flags: p.flags,
                 silent: false,
+                protected: false,
                 alive: p.alive,
                 phase: 0.0,
                 walk: 0.0,
@@ -1256,7 +1259,8 @@ impl GameClient {
             r.yaw = sa.yaw + wrap_angle(sb.yaw - sa.yaw) * k;
             r.pitch = sa.pitch + (sb.pitch - sa.pitch) * k;
             r.stance = Stance::from_u8(sb.stance & 3);
-            r.silent = sb.stance & 0x80 != 0;
+            r.silent = sb.stance & stance_bits::SILENT != 0;
+            r.protected = sb.alive && sb.stance & stance_bits::PROTECTED != 0;
             r.weapon = sb.weapon;
             r.flags = sb.flags;
             r.team = sb.team;

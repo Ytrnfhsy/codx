@@ -75,6 +75,7 @@ fn state_json_raw(g: &Game) -> serde_json::Value {
             "auto_balance": g.cfg.auto_balance,
             "bots": g.cfg.bots,
             "bot_skill": g.cfg.bot_skill,
+            "spawn_protection": g.cfg.spawn_protection,
             "max_players": g.cfg.max_players,
             "motd": g.cfg.motd,
             "has_password": !g.cfg.password.is_empty(),

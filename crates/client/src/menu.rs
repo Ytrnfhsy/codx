@@ -130,7 +130,8 @@ pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_runni
                 hs.map = maps[((ci as i32 + d).rem_euclid(maps.len() as i32)) as usize].short().into();
             }
             hs.bots = ui.slider("Боти (заповнення до)", hs.bots as f32, 0.0, 16.0, x + 24.0, y + 280.0, pw - 48.0, "{}").round() as usize;
-            hs.bot_skill = ui.slider("Складність ботів", hs.bot_skill, 0.0, 1.0, x + 24.0, y + 330.0, pw - 48.0, "{}");
+            let skill_label = format!("Складність ботів ({})", toon_server::bots::skill_name(hs.bot_skill));
+            hs.bot_skill = ui.slider(&skill_label, hs.bot_skill, 0.0, 1.0, x + 24.0, y + 330.0, pw - 48.0, "{}");
             hs.max_players = ui.slider("Макс. гравців", hs.max_players as f32, 2.0, 24.0, x + 24.0, y + 380.0, pw - 48.0, "{}").round() as usize;
             ui.field(13, "Пароль для входу (порожньо = відкритий)", &mut hs.password, x + 24.0, y + 430.0, pw - 48.0, true, 32);
             if ui.button("ЗАПУСТИТИ", x + pw - 220.0, y + 490.0, 196.0, 50.0) {

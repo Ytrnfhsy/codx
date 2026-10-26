@@ -95,6 +95,8 @@ pub struct ServerConfig {
     pub bots: usize,
     /// 0.0 (easy) .. 1.0 (hard).
     pub bot_skill: f32,
+    /// Seconds of invulnerability after respawning (0 = off). Ends early when you shoot.
+    pub spawn_protection: f32,
     /// Players required to start a match (otherwise warmup).
     pub min_players: usize,
     pub http_enabled: bool,
@@ -127,7 +129,8 @@ impl Default for ServerConfig {
             friendly_fire: false,
             auto_balance: true,
             bots: 6,
-            bot_skill: 0.5,
+            bot_skill: 0.4,
+            spawn_protection: 3.0,
             min_players: 2,
             http_enabled: true,
             data_dir: "data".into(),
@@ -168,6 +171,7 @@ impl ServerConfig {
         self.max_players = self.max_players.clamp(2, toon_shared::consts::MAX_PLAYERS);
         self.bots = self.bots.min(self.max_players);
         self.bot_skill = self.bot_skill.clamp(0.0, 1.0);
+        self.spawn_protection = self.spawn_protection.clamp(0.0, 30.0);
         self.min_players = self.min_players.max(1);
         if self.rotation.is_empty() {
             self.rotation.push(RotationEntry::default());
