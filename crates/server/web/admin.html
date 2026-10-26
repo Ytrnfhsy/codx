@@ -34,6 +34,12 @@
   .grid2 input { width:100%; }
   .err { color: var(--red); min-height: 20px; }
   .bot { color: var(--muted); font-size: 12px; }
+  .tgrid { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 16px; }
+  .tgrid label { display:flex; flex-direction:column; gap:3px; }
+  .tgrid input[type=number] { width: 100%; }
+  .tgrid .rng { color: var(--muted); font-size: 11px; }
+  .tgrid .changed input { border-color: var(--acc); }
+  .sub { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -98,6 +104,19 @@
     <div class="row"><input id="say" placeholder="Повідомлення всім гравцям" style="flex:1"><button data-act="say">Надіслати</button></div>
     <div class="row"><input id="cmd" placeholder="Команда (help)" style="flex:1"><button data-act="cmd">Виконати</button></div>
     <pre id="out">Напиши help для списку команд.</pre>
+  </section>
+
+  <section class="card wide">
+    <h2>Тонке налаштування: рух і зброя</h2>
+    <p class="sub" style="margin:0 0 10px">Зміни застосовуються миттєво для всіх гравців. «Зберегти у файл» — щоб лишились після перезапуску.</p>
+    <div class="row">
+      <select id="tgroup"></select>
+      <button data-act="tapply">Застосувати</button>
+      <button class="ghost" data-act="treset">Скинути групу до заводських</button>
+      <button class="ghost" data-cmd="save">Зберегти у файл</button>
+      <span id="tmsg" class="sub"></span>
+    </div>
+    <div id="tfields" class="tgrid"></div>
   </section>
 
   <section class="card">
@@ -187,6 +206,7 @@ async function refresh() {
     const td = el("td"); const u = el("button", "Розбанити", "small"); u.onclick = () => run("unban " + bnn.ip); td.append(u); tr.append(td); bans.append(tr);
   }
   $("log").textContent = s.log.join("\n");
+  updateTuningState(s);
 
   if (!settingsLoaded) {
     const c = s.settings;
@@ -225,6 +245,76 @@ document.addEventListener("click", async (e) => {
 });
 $("cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") document.querySelector('[data-act="cmd"]').click(); });
 $("say").addEventListener("keydown", (e) => { if (e.key === "Enter") document.querySelector('[data-act="say"]').click(); });
+
+// ---- fine tuning editor
+let tState = null;          // last tuning from the server
+let tGroup = "movement";
+function tObj(t, g) { return g === "movement" ? t.movement : t.weapons[g]; }
+function renderTuning(force) {
+  if (!tState) return;
+  const box = $("tfields");
+  if (!force && box.dataset.group === tGroup) return; // don't clobber what the admin is typing
+  box.dataset.group = tGroup;
+  box.replaceChildren();
+  const fields = tGroup === "movement" ? tState.fields.movement : tState.fields.weapon;
+  const obj = tObj(tState.tuning, tGroup);
+  for (const [key, label, lo, hi] of fields) {
+    const wrap = el("label"); wrap.title = key;
+    const cur = obj[key];
+    let input;
+    if (typeof cur === "boolean") {
+      input = document.createElement("input"); input.type = "checkbox"; input.checked = cur; input.style.width = "auto";
+    } else {
+      input = document.createElement("input"); input.type = "number"; input.step = "any"; input.min = lo; input.max = hi; input.value = cur;
+    }
+    input.dataset.key = key; input.dataset.orig = String(cur);
+    input.addEventListener("input", () => {
+      const v = input.type === "checkbox" ? String(input.checked) : input.value;
+      wrap.classList.toggle("changed", v !== input.dataset.orig);
+    });
+    wrap.append(el("span", label), input, el("span", key + "  [" + lo + " … " + hi + "]", "rng"));
+    box.append(wrap);
+  }
+}
+function updateTuningState(s) {
+  const first = !tState;
+  tState = { tuning: s.tuning, fields: s.tuning_fields };
+  if (first) {
+    const sel = $("tgroup");
+    sel.append(new Option("Рух персонажа", "movement"));
+    for (const [k, name] of s.weapon_names) sel.append(new Option("Зброя: " + name, k));
+    sel.onchange = () => { tGroup = sel.value; renderTuning(true); };
+    renderTuning(true);
+  }
+}
+async function applyTuning() {
+  const inputs = $("tfields").querySelectorAll("input");
+  const prefix = tGroup === "movement" ? "movement." : tGroup + ".";
+  const outs = [];
+  for (const i of inputs) {
+    const v = i.type === "checkbox" ? String(i.checked) : i.value;
+    if (v === i.dataset.orig) continue;
+    const r = await api("/api/cmd", { cmd: "tune " + prefix + i.dataset.key + " " + v });
+    outs.push(r.output ?? r.error);
+  }
+  $("tmsg").textContent = outs.length ? outs.join(" · ") : "Нічого не змінено";
+  const s = await api("/api/state");
+  tState = { tuning: s.tuning, fields: s.tuning_fields };
+  renderTuning(true);
+}
+document.addEventListener("click", async (e) => {
+  const t = e.target;
+  if (!(t instanceof HTMLElement)) return;
+  if (t.dataset.act === "tapply") applyTuning();
+  if (t.dataset.act === "treset") {
+    if (!confirm("Скинути параметри цієї групи до заводських?")) return;
+    const r = await api("/api/cmd", { cmd: "tune reset " + tGroup });
+    $("tmsg").textContent = r.output ?? r.error;
+    const s = await api("/api/state");
+    tState = { tuning: s.tuning, fields: s.tuning_fields };
+    renderTuning(true);
+  }
+});
 
 setInterval(refresh, 2000);
 if (token) showApp(); else showLogin();

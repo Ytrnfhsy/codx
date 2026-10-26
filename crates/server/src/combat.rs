@@ -52,15 +52,17 @@ impl Game {
             return;
         }
         let time = self.time;
-        let Some(p) = self.pm(id) else { return };
+        let Some(cur) = self.p(id).map(|p| p.weapon().id) else { return };
+        let cur_mag = self.tuning.weapon(cur).mag;
+        let def = self.tuning.weapon(weapon).clone();
+        let Some(p) = self.players[id as usize].as_mut() else { return };
         // The client finishes reloads/switches by its own clock, which runs ahead of ours by
         // roughly the one-way latency; accept shots that arrive slightly "early".
         let slack = (p.ping * 0.5 + 0.12).min(0.35) as f64;
         if let Some(end) = p.reload_end {
             if time >= end - slack {
-                let mag_max = p.weapon().id.def().mag;
                 let w = p.weapon_mut();
-                let take = (mag_max - w.mag).min(w.reserve);
+                let take = cur_mag.saturating_sub(w.mag).min(w.reserve);
                 w.mag += take;
                 w.reserve -= take;
                 p.reload_end = None;
@@ -74,7 +76,10 @@ impl Game {
         if p.shot_budget < 0.8 {
             return;
         }
-        let def = weapon.def();
+        // weapons need a moment to come up after sprinting (heavier ones longer)
+        if time - p.last_sprint < (def.sprint_out_time * 0.5) as f64 {
+            return;
+        }
         p.shot_budget -= 1.0;
         p.weapon_mut().mag -= 1;
         p.last_shot = time;
@@ -286,11 +291,12 @@ impl Game {
 
     pub fn start_reload(&mut self, id: u8) {
         let time = self.time;
-        let Some(p) = self.pm(id) else { return };
+        let Some(cur) = self.p(id).map(|p| p.weapon().id) else { return };
+        let def = self.tuning.weapon(cur).clone();
+        let Some(p) = self.players[id as usize].as_mut() else { return };
         if !p.alive || p.reload_end.is_some() {
             return;
         }
-        let def = p.weapon().id.def();
         if p.weapon().mag >= def.mag || p.weapon().reserve == 0 {
             return;
         }
@@ -300,13 +306,15 @@ impl Game {
 
     pub fn switch_weapon(&mut self, id: u8, slot: u8) {
         let time = self.time;
-        let Some(p) = self.pm(id) else { return };
+        let Some(next) = self.p(id).map(|p| p.weapons[slot as usize & 1].id) else { return };
+        let swap = self.tuning.weapon(next).swap_time;
+        let Some(p) = self.players[id as usize].as_mut() else { return };
         if !p.alive || slot > 1 || slot == p.slot {
             return;
         }
         p.slot = slot;
         p.reload_end = None;
-        p.switch_end = time + WEAPON_SWITCH_TIME as f64;
+        p.switch_end = time + swap as f64;
         p.shot_budget = p.shot_budget.min(1.0);
     }
 
@@ -331,7 +339,7 @@ impl Game {
     pub fn update_grenades(&mut self, dt: f32) {
         let mut boom = Vec::new();
         for g in self.grenades.iter_mut() {
-            g.vel.y -= GRAVITY * dt;
+            g.vel.y -= self.tuning.movement.gravity * dt;
             let step = g.vel * dt;
             let len = step.length();
             if len > 1e-5 {

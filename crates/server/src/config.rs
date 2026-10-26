@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use toon_shared::consts::DEFAULT_PORT;
 use toon_shared::map::MapId;
+use toon_shared::tuning::Tuning;
 use toon_shared::Mode;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -99,6 +100,9 @@ pub struct ServerConfig {
     pub http_enabled: bool,
     /// Directory for bans and logs.
     pub data_dir: String,
+    /// Fine tuning of movement and every weapon (see `tune` admin command).
+    /// Missing fields fall back to factory defaults.
+    pub tuning: serde_json::Value,
 }
 
 impl Default for ServerConfig {
@@ -127,6 +131,7 @@ impl Default for ServerConfig {
             min_players: 2,
             http_enabled: true,
             data_dir: "data".into(),
+            tuning: tuning_json(&Tuning::default()),
         }
     }
 }
@@ -150,6 +155,15 @@ impl ServerConfig {
         std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
     }
 
+    /// Factory defaults overlaid with the config's (possibly partial) `tuning` section.
+    pub fn tuning(&self) -> Tuning {
+        let mut base = serde_json::to_value(Tuning::default()).expect("tuning json");
+        merge_json(&mut base, &self.tuning);
+        let mut t: Tuning = serde_json::from_value(base).unwrap_or_default();
+        t.finalize();
+        t
+    }
+
     pub fn sanitized(mut self) -> ServerConfig {
         self.max_players = self.max_players.clamp(2, toon_shared::consts::MAX_PLAYERS);
         self.bots = self.bots.min(self.max_players);
@@ -165,6 +179,63 @@ impl ServerConfig {
         self.sab.bomb_timer = self.sab.bomb_timer.max(5.0);
         self.sab.plant_time = self.sab.plant_time.max(0.5);
         self.sab.defuse_time = self.sab.defuse_time.max(0.5);
+        // store the full, validated tuning so admins see every knob in the file
+        self.tuning = tuning_json(&self.tuning());
         self
+    }
+}
+
+/// Rounds every float to 4 decimals (f32 values otherwise show up as 1.399999976158142).
+pub fn round_json(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::Number(n) if n.is_f64() => {
+            let f = (n.as_f64().unwrap_or(0.0) * 10_000.0).round() / 10_000.0;
+            *v = serde_json::json!(f);
+        }
+        serde_json::Value::Array(a) => a.iter_mut().for_each(round_json),
+        serde_json::Value::Object(o) => o.values_mut().for_each(round_json),
+        _ => {}
+    }
+}
+
+/// Tuning as clean JSON.
+pub fn tuning_json(t: &Tuning) -> serde_json::Value {
+    let mut v = serde_json::to_value(t).expect("tuning json");
+    round_json(&mut v);
+    v
+}
+
+/// Recursively overlays `over` onto `base` (objects merge, everything else replaces).
+pub fn merge_json(base: &mut serde_json::Value, over: &serde_json::Value) {
+    match (base, over) {
+        (serde_json::Value::Object(b), serde_json::Value::Object(o)) => {
+            for (k, v) in o {
+                match b.get_mut(k) {
+                    Some(bv) => merge_json(bv, v),
+                    None => {
+                        b.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+        (b, o) if !o.is_null() => *b = o.clone(),
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_tuning_overrides_merge_onto_defaults() {
+        let cfg: ServerConfig = serde_json::from_str(r#"{ "tuning": { "movement": { "sprint_speed": 9.5 }, "weapons": { "m249": { "rpm": 900, "weight": 12 } } } }"#).unwrap();
+        let t = cfg.sanitized().tuning();
+        assert_eq!(t.movement.sprint_speed, 9.5);
+        assert_eq!(t.movement.walk_speed, Tuning::default().movement.walk_speed);
+        let m249 = t.weapon(toon_shared::weapons::WeaponId::M249);
+        assert_eq!(m249.rpm, 900.0);
+        assert_eq!(m249.weight, 12.0);
+        assert_eq!(m249.mag, 100);
     }
 }

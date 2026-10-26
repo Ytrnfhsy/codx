@@ -95,3 +95,26 @@ fn admin_commands() {
     assert_eq!(g.kicked.len(), 1);
     assert!(toon_server::admin::exec(&mut g, "foo").contains("Невідома"));
 }
+
+#[test]
+fn admin_tuning_applies_live_and_reaches_clients() {
+    let (mut g, _) = setup(MapId::Depot, Mode::Tdm);
+    g.outbox.clear();
+    let out = toon_server::admin::exec(&mut g, "tune m249.rpm 900");
+    assert_eq!(out, "weapons.m249.rpm = 900", "{out}");
+    assert_eq!(g.tuning.weapon(toon_shared::weapons::WeaponId::M249).rpm, 900.0);
+    assert!(g.outbox.iter().any(|(_, m, _)| matches!(m, S2C::Tuning(t) if t.weapons["m249"].rpm == 900.0)));
+    let out = toon_server::admin::exec(&mut g, "tune movement.sprint_speed 999");
+    assert!(out.contains("обмежено"), "{out}");
+    assert_eq!(g.tuning.movement.sprint_speed, 25.0);
+    let out = toon_server::admin::exec(&mut g, "tune sprint_speed 8.5");
+    assert_eq!(out, "movement.sprint_speed = 8.5");
+    let out = toon_server::admin::exec(&mut g, "tune w1200.auto true");
+    assert!(out.ends_with("true"), "{out}");
+    assert!(toon_server::admin::exec(&mut g, "tune m249").contains("Вага"));
+    assert!(toon_server::admin::exec(&mut g, "tune m249.nope 1").contains("Невідомий"));
+    toon_server::admin::exec(&mut g, "tune reset all");
+    assert_eq!(g.tuning.weapon(toon_shared::weapons::WeaponId::M249).rpm, 750.0);
+    // persisted into the config section that `save` writes
+    assert_eq!(g.cfg.tuning["weapons"]["m249"]["rpm"], 750.0);
+}

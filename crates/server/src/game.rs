@@ -59,6 +59,8 @@ pub struct Player {
     pub melee_ready: f64,
     pub last_damage: f64,
     pub last_shot: f64,
+    /// Last time an input had the sprint flag (weapon raise delay).
+    pub last_sprint: f64,
     pub kills: u16,
     pub deaths: u16,
     pub assists: u16,
@@ -110,6 +112,7 @@ impl Player {
             melee_ready: 0.0,
             last_damage: -100.0,
             last_shot: -100.0,
+            last_sprint: -100.0,
             kills: 0,
             deaths: 0,
             assists: 0,
@@ -225,6 +228,8 @@ pub struct Sab {
 
 pub struct Game {
     pub cfg: ServerConfig,
+    /// Live movement/weapon tuning (sent to clients).
+    pub tuning: toon_shared::tuning::Tuning,
     pub map: Map,
     pub world: World,
     pub nav: Nav,
@@ -276,7 +281,9 @@ impl Game {
             dropped_since: 0.0,
             overtime_end: 0.0,
         };
+        let tuning = cfg.tuning();
         let mut g = Game {
+            tuning,
             cfg,
             map,
             world,
@@ -364,6 +371,14 @@ impl Game {
             bomb_timer: self.cfg.sab.bomb_timer,
         }
     }
+    /// Applies new tuning live and pushes it to every client.
+    pub fn set_tuning(&mut self, mut t: toon_shared::tuning::Tuning) {
+        t.finalize();
+        self.cfg.tuning = crate::config::tuning_json(&t);
+        self.tuning = t;
+        self.broadcast(S2C::Tuning(Box::new(self.tuning.clone())));
+    }
+
     pub fn new_ent_id(&mut self) -> u16 {
         self.next_ent = self.next_ent.wrapping_add(1).max(1);
         self.next_ent
@@ -427,6 +442,7 @@ impl Game {
                 settings: self.settings(),
             },
         );
+        self.send(id, S2C::Tuning(Box::new(self.tuning.clone())));
         self.broadcast(S2C::Chat { from: String::new(), team: Team::Spectator, text: format!("{name} приєднався до гри"), team_only: false });
         self.logf(format!("+ {name} ({ip}) підключився як #{id}"));
         Ok(id)
@@ -597,7 +613,8 @@ impl Game {
     pub fn spawn_player(&mut self, id: u8, side_only: bool) {
         let (pos, yaw) = self.pick_spawn(id, side_only);
         let time = self.time;
-        let Some(p) = self.pm(id) else { return };
+        let tuning = &self.tuning;
+        let Some(p) = self.players[id as usize].as_mut() else { return };
         if let Some(l) = p.next_loadout.take() {
             p.loadout = l;
         }
@@ -610,8 +627,8 @@ impl Game {
         p.flags = 0;
         p.slot = 0;
         p.weapons = [
-            WState { id: l.primary, mag: l.primary.def().mag, reserve: l.reserve_for(l.primary) },
-            WState { id: l.secondary, mag: l.secondary.def().mag, reserve: l.reserve_for(l.secondary) },
+            WState { id: l.primary, mag: tuning.weapon(l.primary).mag, reserve: l.reserve_for(l.primary, tuning) },
+            WState { id: l.secondary, mag: tuning.weapon(l.secondary).mag, reserve: l.reserve_for(l.secondary, tuning) },
         ];
         p.grenades = l.grenades();
         p.reload_end = None;
@@ -722,6 +739,9 @@ impl Game {
             return;
         }
         p.flags = inp.flags & (flags::SPRINT | flags::ADS | flags::ON_GROUND | flags::USE);
+        if p.flags & flags::SPRINT != 0 {
+            p.last_sprint = self.time;
+        }
         let new = Vec3::from_array(inp.pos);
         if !new.is_finite() {
             return;
@@ -1026,8 +1046,9 @@ impl Game {
         let time = self.time;
         let mut fell = Vec::new();
         let mut auto_spawn = Vec::new();
+        let tuning = &self.tuning;
+        let max_speed = tuning.max_sprint_speed() * 1.2;
         for p in self.players.iter_mut().flatten() {
-            let max_speed = SPRINT_SPEED * 1.2;
             p.move_budget = (p.move_budget + max_speed * dt).min(3.0);
             p.chat_budget = (p.chat_budget + dt * 0.5).min(5.0);
             if !p.alive {
@@ -1039,13 +1060,13 @@ impl Game {
                 }
                 continue;
             }
-            let def = p.weapon().id.def();
+            let def = tuning.weapon(p.weapon().id);
             p.shot_budget = (p.shot_budget + dt * def.rpm / 60.0).min(2.0);
+            let mag_max = def.mag;
             if let Some(end) = p.reload_end {
                 if time >= end {
-                    let mag_max = p.weapon().id.def().mag;
                     let w = p.weapon_mut();
-                    let take = (mag_max - w.mag).min(w.reserve);
+                    let take = mag_max.saturating_sub(w.mag).min(w.reserve);
                     w.mag += take;
                     w.reserve -= take;
                     p.reload_end = None;

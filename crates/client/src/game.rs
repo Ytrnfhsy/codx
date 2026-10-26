@@ -14,6 +14,7 @@ use toon_shared::protocol::*;
 use toon_shared::ray::ray_player;
 use toon_shared::rng::Rng;
 use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
+use toon_shared::tuning::{Tuning, WeaponStats};
 use toon_shared::{look_dir, maps, wrap_angle, yaw_basis, Mode, Team};
 
 pub struct Remote {
@@ -113,6 +114,16 @@ pub struct GameClient {
     pub switch_until: f64,
     pub ads_t: f32,
     spread_bonus: f32,
+    /// Server-provided movement/weapon tuning.
+    pub tuning: Tuning,
+    /// Consecutive shots in the current burst (recoil build-up).
+    shot_streak: u32,
+    /// Camera climb from recoil that recovers after the burst.
+    recoil_accum: f32,
+    /// When we last stopped sprinting (weapon raise delay).
+    sprint_end: f64,
+    /// Duration of the current weapon raise (for the animation).
+    pub switch_dur: f32,
     pub last_fire: f64,
     pub stamina: f32,
     pub sprinting: bool,
@@ -294,8 +305,13 @@ impl GameClient {
             switch_until: 0.0,
             ads_t: 0.0,
             spread_bonus: 0.0,
+            tuning: Tuning::default(),
+            shot_streak: 0,
+            recoil_accum: 0.0,
+            sprint_end: -10.0,
+            switch_dur: 0.5,
             last_fire: -10.0,
-            stamina: SPRINT_TIME,
+            stamina: Tuning::default().movement.sprint_time,
             sprinting: false,
             grenades: 0,
             cooking: None,
@@ -428,14 +444,17 @@ impl GameClient {
                 self.alive = true;
                 self.loadout = loadout;
                 self.weapons = [
-                    (loadout.primary, loadout.primary.def().mag, loadout.reserve_for(loadout.primary)),
-                    (loadout.secondary, loadout.secondary.def().mag, loadout.reserve_for(loadout.secondary)),
+                    (loadout.primary, self.tuning.weapon(loadout.primary).mag, loadout.reserve_for(loadout.primary, &self.tuning)),
+                    (loadout.secondary, self.tuning.weapon(loadout.secondary).mag, loadout.reserve_for(loadout.secondary, &self.tuning)),
                 ];
                 self.slot = 0;
                 self.grenades = loadout.grenades();
                 self.reload_until = None;
                 self.switch_until = now + 0.3;
+                self.switch_dur = 0.3;
                 self.ads_t = 0.0;
+                self.shot_streak = 0;
+                self.recoil_accum = 0.0;
                 self.stamina = self.sprint_max();
                 self.cooking = None;
                 self.death_info = None;
@@ -573,14 +592,24 @@ impl GameClient {
                 }
             }
             S2C::Ping(ms) => self.net.send_unreliable(C2S::Pong(ms)),
+            S2C::Tuning(mut t) => {
+                t.finalize();
+                if self.tuning.movement != t.movement || self.tuning.weapons != t.weapons {
+                    if self.have_clock {
+                        self.push_chat("Сервер оновив налаштування руху/зброї".into(), crate::ui::MUTED);
+                    }
+                }
+                self.tuning = *t;
+            }
         }
     }
 
     fn sprint_max(&self) -> f32 {
+        let t = self.tuning.movement.sprint_time;
         if self.loadout.perk3 == Perk3::ExtremeConditioning {
-            SPRINT_TIME * 2.0
+            t * 2.0
         } else {
-            SPRINT_TIME
+            t
         }
     }
 
@@ -696,7 +725,7 @@ impl GameClient {
     // ------------------------------------------------------------------ simulation
 
     fn current_spread(&self) -> f32 {
-        let def = self.weapon().def();
+        let def = self.ws();
         let mut hip = def.hip_spread;
         if self.loadout.perk3 == Perk3::SteadyAim {
             hip *= 0.65;
@@ -708,7 +737,7 @@ impl GameClient {
         };
         let base = hip + (def.ads_spread - hip) * self.ads_t;
         let speed = vec2(self.body.vel.x, self.body.vel.z).length();
-        let mv = (speed / WALK_SPEED).min(1.3) * def.move_spread * (1.0 - self.ads_t * 0.8);
+        let mv = (speed / self.tuning.movement.walk_speed).min(1.3) * def.move_spread * (1.0 - self.ads_t * 0.8);
         let air = if self.body.on_ground { 0.0 } else { 3.0 };
         base + mv + air + self.spread_bonus
     }
@@ -722,15 +751,28 @@ impl GameClient {
         self.weapon().def().scoped && self.ads_t > 0.85
     }
 
-    /// Sniper scope sway (radians).
+    /// Stats of the weapon in hand.
+    pub fn ws(&self) -> &WeaponStats {
+        self.tuning.weapon(self.weapon())
+    }
+
+    /// Aim sway while aiming down sights (radians). Heavier/longer guns sway more;
+    /// crouching, lying down and (for scopes) holding breath steady it.
     pub fn sway_offset(&self) -> Vec2 {
-        if !self.weapon().def().scoped || self.ads_t < 0.5 {
+        if self.ads_t < 0.5 || !self.alive {
             return Vec2::ZERO;
         }
-        let holding = is_key_down(KeyCode::LeftShift) && self.breath > 0.0;
-        let k = if holding { 0.08 } else { 1.0 } * if self.body.stance == Stance::Prone { 0.4 } else { 1.0 };
+        let scoped = self.weapon().def().scoped;
+        let holding = scoped && is_key_down(KeyCode::LeftShift) && self.breath > 0.0;
+        let stance = match self.body.stance {
+            Stance::Stand => 1.0,
+            Stance::Crouch => 0.7,
+            Stance::Prone => 0.4,
+        };
+        let base = if scoped { 0.007 } else { 0.0018 };
+        let k = base * self.ws().sway * stance * if holding { 0.08 } else { 1.0 };
         let t = self.now as f32;
-        vec2((t * 0.9).sin() * 0.011 + (t * 2.3).sin() * 0.003, (t * 1.7).sin() * 0.008) * k
+        vec2((t * 0.9).sin() * 1.5 + (t * 2.3).sin() * 0.4, (t * 1.7).sin() * 1.1) * k
     }
 
     pub fn aim_dir(&self) -> Vec3 {
@@ -741,7 +783,10 @@ impl GameClient {
     fn fire(&mut self, audio: &Option<&Audio>) {
         let now = self.now;
         let w = self.weapon();
-        let def = w.def();
+        let def = self.ws().clone();
+        if now - self.last_fire > (def.fire_interval() * 2.5 + 0.05) as f64 {
+            self.shot_streak = 0;
+        }
         self.next_fire = now + def.fire_interval() as f64;
         self.weapons[self.slot as usize].1 -= 1;
         self.last_fire = now;
@@ -777,17 +822,23 @@ impl GameClient {
         }
         self.muzzle_flash = now;
         // recoil
+        // recoil: builds up over a burst (LMGs!), steadier crouched / prone (bipod)
         let ads_k = 1.0 - self.ads_t * 0.45;
-        let crouch_k = match self.body.stance {
+        let stance_k = match self.body.stance {
             Stance::Stand => 1.0,
-            Stance::Crouch => 0.8,
-            Stance::Prone => 0.6,
+            Stance::Crouch => def.crouch_recoil,
+            Stance::Prone => def.prone_recoil,
         };
-        self.pitch += (def.recoil_v * 0.55 * ads_k * crouch_k * self.rng.range(0.8, 1.2)).to_radians();
-        self.yaw += (def.recoil_h * 0.5 * ads_k * self.rng.range(-1.0, 1.0)).to_radians();
-        self.spread_bonus = (self.spread_bonus + def.shot_spread).min(4.0);
-        self.recoil_vis = (self.recoil_vis + 0.5 + def.heft * 0.5).min(1.4);
-        self.shake = (self.shake + def.heft * 0.05).min(0.3);
+        let ramp = def.recoil_scale(self.shot_streak);
+        self.shot_streak += 1;
+        let kick = (def.recoil_v * 0.55 * ads_k * stance_k * ramp * self.rng.range(0.8, 1.2)).to_radians();
+        self.pitch = (self.pitch + kick).min(1.5);
+        self.recoil_accum += kick;
+        self.yaw += (def.recoil_h * 0.5 * ads_k * stance_k * ramp.sqrt() * self.rng.range(-1.0, 1.0)).to_radians();
+        self.spread_bonus = (self.spread_bonus + def.shot_spread).min(6.0);
+        let heft = w.def().heft;
+        self.recoil_vis = (self.recoil_vis + 0.5 + heft * 0.5).min(1.4);
+        self.shake = (self.shake + heft * 0.05).min(0.3);
         if let Some(a) = audio {
             a.play(Sfx::for_weapon(w), 0.85);
         }
@@ -804,7 +855,7 @@ impl GameClient {
 
     fn start_reload(&mut self) {
         let (w, mag, res) = self.weapons[self.slot as usize];
-        let def = w.def();
+        let def = self.tuning.weapon(w);
         if self.reload_until.is_some() || mag >= def.mag || res == 0 {
             return;
         }
@@ -820,7 +871,10 @@ impl GameClient {
         }
         self.slot = slot;
         self.reload_until = None;
-        self.switch_until = self.now + WEAPON_SWITCH_TIME as f64;
+        let swap = self.tuning.weapon(self.weapons[slot as usize].0).swap_time;
+        self.switch_until = self.now + swap as f64;
+        self.switch_dur = swap;
+        self.shot_streak = 0;
         self.ads_t = 0.0;
         self.net.send(C2S::Switch(slot));
     }
@@ -841,14 +895,28 @@ impl GameClient {
         // ---- mouse look
         let md = self.mouse_delta;
         if playing_input {
-            let zoom = 1.0 + (self.weapon().def().ads_zoom - 1.0) * self.ads_t;
+            let zoom = 1.0 + (self.ws().ads_zoom - 1.0) * self.ads_t;
             let sens = settings.sensitivity * 0.0011 / zoom;
             self.yaw -= md.x * sens;
             let dy = md.y * sens * if settings.invert_y { -1.0 } else { 1.0 };
             self.pitch = (self.pitch - dy).clamp(-1.5, 1.5);
-            self.sway = (self.sway + vec2(md.x, md.y) * 0.00035).clamp(Vec2::splat(-0.04), Vec2::splat(0.04));
+            if dy > 0.0 {
+                // pulling down compensates recoil, so less to recover later
+                self.recoil_accum = (self.recoil_accum - dy).max(0.0);
+            }
+            // heavier weapons lag behind the view more
+            let inertia = 0.00025 + self.ws().weight * 0.00004;
+            self.sway = (self.sway + vec2(md.x, md.y) * inertia).clamp(Vec2::splat(-0.05), Vec2::splat(0.05));
         }
-        self.sway *= 1.0 - (dt * 8.0).min(1.0);
+        let settle = 8.0 / (1.0 + self.ws().weight * 0.08);
+        self.sway *= 1.0 - (dt * settle).min(1.0);
+        // aim returns after a burst
+        let ws = self.ws();
+        if self.recoil_accum > 0.0 && now - self.last_fire > (ws.fire_interval() * 1.5) as f64 {
+            let d = self.recoil_accum * (1.0 - (-ws.recoil_recover * dt).exp());
+            self.pitch -= d;
+            self.recoil_accum -= d;
+        }
         self.yaw = wrap_angle(self.yaw);
 
         if !self.team.is_playing() || (!self.alive && self.state != MatchState::PostMatch && self.team == Team::Spectator) {
@@ -859,7 +927,8 @@ impl GameClient {
         let can_act = self.alive && playing_input && !self.frozen();
         let key = |k: KeyCode| can_act && is_key_down(k);
         let pressed = |k: KeyCode| can_act && is_key_pressed(k);
-        let def = self.weapon().def();
+        let def = self.ws().clone();
+        let scoped_weapon = self.weapon().def().scoped;
         if self.alive {
             if pressed(KeyCode::C) {
                 self.want_stance = if self.want_stance == Stance::Crouch { Stance::Stand } else { Stance::Crouch };
@@ -889,19 +958,24 @@ impl GameClient {
             let reloading = self.reload_until.is_some();
             let want_sprint = key(KeyCode::LeftShift) && fwd > 0.0 && self.body.stance == Stance::Stand && !ads_held && self.stamina > 0.0 && now - self.last_fire > 0.2;
             // scoped snipers use Shift to hold breath instead
-            let want_sprint = want_sprint && !(def.scoped && self.ads_t > 0.5);
+            let want_sprint = want_sprint && !(scoped_weapon && self.ads_t > 0.5);
+            if self.sprinting && !want_sprint {
+                self.sprint_end = now;
+            }
             self.sprinting = want_sprint;
             if self.sprinting {
                 self.stamina = (self.stamina - dt).max(0.0);
             } else {
-                self.stamina = (self.stamina + dt * 0.6).min(self.sprint_max());
+                self.stamina = (self.stamina + dt * self.tuning.movement.sprint_recover).min(self.sprint_max());
             }
-            if def.scoped && self.ads_t > 0.5 && is_key_down(KeyCode::LeftShift) {
+            if scoped_weapon && self.ads_t > 0.5 && is_key_down(KeyCode::LeftShift) {
                 self.breath = (self.breath - dt).max(0.0);
             } else {
                 self.breath = (self.breath + dt * 0.5).min(4.0);
             }
-            let ads_ok = ads_held && !self.sprinting && !reloading && now >= self.switch_until && now >= self.melee_until;
+            // after sprinting the weapon has to come back up first (longer for heavy guns)
+            let raising = now - self.sprint_end < def.sprint_out_time as f64;
+            let ads_ok = ads_held && !self.sprinting && !raising && !reloading && now >= self.switch_until && now >= self.melee_until;
             let speed = 1.0 / def.ads_time.max(0.05);
             self.ads_t = if ads_ok { (self.ads_t + dt * speed).min(1.0) } else { (self.ads_t - dt * speed * 1.5).max(0.0) };
 
@@ -914,11 +988,13 @@ impl GameClient {
                 ads: self.ads_t > 0.5,
                 want_stance: self.want_stance,
                 speed_mult: def.move_mult,
+                sprint_mult: def.sprint_mult,
+                weight: def.weight,
             };
             let mut t = dt.min(0.1);
             while t > 0.0 {
                 let h = t.min(1.0 / 60.0);
-                self.body.step(&self.world, &inp, h);
+                self.body.step(&self.world, &inp, &self.tuning.movement, h);
                 t -= h;
             }
             if self.body.stance != self.want_stance && self.want_stance == Stance::Stand {
@@ -926,7 +1002,7 @@ impl GameClient {
             }
             // footsteps & bob
             let hs = vec2(self.body.vel.x, self.body.vel.z).length();
-            self.walk_amount += ((hs / WALK_SPEED).min(1.5) - self.walk_amount) * (dt * 8.0).min(1.0);
+            self.walk_amount += ((hs / self.tuning.movement.walk_speed).min(1.5) - self.walk_amount) * (dt * 8.0).min(1.0);
             self.bob_phase += hs * dt * 1.8;
             if self.body.on_ground && hs > 1.5 && self.body.stance == Stance::Stand {
                 self.step_acc += hs * dt;
@@ -939,13 +1015,13 @@ impl GameClient {
             }
 
             // ---- weapon actions
-            self.spread_bonus = (self.spread_bonus - dt * 8.0).max(0.0);
+            self.spread_bonus = (self.spread_bonus - dt * def.spread_recover).max(0.0);
             self.recoil_vis = (self.recoil_vis - dt * 7.0).max(0.0);
             if let Some((end, _)) = self.reload_until {
                 if now >= end {
                     let s = self.slot as usize;
-                    let m = self.weapons[s].0.def().mag;
-                    let take = (m - self.weapons[s].1).min(self.weapons[s].2);
+                    let m = self.tuning.weapon(self.weapons[s].0).mag;
+                    let take = m.saturating_sub(self.weapons[s].1).min(self.weapons[s].2);
                     self.weapons[s].1 += take;
                     self.weapons[s].2 -= take;
                     self.reload_until = None;
@@ -974,7 +1050,8 @@ impl GameClient {
             let trig_pressed = trig_down && !self.trigger_was_down;
             self.trigger_was_down = trig_down;
             let trigger = if def.auto { trig_down } else { trig_pressed };
-            let busy = self.reload_until.is_some() || now < self.switch_until || now < self.melee_until || now < self.throw_until || self.sprinting || self.cooking.is_some();
+            let raising = now - self.sprint_end < def.sprint_out_time as f64;
+            let busy = self.reload_until.is_some() || now < self.switch_until || now < self.melee_until || now < self.throw_until || self.sprinting || raising || self.cooking.is_some();
             if trigger && !busy && now >= self.next_fire {
                 let (_, mag, res) = self.weapons[self.slot as usize];
                 if mag > 0 {
@@ -1146,6 +1223,7 @@ impl GameClient {
 
     fn update_remotes(&mut self, dt: f32, audio: Option<&Audio>) {
         let rt = self.render_time();
+        let walk_speed = self.tuning.movement.walk_speed;
         let now = self.now;
         let listener = self.eye();
         for r in self.remotes.values_mut() {
@@ -1192,7 +1270,7 @@ impl GameClient {
             }
             if !teleport && dt > 0.0 {
                 let speed = moved / dt;
-                r.walk += ((speed / WALK_SPEED).min(1.4) - r.walk) * (dt * 10.0).min(1.0);
+                r.walk += ((speed / walk_speed).min(1.4) - r.walk) * (dt * 10.0).min(1.0);
                 r.phase += moved * 2.2;
                 if r.alive && !r.silent && r.flags & flags::ON_GROUND != 0 && r.stance == Stance::Stand && speed > 2.0 {
                     r.step_acc += moved;

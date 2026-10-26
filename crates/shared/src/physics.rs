@@ -3,6 +3,7 @@
 
 use crate::consts::*;
 use crate::map::Map;
+use crate::tuning::MoveTuning;
 use crate::yaw_basis;
 use glam::{vec3, Vec3};
 use serde::{Deserialize, Serialize};
@@ -193,8 +194,12 @@ pub struct MoveInput {
     pub sprint: bool,
     pub ads: bool,
     pub want_stance: Stance,
-    /// Weapon speed multiplier.
+    /// Weapon movement speed multiplier (0 = 1.0).
     pub speed_mult: f32,
+    /// Weapon sprint speed multiplier (0 = 1.0).
+    pub sprint_mult: f32,
+    /// Weight of the carried weapon in kg (adds inertia).
+    pub weight: f32,
 }
 
 pub fn body_box(pos: Vec3, h: f32) -> Aabb {
@@ -209,19 +214,24 @@ pub fn fits(world: &World, pos: Vec3, stance: Stance) -> bool {
 }
 
 impl Body {
-    pub fn max_speed(&self, inp: &MoveInput) -> f32 {
+    pub fn is_sprinting(&self, inp: &MoveInput) -> bool {
+        self.stance == Stance::Stand && inp.sprint && !inp.ads && inp.forward > 0.1
+    }
+
+    pub fn max_speed(&self, inp: &MoveInput, t: &MoveTuning) -> f32 {
+        let or1 = |v: f32| if v > 0.0 { v } else { 1.0 };
         let base = match self.stance {
-            Stance::Stand if inp.sprint && !inp.ads && inp.forward > 0.1 => SPRINT_SPEED,
-            Stance::Stand => WALK_SPEED,
-            Stance::Crouch => CROUCH_SPEED,
-            Stance::Prone => PRONE_SPEED,
+            Stance::Stand if self.is_sprinting(inp) => t.sprint_speed * or1(inp.sprint_mult),
+            Stance::Stand => t.walk_speed,
+            Stance::Crouch => t.crouch_speed,
+            Stance::Prone => t.prone_speed,
         };
-        let ads = if inp.ads { ADS_SPEED_MULT } else { 1.0 };
-        base * ads * if inp.speed_mult > 0.0 { inp.speed_mult } else { 1.0 }
+        let ads = if inp.ads { t.ads_speed_mult } else { 1.0 };
+        base * ads * or1(inp.speed_mult)
     }
 
     /// Advances the body by `dt` seconds.
-    pub fn step(&mut self, world: &World, inp: &MoveInput, dt: f32) {
+    pub fn step(&mut self, world: &World, inp: &MoveInput, t: &MoveTuning, dt: f32) {
         // stance changes (need head room to stand up)
         if inp.want_stance != self.stance {
             let ok = inp.want_stance.height() <= self.stance.height() || fits(world, self.pos, inp.want_stance);
@@ -233,23 +243,44 @@ impl Body {
         }
 
         let (fwd, right) = yaw_basis(inp.yaw);
-        let mut wish = fwd * inp.forward + right * inp.right;
-        if wish.length_squared() > 1.0 {
-            wish = wish.normalize();
+        let mut f = inp.forward;
+        let mut r = inp.right;
+        let len = (f * f + r * r).sqrt();
+        if len > 1.0 {
+            f /= len;
+            r /= len;
         }
-        let wish = wish * self.max_speed(inp);
+        // moving backwards / sideways is slower than forwards
+        let dir_mult = if len > 0.0 {
+            let fm = if f < 0.0 { t.backpedal_mult } else { 1.0 };
+            (f * f * fm + r * r * t.strafe_mult) / (f * f + r * r)
+        } else {
+            1.0
+        };
+        let wish = (fwd * f + right * r) * self.max_speed(inp, t) * dir_mult;
 
         let hv = vec3(self.vel.x, 0.0, self.vel.z);
         let new_hv = if self.on_ground {
-            approach(hv, wish, GROUND_ACCEL * dt)
+            // heavier weapons = more inertia (slower to speed up and to stop)
+            let inertia = 1.0 + inp.weight.max(0.0) * t.weight_inertia;
+            let speeding_up = wish.length() > hv.length() + 0.01 && wish.dot(hv) >= 0.0;
+            let rate = if !speeding_up {
+                t.ground_decel / inertia.sqrt()
+            } else if hv.length() >= t.walk_speed * 0.98 {
+                // building up from walk to full sprint takes a moment
+                t.sprint_accel / inertia
+            } else {
+                t.ground_accel / inertia
+            };
+            approach(hv, wish, rate * dt)
         } else {
-            approach(hv, wish, AIR_ACCEL * dt)
+            approach(hv, wish, t.air_accel * dt)
         };
         self.vel.x = new_hv.x;
         self.vel.z = new_hv.z;
 
         if inp.jump && self.on_ground && self.stance == Stance::Stand {
-            self.vel.y = JUMP_SPEED;
+            self.vel.y = t.jump_speed;
             self.on_ground = false;
         } else if inp.jump && self.on_ground && self.stance != Stance::Stand {
             // jump key stands you up like in CoD
@@ -257,7 +288,7 @@ impl Body {
                 self.stance = Stance::Stand;
             }
         }
-        self.vel.y -= GRAVITY * dt;
+        self.vel.y -= t.gravity * dt;
         self.vel.y = self.vel.y.max(-40.0);
 
         let delta = self.vel * dt;
@@ -368,6 +399,44 @@ mod tests {
     use super::*;
     use crate::map::MapId;
     use crate::maps;
+    use glam::vec2;
+
+    fn mt() -> MoveTuning {
+        MoveTuning::default()
+    }
+
+    #[test]
+    fn heavy_weapon_accelerates_slower_and_sprints_slower() {
+        let (_, w) = world();
+        let run = |weight: f32, sprint_mult: f32| {
+            let mut b = Body { pos: vec3(0.0, 0.0, 20.0), on_ground: true, ..Default::default() };
+            let inp = MoveInput { forward: 1.0, sprint: true, weight, sprint_mult, ..Default::default() };
+            let mut d02 = 0.0;
+            for i in 0..90 {
+                b.step(&w, &inp, &mt(), 1.0 / 60.0);
+                if i == 11 {
+                    d02 = 20.0 - b.pos.z;
+                }
+            }
+            (d02, vec2(b.vel.x, b.vel.z).length())
+        };
+        let (smg_early, smg_top) = run(2.7, 1.0);
+        let (lmg_early, lmg_top) = run(8.0, 0.84);
+        assert!(lmg_early < smg_early, "{lmg_early} vs {smg_early}");
+        assert!(lmg_top < smg_top - 0.5, "{lmg_top} vs {smg_top}");
+    }
+
+    #[test]
+    fn backpedal_is_slower() {
+        let (_, w) = world();
+        let mut a = Body { pos: vec3(0.0, 0.0, 20.0), on_ground: true, ..Default::default() };
+        let mut b = a;
+        for _ in 0..60 {
+            a.step(&w, &MoveInput { forward: 1.0, ..Default::default() }, &mt(), 1.0 / 60.0);
+            b.step(&w, &MoveInput { forward: -1.0, ..Default::default() }, &mt(), 1.0 / 60.0);
+        }
+        assert!(b.vel.length() < a.vel.length());
+    }
 
     fn world() -> (Map, World) {
         let m = maps::build(MapId::Depot);
@@ -377,7 +446,7 @@ mod tests {
 
     fn settle(w: &World, b: &mut Body) {
         for _ in 0..60 {
-            b.step(w, &MoveInput { yaw: 0.0, ..Default::default() }, 1.0 / 60.0);
+            b.step(w, &MoveInput { yaw: 0.0, ..Default::default() }, &mt(), 1.0 / 60.0);
         }
     }
 
@@ -391,10 +460,10 @@ mod tests {
         let start = b.pos;
         let inp = MoveInput { forward: 1.0, yaw: 0.0, ..Default::default() };
         for _ in 0..60 {
-            b.step(&w, &inp, 1.0 / 60.0);
+            b.step(&w, &inp, &mt(), 1.0 / 60.0);
         }
         let moved = start.z - b.pos.z;
-        assert!(moved > 4.0 && moved < WALK_SPEED + 0.1, "moved {moved}");
+        assert!(moved > 4.0 && moved < mt().walk_speed + 0.1, "moved {moved}");
     }
 
     #[test]
@@ -405,7 +474,7 @@ mod tests {
         settle(&w, &mut b);
         let inp = MoveInput { forward: 1.0, yaw: std::f32::consts::FRAC_PI_2, ..Default::default() };
         for _ in 0..120 {
-            b.step(&w, &inp, 1.0 / 60.0);
+            b.step(&w, &inp, &mt(), 1.0 / 60.0);
         }
         assert!(b.pos.x >= -40.0 + PLAYER_RADIUS - 0.01, "x={}", b.pos.x);
     }
@@ -418,13 +487,13 @@ mod tests {
         settle(&w, &mut b);
         let inp = MoveInput { forward: 1.0, yaw: 0.0, ..Default::default() };
         for _ in 0..150 {
-            b.step(&w, &inp, 1.0 / 60.0);
+            b.step(&w, &inp, &mt(), 1.0 / 60.0);
         }
         assert!(b.pos.y > 3.0, "y={} z={}", b.pos.y, b.pos.z);
         // step west off the top onto the floor
         let inp = MoveInput { forward: 1.0, yaw: std::f32::consts::FRAC_PI_2, ..Default::default() };
         for _ in 0..60 {
-            b.step(&w, &inp, 1.0 / 60.0);
+            b.step(&w, &inp, &mt(), 1.0 / 60.0);
         }
         assert!(b.pos.y > 3.3 && b.pos.x < 29.0, "pos={:?}", b.pos);
     }
@@ -434,11 +503,11 @@ mod tests {
         let (_, w) = world();
         let mut b = Body { pos: vec3(0.0, 0.0, 20.0), ..Default::default() };
         settle(&w, &mut b);
-        b.step(&w, &MoveInput { jump: true, ..Default::default() }, 1.0 / 60.0);
+        b.step(&w, &MoveInput { jump: true, ..Default::default() }, &mt(), 1.0 / 60.0);
         assert!(!b.on_ground);
         let mut peak: f32 = 0.0;
         for _ in 0..120 {
-            b.step(&w, &MoveInput::default(), 1.0 / 60.0);
+            b.step(&w, &MoveInput::default(), &mt(), 1.0 / 60.0);
             peak = peak.max(b.pos.y);
         }
         assert!(b.on_ground && peak > 0.9 && peak < 1.3, "peak {peak}");
@@ -449,9 +518,9 @@ mod tests {
         let (_, w) = world();
         let mut b = Body { pos: vec3(0.0, 0.0, 20.0), ..Default::default() };
         settle(&w, &mut b);
-        b.step(&w, &MoveInput { want_stance: Stance::Prone, ..Default::default() }, 1.0 / 60.0);
+        b.step(&w, &MoveInput { want_stance: Stance::Prone, ..Default::default() }, &mt(), 1.0 / 60.0);
         assert_eq!(b.stance, Stance::Prone);
-        b.step(&w, &MoveInput { want_stance: Stance::Stand, ..Default::default() }, 1.0 / 60.0);
+        b.step(&w, &MoveInput { want_stance: Stance::Stand, ..Default::default() }, &mt(), 1.0 / 60.0);
         assert_eq!(b.stance, Stance::Stand);
     }
 

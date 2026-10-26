@@ -449,7 +449,8 @@ impl GameClient {
         let x = w - 300.0;
         let y = h - 120.0;
         draw_rectangle(x - 10.0, y - 10.0, 300.0, 110.0, Color::new(0.0, 0.0, 0.0, 0.35));
-        let mag_c = if mag == 0 { BAD } else if (mag as f32) < def.mag as f32 * 0.3 { ACCENT } else { TEXT };
+        let mag_max = self.tuning.weapon(wid).mag;
+        let mag_c = if mag == 0 { BAD } else if (mag as f32) < mag_max as f32 * 0.3 { ACCENT } else { TEXT };
         ui.shadowed(&format!("{mag}"), x, y + 42.0, 46, mag_c);
         let mw = ui.width(&format!("{mag}"), 46, true);
         ui.shadowed(&format!("/ {res}"), x + mw + 8.0, y + 42.0, 24, MUTED);
@@ -602,10 +603,17 @@ impl GameClient {
                     ui.bold(a, dx, y + 140.0 + k as f32 * 50.0, 18, TEXT);
                     ui.text(b, dx, y + 160.0 + k as f32 * 50.0, 15, MUTED);
                 }
-                let d = l.primary.def();
-                let stats = [("Урон", d.damage_max / 100.0), ("Скорострільність", d.rpm / 1000.0), ("Дальність", d.range_far / 100.0), ("Мобільність", d.move_mult)];
+                let d = self.tuning.weapon(l.primary).clone();
+                let stats = [
+                    ("Урон", d.damage_max / 100.0),
+                    ("Скорострільність", d.rpm / 1000.0),
+                    ("Дальність", d.range_far / 100.0),
+                    ("Контроль віддачі", 1.0 - (d.recoil_v * d.recoil_max_ramp / 6.0)),
+                    ("Мобільність", (d.move_mult - 0.6) / 0.45),
+                ];
+                ui.text(&format!("Вага {:.1} кг · приціл {:.2} с · магазин {}", d.weight, d.ads_time, d.mag), dx, y + 388.0, 14, TEXT);
                 for (k, (label, v)) in stats.iter().enumerate() {
-                    let sy = y + 400.0 + k as f32 * 20.0;
+                    let sy = y + 408.0 + k as f32 * 18.0;
                     ui.text(label, dx, sy, 14, MUTED);
                     draw_rectangle(dx + 140.0, sy - 10.0, 200.0, 10.0, Color::new(0.0, 0.0, 0.0, 0.5));
                     draw_rectangle(dx + 140.0, sy - 10.0, 200.0 * v.clamp(0.0, 1.0), 10.0, ACCENT);

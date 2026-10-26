@@ -9,6 +9,7 @@ pub mod physics;
 pub mod protocol;
 pub mod ray;
 pub mod rng;
+pub mod tuning;
 pub mod weapons;
 
 pub use glam::{vec2, vec3, Vec2, Vec3};

@@ -70,7 +70,7 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
     let aspect = screen_width() / screen_height().max(1.0);
     let hfov = settings.fov.clamp(60.0, 120.0).to_radians();
     let mut fovy = 2.0 * ((hfov * 0.5).tan() / aspect).atan();
-    let zoom = 1.0 + (g.weapon().def().ads_zoom - 1.0) * g.ads_t;
+    let zoom = 1.0 + (g.ws().ads_zoom - 1.0) * g.ads_t;
     let zoom = if g.weapon().def().scoped && !g.scoped() { 1.0 + (zoom - 1.0) * 0.25 } else { zoom };
     if g.alive {
         fovy = 2.0 * ((fovy * 0.5).tan() / zoom).atan();
@@ -260,7 +260,7 @@ pub fn render_viewmodel(g: &mut GameClient, mats: &Materials, settings: &Setting
     let mut yaw = 0.0f32;
     let mut roll = 0.0f32;
     // bob & sway
-    let bob_k = g.walk_amount * (1.0 - ads * 0.85);
+    let bob_k = g.walk_amount * (1.0 - ads * 0.85) * g.tuning.movement.view_bob;
     pos += vec3(g.bob_phase.sin() * 0.012, -(g.bob_phase.cos().abs()) * 0.016, 0.0) * bob_k;
     pos += vec3(-g.sway.x, g.sway.y, 0.0) * (1.0 - ads * 0.7);
     // recoil
@@ -283,7 +283,7 @@ pub fn render_viewmodel(g: &mut GameClient, mats: &Materials, settings: &Setting
     }
     // weapon switch
     if now < g.switch_until {
-        let k = ((g.switch_until - now) as f32 / toon_shared::consts::WEAPON_SWITCH_TIME).clamp(0.0, 1.0);
+        let k = ((g.switch_until - now) as f32 / g.switch_dur.max(0.05)).clamp(0.0, 1.0);
         pos.y -= k * 0.35;
         pitch -= k * 0.8;
     }

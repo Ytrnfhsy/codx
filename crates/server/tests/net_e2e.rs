@@ -79,6 +79,7 @@ fn join_move_and_shoot_over_udp() {
     let mut fired = false;
     let mut state = MatchState::Warmup;
     let mut walked = 0.0f32;
+    let mut tuning: Option<toon_shared::tuning::Tuning> = None;
     let mut ammo_after_fire = None;
     let t0 = Instant::now();
     while t0.elapsed() < Duration::from_secs(20) {
@@ -106,6 +107,10 @@ fn join_move_and_shoot_over_udp() {
                         ammo_after_fire = Some(s.me.ammo[0].0);
                     }
                 }
+                S2C::Tuning(mut t) => {
+                    t.finalize();
+                    tuning = Some(*t);
+                }
                 S2C::Ping(ms) => c.chan.send_unreliable(&C2S::Pong(ms)),
                 S2C::Reject(r) => panic!("rejected: {r}"),
                 _ => {}
@@ -118,9 +123,19 @@ fn join_move_and_shoot_over_udp() {
             if walking {
                 walked += 1.0 / 30.0;
             }
-            let inp = MoveInput { forward: if walking { 1.0 } else { 0.0 }, yaw: *yaw, want_stance: Stance::Stand, speed_mult: 0.96, ..Default::default() };
+            let t = tuning.as_ref().expect("server sends tuning before spawning us");
+            let ws = t.weapon(DEFAULT_CLASSES[0].1.primary);
+            let inp = MoveInput {
+                forward: if walking { 1.0 } else { 0.0 },
+                yaw: *yaw,
+                want_stance: Stance::Stand,
+                speed_mult: ws.move_mult,
+                sprint_mult: ws.sprint_mult,
+                weight: ws.weight,
+                ..Default::default()
+            };
             for _ in 0..2 {
-                body.step(&world, &inp, 1.0 / 60.0);
+                body.step(&world, &inp, &t.movement, 1.0 / 60.0);
             }
             seq += 1;
             c.chan.send_unreliable(&C2S::Input(InputState {

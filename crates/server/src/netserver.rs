@@ -43,6 +43,12 @@ pub fn info_json(g: &Game) -> serde_json::Value {
 }
 
 pub fn state_json(g: &Game) -> serde_json::Value {
+    let mut v = state_json_raw(g);
+    crate::config::round_json(&mut v);
+    v
+}
+
+fn state_json_raw(g: &Game) -> serde_json::Value {
     let players: Vec<_> = g
         .players
         .iter()
@@ -77,6 +83,12 @@ pub fn state_json(g: &Game) -> serde_json::Value {
         "rotation_idx": g.rotation_idx,
         "bans": g.bans.list,
         "log": g.log.iter().rev().take(150).collect::<Vec<_>>(),
+        "tuning": g.tuning,
+        "tuning_fields": {
+            "movement": toon_shared::tuning::MoveTuning::FIELDS,
+            "weapon": toon_shared::tuning::WeaponStats::FIELDS,
+        },
+        "weapon_names": toon_shared::weapons::WeaponId::all().map(|w| (w.key(), w.def().name)).collect::<Vec<_>>(),
     })
 }
 

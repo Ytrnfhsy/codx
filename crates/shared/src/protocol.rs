@@ -193,6 +193,8 @@ pub enum S2C {
     RoundEnd { winner: Option<Team>, text: String },
     BombEvent { text: String },
     RconReply(String),
+    /// Server gameplay tuning (sent after `Welcome` and whenever an admin changes it).
+    Tuning(Box<crate::tuning::Tuning>),
     /// Latency probe; the client answers with `C2S::Pong`.
     Ping(u32),
 }

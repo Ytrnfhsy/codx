@@ -108,7 +108,8 @@ impl Game {
         let mut yaw = me.yaw;
         let mut pitch = me.pitch;
         let weapon = me.weapon().id;
-        let def = weapon.def();
+        let class = weapon.def().class;
+        let def = self.tuning.weapon(weapon).clone();
         let mag = me.weapon().mag;
         let reserve = me.weapon().reserve;
         let reloading = me.reload_end.is_some();
@@ -197,9 +198,9 @@ impl Game {
         let mut fire_dirs: Option<Vec<Vec3>> = None;
         let reaction = (0.6 - 0.4 * skill) as f64;
         if let Some((_, _, _, _)) = target {
-            ads = dist_to_target > 14.0 && def.class != WeaponClass::Shotgun;
+            ads = dist_to_target > 14.0 && class != WeaponClass::Shotgun;
             let tol = 0.05 + 0.8 / dist_to_target.max(1.0);
-            let in_range = def.class != WeaponClass::Shotgun || dist_to_target < 20.0;
+            let in_range = class != WeaponClass::Shotgun || dist_to_target < 20.0;
             if time - bot.seen_at > reaction && aim_err_angle < tol && mag > 0 && !reloading && in_range {
                 let can = if def.auto {
                     if time > bot.burst_until && time > bot.pause_until {
@@ -244,14 +245,14 @@ impl Game {
             }
             let (f, r) = yaw_basis(yaw);
             move_dir = r * bot.strafe;
-            if def.class == WeaponClass::Shotgun || def.class == WeaponClass::Smg {
+            if class == WeaponClass::Shotgun || class == WeaponClass::Smg {
                 if dist_to_target > 6.0 {
                     move_dir += f * 0.8;
                 }
             } else if dist_to_target < 5.0 {
                 move_dir -= f * 0.6;
             }
-            if matches!(def.class, WeaponClass::Lmg | WeaponClass::Sniper) && dist_to_target > 20.0 {
+            if matches!(class, WeaponClass::Lmg | WeaponClass::Sniper) && dist_to_target > 20.0 {
                 stance = Stance::Crouch;
                 move_dir *= 0.3;
             }
@@ -331,14 +332,17 @@ impl Game {
             ads,
             want_stance: stance,
             speed_mult: def.move_mult,
+            sprint_mult: def.sprint_mult,
+            weight: def.weight,
         };
 
         // apply
         let world = &self.world;
+        let mt = &self.tuning.movement;
         let p = self.players[id as usize].as_mut().unwrap();
         p.yaw = yaw;
         p.pitch = pitch.clamp(-1.4, 1.4);
-        p.body.step(world, &inp, dt);
+        p.body.step(world, &inp, mt, dt);
         let mut fl = 0;
         if p.body.on_ground {
             fl |= flags::ON_GROUND;

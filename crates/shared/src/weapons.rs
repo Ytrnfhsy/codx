@@ -136,11 +136,11 @@ macro_rules! w {
 
 pub static WEAPONS: [WeaponDef; 15] = [
     w!(M4, "M4A1", Rifle, dmg 30.0 => 20.0, range 30.0 => 60.0, rpm 750.0, auto true, mag 30, res 120, reload 2.2, pellets 1,
-       spread 3.0, 0.15, 2.0, 0.35, ads 0.22, recoil 0.7, 0.35, speed 0.96, zoom 1.35, head 1.4, scoped false, heft 0.5),
+       spread 3.0, 0.15, 2.0, 0.35, ads 0.22, recoil 0.7, 0.35, speed 0.94, zoom 1.35, head 1.4, scoped false, heft 0.5),
     w!(Ak47, "AK-47", Rifle, dmg 40.0 => 30.0, range 25.0 => 55.0, rpm 600.0, auto true, mag 30, res 120, reload 2.4, pellets 1,
-       spread 3.2, 0.2, 2.0, 0.45, ads 0.24, recoil 1.1, 0.5, speed 0.95, zoom 1.35, head 1.4, scoped false, heft 0.65),
+       spread 3.2, 0.2, 2.0, 0.45, ads 0.25, recoil 1.1, 0.5, speed 0.93, zoom 1.35, head 1.4, scoped false, heft 0.65),
     w!(G3, "G3", Rifle, dmg 40.0 => 30.0, range 40.0 => 70.0, rpm 500.0, auto false, mag 20, res 100, reload 2.3, pellets 1,
-       spread 3.2, 0.1, 2.0, 0.6, ads 0.24, recoil 1.4, 0.4, speed 0.95, zoom 1.4, head 1.4, scoped false, heft 0.7),
+       spread 3.2, 0.1, 2.0, 0.6, ads 0.27, recoil 1.4, 0.4, speed 0.92, zoom 1.4, head 1.4, scoped false, heft 0.7),
     w!(Mp5, "MP5", Smg, dmg 40.0 => 20.0, range 12.0 => 30.0, rpm 800.0, auto true, mag 30, res 120, reload 2.0, pellets 1,
        spread 2.2, 0.35, 1.0, 0.3, ads 0.18, recoil 0.6, 0.35, speed 1.0, zoom 1.25, head 1.4, scoped false, heft 0.35),
     w!(P90, "P90", Smg, dmg 40.0 => 20.0, range 12.0 => 30.0, rpm 900.0, auto true, mag 50, res 150, reload 2.6, pellets 1,
@@ -148,17 +148,17 @@ pub static WEAPONS: [WeaponDef; 15] = [
     w!(Ak74u, "AK-74u", Smg, dmg 40.0 => 30.0, range 12.0 => 30.0, rpm 700.0, auto true, mag 30, res 120, reload 2.2, pellets 1,
        spread 2.3, 0.35, 1.0, 0.35, ads 0.2, recoil 0.85, 0.45, speed 1.0, zoom 1.25, head 1.4, scoped false, heft 0.45),
     w!(M249, "M249 SAW", Lmg, dmg 30.0 => 20.0, range 40.0 => 70.0, rpm 750.0, auto true, mag 100, res 200, reload 6.0, pellets 1,
-       spread 4.5, 0.3, 3.0, 0.3, ads 0.35, recoil 0.75, 0.45, speed 0.85, zoom 1.3, head 1.4, scoped false, heft 0.7),
+       spread 4.5, 0.3, 3.0, 0.3, ads 0.45, recoil 0.75, 0.45, speed 0.8, zoom 1.3, head 1.4, scoped false, heft 0.7),
     w!(Rpd, "RPD", Lmg, dmg 40.0 => 30.0, range 40.0 => 70.0, rpm 600.0, auto true, mag 100, res 200, reload 6.5, pellets 1,
-       spread 4.5, 0.35, 3.0, 0.4, ads 0.35, recoil 1.0, 0.55, speed 0.85, zoom 1.3, head 1.4, scoped false, heft 0.8),
+       spread 4.5, 0.35, 3.0, 0.4, ads 0.45, recoil 1.0, 0.55, speed 0.8, zoom 1.3, head 1.4, scoped false, heft 0.8),
     w!(W1200, "W1200", Shotgun, dmg 40.0 => 10.0, range 6.0 => 18.0, rpm 75.0, auto false, mag 7, res 28, reload 3.0, pellets 8,
-       spread 4.5, 3.5, 1.0, 0.0, ads 0.25, recoil 3.5, 1.0, speed 1.0, zoom 1.15, head 1.0, scoped false, heft 1.0),
+       spread 4.5, 3.5, 1.0, 0.0, ads 0.25, recoil 3.5, 1.0, speed 0.95, zoom 1.15, head 1.0, scoped false, heft 1.0),
     w!(M1014, "M1014", Shotgun, dmg 30.0 => 10.0, range 6.0 => 16.0, rpm 210.0, auto false, mag 4, res 24, reload 2.7, pellets 6,
-       spread 4.5, 3.5, 1.0, 0.5, ads 0.25, recoil 2.6, 0.9, speed 1.0, zoom 1.15, head 1.0, scoped false, heft 0.95),
+       spread 4.5, 3.5, 1.0, 0.5, ads 0.25, recoil 2.6, 0.9, speed 0.95, zoom 1.15, head 1.0, scoped false, heft 0.95),
     w!(M40, "M40A3", Sniper, dmg 98.0 => 98.0, range 500.0 => 600.0, rpm 50.0, auto false, mag 5, res 20, reload 3.0, pellets 1,
-       spread 7.0, 0.0, 6.0, 0.0, ads 0.35, recoil 4.0, 0.8, speed 0.95, zoom 4.0, head 1.5, scoped true, heft 0.95),
+       spread 7.0, 0.0, 6.0, 0.0, ads 0.4, recoil 4.0, 0.8, speed 0.9, zoom 4.0, head 1.5, scoped true, heft 0.95),
     w!(R700, "R700", Sniper, dmg 98.0 => 98.0, range 500.0 => 600.0, rpm 48.0, auto false, mag 4, res 16, reload 3.2, pellets 1,
-       spread 7.0, 0.0, 6.0, 0.0, ads 0.35, recoil 4.2, 0.8, speed 0.95, zoom 4.0, head 1.5, scoped true, heft 0.95),
+       spread 7.0, 0.0, 6.0, 0.0, ads 0.4, recoil 4.2, 0.8, speed 0.9, zoom 4.0, head 1.5, scoped true, heft 0.95),
     w!(M9, "M9", Pistol, dmg 40.0 => 20.0, range 10.0 => 25.0, rpm 400.0, auto false, mag 15, res 45, reload 1.6, pellets 1,
        spread 2.4, 0.3, 1.0, 0.5, ads 0.14, recoil 1.0, 0.4, speed 1.05, zoom 1.2, head 1.4, scoped false, heft 0.2),
     w!(Usp, "USP .45", Pistol, dmg 40.0 => 30.0, range 10.0 => 25.0, rpm 360.0, auto false, mag 12, res 36, reload 1.6, pellets 1,
@@ -168,6 +168,30 @@ pub static WEAPONS: [WeaponDef; 15] = [
 ];
 
 impl WeaponId {
+    /// Short stable key used in configs and admin commands (e.g. "m249").
+    pub fn key(self) -> &'static str {
+        match self {
+            WeaponId::M4 => "m4",
+            WeaponId::Ak47 => "ak47",
+            WeaponId::G3 => "g3",
+            WeaponId::Mp5 => "mp5",
+            WeaponId::P90 => "p90",
+            WeaponId::Ak74u => "ak74u",
+            WeaponId::M249 => "m249",
+            WeaponId::Rpd => "rpd",
+            WeaponId::W1200 => "w1200",
+            WeaponId::M1014 => "m1014",
+            WeaponId::M40 => "m40",
+            WeaponId::R700 => "r700",
+            WeaponId::M9 => "m9",
+            WeaponId::Usp => "usp",
+            WeaponId::Deagle => "deagle",
+        }
+    }
+    pub fn from_key(k: &str) -> Option<WeaponId> {
+        let k = k.to_ascii_lowercase();
+        WeaponId::all().find(|w| w.key() == k)
+    }
     pub fn def(self) -> &'static WeaponDef {
         &WEAPONS[self as usize]
     }
@@ -300,8 +324,8 @@ impl Loadout {
             1
         }
     }
-    pub fn reserve_for(&self, w: WeaponId) -> u16 {
-        let base = w.def().reserve;
+    pub fn reserve_for(&self, w: WeaponId, t: &crate::tuning::Tuning) -> u16 {
+        let base = t.weapon(w).reserve;
         if self.perk1 == Perk1::Bandolier {
             base + base / 2
         } else {

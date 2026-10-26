@@ -9,7 +9,7 @@ pub const INTERP_DELAY: f32 = 0.1;
 pub const MAX_REWIND: f32 = 0.35;
 
 pub const DEFAULT_PORT: u16 = 27015;
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 /// Prefix of a connectionless server info query.
 pub const QUERY_MAGIC: &[u8; 4] = b"TWQ?";
 pub const QUERY_REPLY_MAGIC: &[u8; 4] = b"TWQ!";
@@ -23,18 +23,9 @@ pub const STAND_EYE: f32 = 1.62;
 pub const CROUCH_EYE: f32 = 1.06;
 pub const PRONE_EYE: f32 = 0.38;
 
-pub const WALK_SPEED: f32 = 5.2;
-pub const SPRINT_SPEED: f32 = 7.9;
-pub const CROUCH_SPEED: f32 = 2.7;
-pub const PRONE_SPEED: f32 = 1.1;
-pub const ADS_SPEED_MULT: f32 = 0.6;
-pub const GROUND_ACCEL: f32 = 55.0;
-pub const AIR_ACCEL: f32 = 6.0;
-pub const GRAVITY: f32 = 20.0;
-pub const JUMP_SPEED: f32 = 6.6;
+// Movement speeds, acceleration, gravity, sprint and weapon handling live in
+// `tuning.rs` so server admins can change them.
 pub const STEP_HEIGHT: f32 = 0.5;
-/// Sprint duration in seconds (doubled by Extreme Conditioning).
-pub const SPRINT_TIME: f32 = 4.0;
 
 pub const MAX_HEALTH: f32 = 100.0;
 pub const REGEN_DELAY: f32 = 5.0;
@@ -48,7 +39,6 @@ pub const GRENADE_FUSE: f32 = 3.5;
 pub const GRENADE_SPEED: f32 = 17.0;
 pub const GRENADE_RADIUS: f32 = 6.5;
 pub const GRENADE_DAMAGE: f32 = 150.0;
-pub const WEAPON_SWITCH_TIME: f32 = 0.55;
 
 pub const UAV_KILLS: u32 = 3;
 pub const AIRSTRIKE_KILLS: u32 = 5;

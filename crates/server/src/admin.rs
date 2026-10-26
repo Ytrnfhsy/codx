@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use toon_shared::map::MapId;
 use toon_shared::protocol::S2C;
+use toon_shared::tuning::{FieldInfo, MoveTuning, Tuning, WeaponStats};
+use toon_shared::weapons::WeaponId;
 use toon_shared::{Mode, Team};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -60,6 +62,9 @@ pub const HELP: &str = "Команди:
   kill <id|ім'я>             — вбити гравця
   bots <n>                   — заповнювати сервер ботами до n гравців
   givestreak <id|ім'я> <uav|airstrike|heli> — видати кілстрік
+  tune [movement|weapons|<зброя>]           — показати параметри руху/зброї
+  tune <шлях> <значення>     — змінити: tune movement.sprint_speed 8; tune m249.rpm 850
+  tune reset [movement|<зброя>|all]         — повернути заводські значення
   set <ключ> <значення>      — scorelimit, timelimit, sabtime, rounds, bombtimer, planttime,
                                defusetime, ff, autobalance, maxplayers, password, name, motd, botskill
   save                       — зберегти налаштування у файл
@@ -279,6 +284,7 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             g.send(id, S2C::StreakReady(streak));
             format!("Видано: {}", streak.name())
         }
+        "tune" => tune(g, rest),
         "set" => {
             let (Some(key), Some(_)) = (args.next(), rest.split_once(char::is_whitespace)) else {
                 return "Використання: set <ключ> <значення>".into();
@@ -354,4 +360,120 @@ fn set_var(g: &mut Game, key: &str, v: &str) -> String {
         g.center_all(format!("Налаштування змінено: {key} = {v}"), 3.0);
     }
     format!("{key} = {v}")
+}
+
+fn fmt_val(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Number(n) => {
+            let f = n.as_f64().unwrap_or(0.0);
+            if f.fract() == 0.0 {
+                format!("{f:.0}")
+            } else {
+                format!("{f:.3}").trim_end_matches('0').to_string()
+            }
+        }
+        other => other.to_string(),
+    }
+}
+
+fn list_fields(obj: &serde_json::Value, fields: &[FieldInfo], prefix: &str) -> String {
+    let mut out = String::new();
+    for (k, label, lo, hi) in fields {
+        let v = obj.get(*k).map(fmt_val).unwrap_or_default();
+        out.push_str(&format!("  {prefix}{k:<18} = {v:<8} {label}  [{lo}..{hi}]\n"));
+    }
+    out
+}
+
+/// `tune` admin command: inspect and change movement / weapon tuning live.
+pub fn tune(g: &mut Game, rest: &str) -> String {
+    let mut args = rest.split_whitespace();
+    let Some(first) = args.next() else {
+        return "Тонке налаштування:\n  tune movement — параметри руху\n  tune weapons — список зброї\n  tune <зброя> — параметри зброї (напр. tune m249)\n  tune <шлях> <значення> — tune movement.sprint_speed 8, tune m249.weight 10\n  tune reset [movement|<зброя>|all]".into();
+    };
+    let json = serde_json::to_value(&g.tuning).unwrap_or_default();
+    let first_l = first.to_lowercase();
+    if first_l == "reset" {
+        let what = args.next().unwrap_or("all").to_lowercase();
+        let def = Tuning::default();
+        let mut t = g.tuning.clone();
+        match what.as_str() {
+            "all" => t = def,
+            "movement" | "move" => t.movement = def.movement,
+            w => match WeaponId::from_key(w) {
+                Some(id) => {
+                    t.weapons.insert(id.key().into(), def.weapon(id).clone());
+                }
+                None => return format!("Невідомо, що скидати: «{w}»"),
+            },
+        }
+        g.set_tuning(t);
+        return format!("Скинуто до заводських: {what}");
+    }
+    let Some(value) = args.next() else {
+        // show
+        return match first_l.as_str() {
+            "movement" | "move" => format!("Рух (tune movement.<ключ> <значення>):\n{}", list_fields(&json["movement"], MoveTuning::FIELDS, "")),
+            "weapons" => WeaponId::all()
+                .map(|w| {
+                    let s = g.tuning.weapon(w);
+                    format!("  {:<7} {:<13} {:>5.1} кг  {:>4.0} постр./хв  рух ×{:.2}  ADS {:.2} с", w.key(), w.def().name, s.weight, s.rpm, s.move_mult, s.ads_time)
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            k => match WeaponId::from_key(k) {
+                Some(w) => format!("{} (tune {}.<ключ> <значення>):\n{}", w.def().name, w.key(), list_fields(&json["weapons"][w.key()], WeaponStats::FIELDS, "")),
+                None => format!("Невідома група «{k}». Напиши tune"),
+            },
+        };
+    };
+    // set: path forms movement.x | <weapon>.x | weapons.<weapon>.x | x (movement shorthand)
+    let parts: Vec<&str> = first_l.split('.').collect();
+    let (path, fields): (Vec<String>, &[FieldInfo]) = match parts.as_slice() {
+        ["movement" | "move", f] => (vec!["movement".into(), f.to_string()], MoveTuning::FIELDS),
+        ["weapons", w, f] | [w, f] if WeaponId::from_key(w).is_some() => {
+            (vec!["weapons".into(), WeaponId::from_key(w).unwrap().key().into(), f.to_string()], WeaponStats::FIELDS)
+        }
+        [f] if MoveTuning::FIELDS.iter().any(|x| x.0 == *f) => (vec!["movement".into(), f.to_string()], MoveTuning::FIELDS),
+        _ => return format!("Невірний шлях «{first}». Приклади: movement.sprint_speed, m249.rpm"),
+    };
+    let field = path.last().unwrap().clone();
+    let Some(info) = fields.iter().find(|x| x.0 == field) else {
+        return format!("Невідомий параметр «{field}». Список: tune {}", if path[0] == "movement" { "movement" } else { &path[1] });
+    };
+    let mut json = json;
+    let slot = path.iter().fold(&mut json, |v, k| &mut v[k.as_str()]);
+    let new = if slot.is_boolean() {
+        match parse_bool(value) {
+            Some(b) => serde_json::Value::Bool(b),
+            None => return format!("Очікується true/false для {field}"),
+        }
+    } else {
+        match value.replace(',', ".").parse::<f64>() {
+            Ok(n) if n.is_finite() => {
+                if slot.is_u64() {
+                    serde_json::json!(n.max(0.0).round() as u64)
+                } else {
+                    serde_json::json!(n)
+                }
+            }
+            _ => return format!("Очікується число для {field}"),
+        }
+    };
+    *slot = new;
+    let t: Tuning = match serde_json::from_value(json) {
+        Ok(t) => t,
+        Err(e) => return format!("Помилка: {e}"),
+    };
+    g.set_tuning(t);
+    let after = serde_json::to_value(&g.tuning).unwrap_or_default();
+    let applied = path.iter().fold(&after, |v, k| &v[k.as_str()]);
+    let clamped = match (applied.as_f64(), value.replace(',', ".").parse::<f64>()) {
+        (Some(a), Ok(v)) => (a - v).abs() > 1e-3 * v.abs().max(1.0),
+        _ => false,
+    };
+    let note = if clamped { format!(" (обмежено діапазоном {}..{})", info.2, info.3) } else { String::new() };
+    let msg = format!("{} = {}{note}", path.join("."), fmt_val(applied));
+    g.logf(format!("Тюнінг: {msg}"));
+    msg
 }
