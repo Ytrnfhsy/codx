@@ -8,7 +8,7 @@ use crate::ui::*;
 use macroquad::prelude::*;
 use toon_shared::consts::*;
 use toon_shared::protocol::{flags, EntSnap, MatchState};
-use toon_shared::weapons::{Killstreak, Perk1, Perk2, Perk3, WeaponId};
+use toon_shared::weapons::{Cause, Killstreak, Perk1, Perk2, Perk3, WeaponId};
 use toon_shared::{wrap_angle, yaw_of, Mode, Team};
 
 pub enum HudAction {
@@ -36,6 +36,12 @@ impl GameClient {
         let (w, h) = (screen_width(), screen_height());
         let (cx, cy) = (w / 2.0, h / 2.0);
         let now = self.now;
+
+        if self.killcam.is_some() {
+            self.draw_killcam(ui);
+            self.draw_killfeed(ui);
+            return self.draw_overlay(ui, settings);
+        }
 
         if self.scoped() && self.alive {
             self.draw_scope();
@@ -114,21 +120,13 @@ impl GameClient {
             }
         }
         // hitmarker
-        let hk = (now - self.hitmarker) as f32;
-        if hk < 0.25 {
-            let c = if self.hit_kill { BAD } else { WHITE };
-            let a = 1.0 - hk / 0.25;
-            for (dx, dy) in [(1.0f32, 1.0f32), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-                draw_line(
-                    cx + dx * 6.0,
-                    cy + dy * 6.0,
-                    cx + dx * 14.0,
-                    cy + dy * 14.0,
-                    3.0,
-                    with_alpha(c, a),
-                );
-            }
-        }
+        draw_hitmarker(
+            cx,
+            cy,
+            (now - self.hitmarker) as f32,
+            self.hit_kill,
+            self.hit_head,
+        );
 
         self.draw_minimap(ui);
         self.draw_score_panel(ui);
@@ -619,30 +617,23 @@ impl GameClient {
     fn draw_killfeed(&self, ui: &Ui) {
         let w = screen_width();
         let mut y = 30.0;
+        let ih = 16.0;
         for k in self.killfeed.iter().rev() {
             let age = (self.now - k.time) as f32;
             if age > 7.0 {
                 continue;
             }
             let a = (1.0 - (age - 6.0).max(0.0)).clamp(0.0, 1.0);
-            let mid = format!(
-                "  [{}{}]  ",
-                k.cause.name(),
-                if k.headshot { " ✦" } else { "" }
-            );
-            let parts: Vec<(String, Color)> = if k.killer.is_empty() || k.killer == k.victim {
-                vec![
-                    (mid.trim_start().to_string(), MUTED),
-                    (k.victim.clone(), team_color(k.vteam)),
-                ]
+            let suicide = k.killer.is_empty() || k.killer == k.victim;
+            let icon_w = cause_icon_width(k.cause, ih) + if k.headshot { ih + 6.0 } else { 0.0 };
+            let kw = if suicide {
+                0.0
             } else {
-                vec![
-                    (k.killer.clone(), team_color(k.kteam)),
-                    (mid, MUTED),
-                    (k.victim.clone(), team_color(k.vteam)),
-                ]
+                ui.width(&k.killer, 16, true)
             };
-            let total: f32 = parts.iter().map(|p| ui.width(&p.0, 16, true)).sum();
+            let vw = ui.width(&k.victim, 16, true);
+            let gap = 10.0;
+            let total = kw + vw + icon_w + gap * if suicide { 1.0 } else { 2.0 };
             let mut x = w - 20.0 - total;
             draw_rectangle(
                 x - 6.0,
@@ -651,11 +642,91 @@ impl GameClient {
                 23.0,
                 Color::new(0.0, 0.0, 0.0, 0.35 * a),
             );
-            for (s, c) in parts {
-                ui.shadowed(&s, x, y, 16, with_alpha(c, a));
-                x += ui.width(&s, 16, true);
+            if !suicide {
+                ui.shadowed(&k.killer, x, y, 16, with_alpha(team_color(k.kteam), a));
+                x += kw + gap;
             }
+            let iw = draw_cause_icon(k.cause, x, y - 6.0, ih, a);
+            x += iw;
+            if k.headshot {
+                draw_headshot_icon(x + 6.0 + ih * 0.5, y - 6.0, ih, a);
+                x += ih + 6.0;
+            }
+            x += gap;
+            ui.shadowed(&k.victim, x, y, 16, with_alpha(team_color(k.vteam), a));
             y += 26.0;
+        }
+    }
+
+    /// Killcam overlay: letterbox, title, who killed whom and with what.
+    fn draw_killcam(&self, ui: &Ui) {
+        let Some(k) = &self.killcam else { return };
+        let (w, h) = (screen_width(), screen_height());
+        let (cx, cy) = (w / 2.0, h / 2.0);
+        if k.scoped() {
+            self.draw_scope();
+        }
+        draw_hitmarker(cx, cy, (k.pt - k.hitmarker) as f32, k.hit_kill, false);
+        let bar = (h * 0.09).max(48.0);
+        let black = Color::new(0.0, 0.0, 0.0, 0.85);
+        draw_rectangle(0.0, 0.0, w, bar, black);
+        draw_rectangle(0.0, h - bar, w, bar, black);
+        let title = if k.final_cam {
+            "ФІНАЛЬНИЙ КІЛКАМ"
+        } else {
+            "КІЛКАМ"
+        };
+        // a slow blink on the record dot
+        if ((self.now * 2.0) as i64) % 2 == 0 {
+            draw_circle(
+                cx - ui.width(title, 30, true) / 2.0 - 18.0,
+                bar * 0.5 - 2.0,
+                7.0,
+                BAD,
+            );
+        }
+        ui.centered(title, cx, bar * 0.5 + 10.0, 30, ACCENT);
+
+        // killer · weapon · victim
+        let info = &k.info;
+        let ih = 20.0;
+        let kw = ui.width(&info.killer_name, 22, true);
+        let vw = ui.width(&info.victim_name, 22, true);
+        let iw = cause_icon_width(info.cause, ih) + if info.headshot { ih + 8.0 } else { 0.0 };
+        let total = kw + vw + iw + 40.0;
+        let mut x = cx - total / 2.0;
+        let y = h - bar * 0.5 + 8.0;
+        ui.shadowed(&info.killer_name, x, y, 22, team_color(info.killer_team));
+        x += kw + 20.0;
+        x += draw_cause_icon(info.cause, x, y - 8.0, ih, 1.0);
+        if info.headshot {
+            draw_headshot_icon(x + 8.0 + ih * 0.5, y - 8.0, ih, 1.0);
+            x += ih + 8.0;
+        }
+        x += 20.0;
+        let vteam = self
+            .scoreboard
+            .iter()
+            .find(|r| r.id == info.victim)
+            .map(|r| r.team)
+            .unwrap_or(Team::Spectator);
+        ui.shadowed(&info.victim_name, x, y, 22, team_color(vteam));
+        if !k.final_cam {
+            let hint = if self.me.respawn_in > 0.0 {
+                format!(
+                    "ЛКМ — пропустити · відродження через {:.0}",
+                    self.me.respawn_in.ceil()
+                )
+            } else {
+                "ЛКМ — пропустити".to_string()
+            };
+            ui.text(
+                &hint,
+                w - ui.width(&hint, 15, false) - 20.0,
+                h - 12.0,
+                15,
+                MUTED,
+            );
         }
     }
 
@@ -1261,4 +1332,173 @@ impl GameClient {
             }
         }
     }
+}
+
+/// Hitmarker: pops out on impact, red and bigger for kills, with a gold ring for headshots.
+fn draw_hitmarker(cx: f32, cy: f32, age: f32, kill: bool, head: bool) {
+    let life = if kill { 0.4 } else { 0.25 };
+    if !(0.0..life).contains(&age) {
+        return;
+    }
+    let a = 1.0 - age / life;
+    let pop = 1.0 + 0.5 * (1.0 - (age / 0.07).min(1.0));
+    let size = if kill { 1.35 } else { 1.0 } * pop;
+    let c = if kill { BAD } else { WHITE };
+    for (dx, dy) in [(1.0f32, 1.0f32), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+        let (x0, y0) = (cx + dx * 6.0 * size, cy + dy * 6.0 * size);
+        let (x1, y1) = (cx + dx * 14.0 * size, cy + dy * 14.0 * size);
+        draw_line(
+            x0 + 1.0,
+            y0 + 1.0,
+            x1 + 1.0,
+            y1 + 1.0,
+            3.5,
+            Color::new(0.0, 0.0, 0.0, a * 0.5),
+        );
+        draw_line(
+            x0,
+            y0,
+            x1,
+            y1,
+            if kill { 3.5 } else { 3.0 },
+            with_alpha(c, a),
+        );
+    }
+    if head {
+        draw_circle_lines(cx, cy, 20.0 * size, 2.0, with_alpha(ACCENT, a));
+    }
+}
+
+fn icon_color(a: f32) -> (Color, Color) {
+    (
+        Color::new(1.0, 1.0, 1.0, 0.95 * a),
+        Color::new(0.0, 0.0, 0.0, 0.7 * a),
+    )
+}
+
+/// Side view of a gun built from its 3D model: (x, y, w, h) rectangles, barrel to the right.
+fn gun_rects(w: WeaponId, h: f32) -> (Vec<Rect>, f32) {
+    let parts = crate::models::gun_parts(w);
+    let (mut z0, mut z1, mut y0, mut y1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+    for p in &parts {
+        z0 = z0.min(-(p.c.z + p.h.z));
+        z1 = z1.max(-(p.c.z - p.h.z));
+        y0 = y0.min(p.c.y - p.h.y);
+        y1 = y1.max(p.c.y + p.h.y);
+    }
+    let s = (h / (y1 - y0)).min(64.0 / (z1 - z0));
+    let rects = parts
+        .iter()
+        .map(|p| {
+            Rect::new(
+                (-(p.c.z + p.h.z) - z0) * s,
+                (y1 - (p.c.y + p.h.y)) * s + (h - (y1 - y0) * s) * 0.5,
+                (p.h.z * 2.0 * s).max(1.5),
+                (p.h.y * 2.0 * s).max(1.5),
+            )
+        })
+        .collect();
+    (rects, (z1 - z0) * s)
+}
+
+fn cause_icon_width(c: Cause, h: f32) -> f32 {
+    match c {
+        Cause::Weapon(w) => gun_rects(w, h).1,
+        Cause::Knife | Cause::Airstrike | Cause::Helicopter => h * 1.8,
+        _ => h * 1.1,
+    }
+}
+
+/// Draws a small white silhouette for a cause of death; `cy` is the icon's vertical centre.
+/// Returns its width.
+fn draw_cause_icon(c: Cause, x: f32, cy: f32, h: f32, a: f32) -> f32 {
+    let (fg, bg) = icon_color(a);
+    let top = cy - h * 0.5;
+    match c {
+        Cause::Weapon(w) => {
+            let (rects, width) = gun_rects(w, h);
+            for r in &rects {
+                draw_rectangle(x + r.x - 1.0, top + r.y - 1.0, r.w + 2.0, r.h + 2.0, bg);
+            }
+            for r in &rects {
+                draw_rectangle(x + r.x, top + r.y, r.w, r.h, fg);
+            }
+            width
+        }
+        Cause::Grenade => {
+            let r = h * 0.36;
+            let (gx, gy) = (x + h * 0.5, cy + h * 0.1);
+            draw_circle(gx, gy, r + 1.2, bg);
+            draw_circle(gx, gy, r, fg);
+            draw_rectangle(gx - r * 0.3, gy - r - h * 0.18, r * 0.6, h * 0.2, fg);
+            draw_circle_lines(gx + r * 0.6, gy - r - h * 0.05, h * 0.12, 1.5, fg);
+            h * 1.1
+        }
+        Cause::Knife => {
+            let w = h * 1.8;
+            draw_rectangle(
+                x - 1.0,
+                cy - h * 0.18 - 1.0,
+                w * 0.4 + 2.0,
+                h * 0.36 + 2.0,
+                bg,
+            );
+            draw_rectangle(x, cy - h * 0.18, w * 0.4, h * 0.36, fg);
+            draw_rectangle(x + w * 0.38, cy - h * 0.3, w * 0.06, h * 0.6, fg);
+            draw_triangle(
+                vec2(x + w * 0.44, cy - h * 0.2),
+                vec2(x + w * 0.44, cy + h * 0.15),
+                vec2(x + w, cy - h * 0.12),
+                fg,
+            );
+            w
+        }
+        Cause::Airstrike => {
+            let w = h * 1.8;
+            draw_triangle(
+                vec2(x, cy - h * 0.4),
+                vec2(x, cy + h * 0.4),
+                vec2(x + w, cy),
+                fg,
+            );
+            draw_rectangle(x + w * 0.1, cy - h * 0.08, w * 0.6, h * 0.16, bg);
+            w
+        }
+        Cause::Helicopter => {
+            let w = h * 1.8;
+            draw_circle(x + w * 0.65, cy + h * 0.05, h * 0.3, fg);
+            draw_rectangle(x, cy - h * 0.02, w * 0.6, h * 0.14, fg);
+            draw_rectangle(x + w * 0.15, cy - h * 0.42, w * 0.85, h * 0.08, fg);
+            draw_rectangle(x + w * 0.62, cy - h * 0.42, w * 0.05, h * 0.25, fg);
+            w
+        }
+        Cause::Bomb => {
+            draw_rectangle(x - 1.0, top + h * 0.25 - 1.0, h + 2.0, h * 0.65 + 2.0, bg);
+            draw_rectangle(x, top + h * 0.25, h, h * 0.65, fg);
+            draw_rectangle(x, top + h * 0.45, h, h * 0.12, bg);
+            draw_line(x + h * 0.8, top + h * 0.25, x + h, top, 2.0, fg);
+            h * 1.1
+        }
+        Cause::Fall | Cause::World => {
+            // cartoon skull
+            let (sx, sy) = (x + h * 0.5, cy);
+            draw_circle(sx, sy - h * 0.05, h * 0.42, fg);
+            draw_rectangle(sx - h * 0.22, sy + h * 0.15, h * 0.44, h * 0.25, fg);
+            draw_circle(sx - h * 0.16, sy - h * 0.05, h * 0.11, bg);
+            draw_circle(sx + h * 0.16, sy - h * 0.05, h * 0.11, bg);
+            h * 1.1
+        }
+    }
+}
+
+/// Head with a crosshair — shown after the weapon for headshots.
+fn draw_headshot_icon(cx: f32, cy: f32, h: f32, a: f32) {
+    let (fg, bg) = icon_color(a);
+    let r = h * 0.38;
+    draw_circle(cx, cy, r + 1.2, bg);
+    draw_circle(cx, cy, r, fg);
+    let red = Color::new(0.95, 0.25, 0.2, a);
+    draw_circle_lines(cx, cy, r * 0.75, 1.5, red);
+    draw_line(cx - r * 1.2, cy, cx + r * 1.2, cy, 1.5, red);
+    draw_line(cx, cy - r * 1.2, cx, cy + r * 1.2, 1.5, red);
 }

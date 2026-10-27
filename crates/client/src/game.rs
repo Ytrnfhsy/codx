@@ -2,8 +2,11 @@
 
 use crate::audio::{Audio, Sfx};
 use crate::effects::Effects;
+use crate::killcam::{has_killcam, Event, Frame, KillInfo, Killcam, Recorder};
 use crate::mesh::{MeshBuilder, ToonMesh};
 use crate::netclient::NetClient;
+use crate::ragdoll::{DeathBlow, Ragdoll};
+use crate::render::{Actor, VmState};
 use crate::settings::Settings;
 use macroquad::prelude::*;
 use std::collections::{HashMap, VecDeque};
@@ -36,6 +39,9 @@ pub struct Remote {
     pub muzzle: Vec3,
     pub melee_t: f64,
     pub step_acc: f32,
+    /// When we first saw this player reloading.
+    pub reload_since: Option<f64>,
+    pub vel: Vec3,
 }
 
 pub struct Line {
@@ -180,7 +186,24 @@ pub struct GameClient {
     pub streak_hint: Option<Killstreak>,
     pub bomb_beep: f64,
     pub muzzle_flash: f64,
+
+    // replays and bodies
+    pub recorder: Recorder,
+    pub killcam: Option<Killcam>,
+    /// A killcam waiting to start: (real time to start, info, final killcam).
+    pending_killcam: Option<(f64, KillInfo, bool)>,
+    pub ragdolls: Vec<(u8, Ragdoll)>,
+    /// How each recently killed player died (for ragdoll impulses).
+    blows: HashMap<u8, (DeathBlow, f64)>,
+    explosions: Vec<(Vec3, f64)>,
+    pub hit_head: bool,
+    reload_cue: usize,
+    was_on_ground: bool,
+    fall_speed: f32,
 }
+
+/// Server time the client currently sees (clock offset applied).
+const KILLCAM_DELAY: f64 = 1.1;
 
 pub fn build_map_mesh(map: &Map) -> ToonMesh {
     let mut m = ToonMesh::new();
@@ -396,6 +419,16 @@ impl GameClient {
             streak_hint: None,
             bomb_beep: 0.0,
             muzzle_flash: -10.0,
+            recorder: Recorder::default(),
+            killcam: None,
+            pending_killcam: None,
+            ragdolls: Vec::new(),
+            blows: HashMap::new(),
+            explosions: Vec::new(),
+            hit_head: false,
+            reload_cue: 0,
+            was_on_ground: true,
+            fall_speed: 0.0,
         };
         if !w.motd.is_empty() {
             g.push_chat(format!("[{}] {}", g.server_name, w.motd), crate::ui::ACCENT);
@@ -469,6 +502,10 @@ impl GameClient {
         self.ents.clear();
         self.airstrikes.clear();
         self.killfeed.clear();
+        self.recorder.clear();
+        self.killcam = None;
+        self.pending_killcam = None;
+        self.ragdolls.clear();
         self.spec_pos = vec3(self.map.center().x, 15.0, self.map.max.y);
         self.body.pos = self.spec_pos;
     }
@@ -536,6 +573,11 @@ impl GameClient {
                 self.cooking = None;
                 self.death_info = None;
                 self.has_class = true;
+                if !self.killcam.as_ref().is_some_and(|k| k.final_cam) {
+                    self.killcam = None;
+                }
+                self.pending_killcam = None;
+                self.reload_cue = 0;
                 if matches!(self.overlay, Overlay::Class | Overlay::Team) {
                     self.overlay = Overlay::None;
                 }
@@ -575,13 +617,59 @@ impl GameClient {
                 killer_team,
                 victim_team,
             } => {
+                let st = self.server_now();
+                self.recorder.event(
+                    st,
+                    Event::Kill {
+                        killer,
+                        victim,
+                        cause,
+                        headshot,
+                    },
+                );
+                let blow = DeathBlow {
+                    cause,
+                    headshot,
+                    from: self.blow_source(killer, cause),
+                };
+                self.blows.insert(victim, (blow, now));
                 if victim == self.my_id {
+                    let was_alive = self.alive;
                     self.alive = false;
                     self.death_time = now;
                     self.death_pos = self.eye();
                     self.death_info =
                         Some((killer_name.clone(), cause, killer.filter(|k| *k != victim)));
                     self.cooking = None;
+                    if was_alive && self.team.is_playing() {
+                        let r = Ragdoll::new(
+                            self.body.pos,
+                            self.yaw,
+                            self.body.stance,
+                            self.body.vel,
+                            self.team,
+                            self.weapon(),
+                            blow,
+                            &mut self.rng,
+                        );
+                        self.add_ragdoll(victim, r);
+                    }
+                    // killcam a moment later, once the replay has the whole kill
+                    if let Some(k) = killer.filter(|k| *k != victim && has_killcam(cause)) {
+                        self.pending_killcam = Some((
+                            now + KILLCAM_DELAY,
+                            KillInfo {
+                                killer: k,
+                                victim,
+                                killer_name: killer_name.clone(),
+                                victim_name: victim_name.clone(),
+                                killer_team,
+                                cause,
+                                headshot,
+                            },
+                            false,
+                        ));
+                    }
                 }
                 if killer == Some(self.my_id) && victim != self.my_id {
                     if let Some(a) = audio {
@@ -603,9 +691,13 @@ impl GameClient {
             }
             S2C::HitConfirm { kill, headshot } => {
                 self.hitmarker = now;
-                self.hit_kill = kill || headshot;
+                self.hit_kill = kill;
+                self.hit_head = headshot;
                 if let Some(a) = audio {
-                    a.play(Sfx::Hit, 0.5);
+                    a.play(Sfx::Hit, 0.55);
+                    if headshot {
+                        a.play(Sfx::HitHead, 0.55);
+                    }
                 }
             }
             S2C::Damaged { from, amount } => {
@@ -618,6 +710,9 @@ impl GameClient {
             }
             S2C::Explosion { pos, radius, big } => {
                 let p = Vec3::from_array(pos);
+                self.recorder
+                    .event(self.server_now(), Event::Explosion { pos: p, radius });
+                self.explosions.push((p, now));
                 self.fx.explosion(p, radius);
                 let d = p.distance(self.eye());
                 self.shake = (self.shake
@@ -628,6 +723,7 @@ impl GameClient {
                 }
             }
             S2C::Melee { id } => {
+                self.recorder.event(self.server_now(), Event::Melee(id));
                 if let Some(r) = self.remotes.get_mut(&id) {
                     r.melee_t = now;
                     if let Some(a) = audio {
@@ -698,8 +794,10 @@ impl GameClient {
             }
             S2C::MatchEnd { winner, text } => {
                 self.match_end = Some((text, winner, now));
+                self.queue_final_killcam(now);
             }
             S2C::RoundEnd { winner, text } => {
+                self.queue_final_killcam(now);
                 let c = match winner {
                     Some(t) if t == self.team => crate::ui::GOOD,
                     Some(_) => crate::ui::BAD,
@@ -762,6 +860,13 @@ impl GameClient {
                 self.match_end = None;
             }
         }
+        self.recorder.push(Frame {
+            t: st,
+            players: s.players.clone(),
+            ents: s.ents.clone(),
+            shots: s.shots.clone(),
+            bomb: s.bomb.clone(),
+        });
         self.state = s.state;
         self.time_left = s.time_left;
         self.scores = s.scores;
@@ -792,6 +897,8 @@ impl GameClient {
                 muzzle: Vec3::from_array(p.pos),
                 melee_t: -10.0,
                 step_acc: 0.0,
+                reload_since: None,
+                vel: Vec3::ZERO,
             });
             r.buf.push_back((st, p));
             while r.buf.len() > 40 {
@@ -857,8 +964,152 @@ impl GameClient {
                 } else {
                     Sfx::for_weapon(shot.weapon)
                 };
-                a.play_at(sfx, from, eye, 0.7, 140.0);
+                a.play_shot(sfx, from, eye, 0.75);
+                if shot.flesh {
+                    a.play_at(Sfx::Flesh, to, eye, 0.5, 30.0);
+                }
+                // bullets cracking past your head
+                if self.alive {
+                    let d = to - from;
+                    let len = d.length();
+                    if len > 1.0 {
+                        let k = ((eye - from).dot(d) / (len * len)).clamp(0.0, 1.0);
+                        let miss = (from + d * k).distance(eye);
+                        if miss < 2.5 && k > 0.02 && k < 0.98 {
+                            a.play(Sfx::Whiz, 0.75 * (1.0 - miss / 2.5) + 0.15);
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    /// Server time matching the newest snapshot.
+    pub fn server_now(&self) -> f64 {
+        self.now + self.clock_offset
+    }
+
+    /// Where the blow that killed somebody came from.
+    fn blow_source(&self, killer: Option<u8>, cause: Cause) -> Option<Vec3> {
+        match cause {
+            Cause::Grenade | Cause::Airstrike | Cause::Bomb => self
+                .explosions
+                .iter()
+                .rev()
+                .find(|e| self.now - e.1 < 0.6)
+                .map(|e| e.0),
+            _ => match killer {
+                Some(k) if k == self.my_id => Some(self.eye()),
+                Some(k) => self.remotes.get(&k).map(|r| r.pos + vec3(0.0, 1.3, 0.0)),
+                None => None,
+            },
+        }
+    }
+
+    fn add_ragdoll(&mut self, id: u8, r: Ragdoll) {
+        self.ragdolls.push((id, r));
+        if self.ragdolls.len() > 24 {
+            self.ragdolls.remove(0);
+        }
+    }
+
+    /// After a match or round ends, everybody watches the last kill again in slow motion.
+    fn queue_final_killcam(&mut self, now: f64) {
+        let since = self.server_now() - 6.0;
+        let Some((_, killer, victim, cause, headshot)) = self.recorder.last_kill(since) else {
+            return;
+        };
+        let name = |id: u8| -> String {
+            self.scoreboard
+                .iter()
+                .find(|r| r.id == id)
+                .map(|r| r.name.clone())
+                .unwrap_or_else(|| "?".into())
+        };
+        let (killer_name, victim_name) = (name(killer), name(victim));
+        let killer_team = self
+            .scoreboard
+            .iter()
+            .find(|r| r.id == killer)
+            .map(|r| r.team)
+            .unwrap_or(Team::Spectator);
+        self.killcam = None;
+        self.pending_killcam = Some((
+            now + 0.9,
+            KillInfo {
+                killer,
+                victim,
+                killer_name,
+                victim_name,
+                killer_team,
+                cause,
+                headshot,
+            },
+            true,
+        ));
+    }
+
+    fn start_killcam(&mut self, info: KillInfo, final_cam: bool) {
+        // the replay ends at the moment the victim went down
+        let since = self.server_now() - 8.0;
+        let Some(t_kill) = self.recorder.death_time(info.victim, since) else {
+            return;
+        };
+        self.killcam = Killcam::new(&self.recorder, info, t_kill, final_cam);
+    }
+
+    /// Living remote players, interpolated for this frame.
+    pub fn live_actors(&self) -> Vec<Actor> {
+        let now = self.now;
+        self.remotes
+            .iter()
+            .filter(|(_, r)| r.alive)
+            .map(|(id, r)| Actor {
+                id: *id,
+                pos: r.pos,
+                yaw: r.yaw,
+                pitch: r.pitch,
+                stance: r.stance,
+                team: r.team,
+                weapon: r.weapon,
+                flags: r.flags,
+                phase: r.phase,
+                walk: r.walk,
+                melee: if now - r.melee_t < 0.4 {
+                    ((now - r.melee_t) as f32 / 0.4).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                },
+                reload: r.reload_since.map(|t| (now - t) as f32),
+                protected: r.protected,
+            })
+            .collect()
+    }
+
+    /// First-person weapon animation state.
+    pub fn vm_state(&self) -> VmState {
+        let now = self.now;
+        VmState {
+            weapon: self.weapon(),
+            team: self.team,
+            ads: self.ads_t,
+            bob_phase: self.bob_phase,
+            bob: self.walk_amount * (1.0 - self.ads_t * 0.85) * self.tuning.movement.view_bob,
+            sway: self.sway,
+            recoil: self.recoil_vis,
+            sprint: self.sprinting,
+            reload: self
+                .reload_until
+                .map(|(end, dur)| (1.0 - ((end - now) / dur) as f32).clamp(0.0, 1.0)),
+            raise: if now < self.switch_until {
+                ((self.switch_until - now) as f32 / self.switch_dur.max(0.05)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+            knife: (now < self.melee_until)
+                .then(|| (1.0 - ((self.melee_until - now) / 0.45) as f32).clamp(0.0, 1.0)),
+            throwing: self.cooking.is_some() || now < self.throw_until,
+            flash: now - self.muzzle_flash < 0.05,
         }
     }
 
@@ -1004,6 +1255,7 @@ impl GameClient {
         self.shake = (self.shake + heft * 0.05).min(0.3);
         if let Some(a) = audio {
             a.play(Sfx::for_weapon(w), 0.85);
+            a.play_later(Sfx::Shell, 0.35 + self.rng.range(0.0, 0.2), 0.25);
         }
     }
 
@@ -1029,6 +1281,7 @@ impl GameClient {
         };
         let dur = (def.reload_time * k) as f64;
         self.reload_until = Some((self.now + dur, dur));
+        self.reload_cue = 0;
         self.net.send(C2S::Reload);
     }
 
@@ -1050,10 +1303,34 @@ impl GameClient {
     pub fn update(&mut self, dt: f32, settings: &Settings, audio: Option<&Audio>) {
         self.now = get_time();
         let now = self.now;
-        let mut audio_opt = audio;
+        // while a replay plays, the live game is silent
+        let mut audio_opt = if self.killcam.is_some() { None } else { audio };
         for m in self.net.poll() {
             self.handle_msg(m, &mut audio_opt);
         }
+        if let Some(a) = audio {
+            a.tick();
+        }
+        // killcam replay
+        if self.pending_killcam.as_ref().is_some_and(|p| now >= p.0) {
+            let (_, info, final_cam) = self.pending_killcam.take().unwrap();
+            if final_cam || !self.alive {
+                self.start_killcam(info, final_cam);
+            }
+        }
+        if let Some(k) = &mut self.killcam {
+            k.update(dt, &self.world, &self.tuning, audio);
+            if k.done {
+                self.killcam = None;
+            }
+        }
+        for (_, r) in &mut self.ragdolls {
+            r.update(&self.world, dt);
+        }
+        self.ragdolls
+            .retain(|(_, r)| r.age < crate::ragdoll::LIFETIME);
+        self.blows.retain(|_, b| now - b.1 < 3.0);
+        self.explosions.retain(|e| now - e.1 < 2.0);
         if self.net.last_recv.elapsed().as_secs_f32() > 10.0 {
             self.leave = Some("З'єднання з сервером втрачено".into());
         }
@@ -1094,7 +1371,7 @@ impl GameClient {
         }
 
         // ---- local player
-        let can_act = self.alive && playing_input && !self.frozen();
+        let can_act = self.alive && playing_input && !self.frozen() && self.killcam.is_none();
         let key = |k: KeyCode| can_act && is_key_down(k);
         let pressed = |k: KeyCode| can_act && is_key_pressed(k);
         let def = self.ws().clone();
@@ -1191,6 +1468,18 @@ impl GameClient {
                 self.body.step(&self.world, &inp, &self.tuning.movement, h);
                 t -= h;
             }
+            if !self.body.on_ground {
+                self.fall_speed = self.fall_speed.max(-self.body.vel.y);
+            } else if !self.was_on_ground {
+                if self.fall_speed > 6.5 {
+                    if let Some(a) = audio {
+                        a.play(Sfx::Land, ((self.fall_speed - 5.0) / 8.0).clamp(0.2, 0.8));
+                    }
+                    self.shake = (self.shake + (self.fall_speed - 6.0) * 0.03).min(0.4);
+                }
+                self.fall_speed = 0.0;
+            }
+            self.was_on_ground = self.body.on_ground;
             // stairs and stance changes move the view smoothly, not in one jump
             let snap = self.body.take_snap() + (self.body.stance.eye() - eye_before);
             if snap.abs() < 1.5 {
@@ -1228,6 +1517,15 @@ impl GameClient {
                     self.reload_until = None;
                 }
             }
+            if let (Some(a), Some((end, dur))) = (audio, self.reload_until) {
+                let p = (1.0 - ((end - now) / dur) as f32).clamp(0.0, 1.0);
+                let cues = crate::audio::reload_cues(self.weapon().def().class);
+                while self.reload_cue < cues.len() && p >= cues[self.reload_cue].0 {
+                    a.play(cues[self.reload_cue].1, 0.5);
+                    self.reload_cue += 1;
+                }
+            }
+            let slot_before = self.slot;
             if pressed(KeyCode::Key1) {
                 self.switch_to(0);
             }
@@ -1239,13 +1537,13 @@ impl GameClient {
                 let s = 1 - self.slot;
                 self.switch_to(s);
             }
+            if self.slot != slot_before {
+                if let Some(a) = audio {
+                    a.play(Sfx::Raise, 0.45);
+                }
+            }
             if pressed(KeyCode::R) {
                 self.start_reload();
-                if self.reload_until.is_some() {
-                    if let Some(a) = audio {
-                        a.play(Sfx::Reload, 0.5);
-                    }
-                }
             }
             let trig_down = can_act && is_mouse_button_down(MouseButton::Left);
             // also catch very quick clicks (press + release within one frame)
@@ -1364,13 +1662,16 @@ impl GameClient {
             self.ads_t = 0.0;
             self.sprinting = false;
             self.using = false;
-            // click to respawn
-            if self.team.is_playing()
-                && playing_input
-                && is_mouse_button_pressed(MouseButton::Left)
-                && self.me.respawn_in <= 0.0
-            {
-                self.net.send(C2S::Spawn);
+            // click skips the killcam, then respawns
+            if playing_input && is_mouse_button_pressed(MouseButton::Left) {
+                let skippable = self.killcam.as_ref().is_some_and(|k| !k.final_cam)
+                    || self.pending_killcam.as_ref().is_some_and(|p| !p.2);
+                if skippable {
+                    self.killcam = None;
+                    self.pending_killcam = None;
+                } else if self.team.is_playing() && self.me.respawn_in <= 0.0 {
+                    self.net.send(C2S::Spawn);
+                }
             }
         }
 
@@ -1407,7 +1708,8 @@ impl GameClient {
         self.net.maybe_flush(1.0 / 60.0);
 
         // ---- remotes interpolation
-        self.update_remotes(dt, audio);
+        let live_audio = if self.killcam.is_some() { None } else { audio };
+        self.update_remotes(dt, live_audio);
 
         // ---- misc timers
         self.shake = (self.shake - dt * 2.5).max(0.0);
@@ -1499,7 +1801,8 @@ impl GameClient {
         let walk_speed = self.tuning.movement.walk_speed;
         let now = self.now;
         let listener = self.eye();
-        for r in self.remotes.values_mut() {
+        let mut deaths = Vec::new();
+        for (id, r) in self.remotes.iter_mut() {
             // find the two snapshots around rt
             let mut a = None;
             let mut b = None;
@@ -1523,6 +1826,7 @@ impl GameClient {
             let sa = &r.buf[pa].1;
             let sb = &r.buf[pb].1;
             let new_pos = Vec3::from_array(sa.pos).lerp(Vec3::from_array(sb.pos), k);
+            let old_pos = r.pos;
             let moved = vec2(new_pos.x - r.pos.x, new_pos.z - r.pos.z).length();
             let teleport = moved > 4.0;
             r.pos = new_pos;
@@ -1536,8 +1840,18 @@ impl GameClient {
             r.team = sb.team;
             let was_alive = r.alive;
             r.alive = sb.alive;
+            if !teleport && dt > 0.0 {
+                let v = ((new_pos - old_pos) / dt).clamp_length_max(9.0);
+                r.vel += (v - r.vel) * (dt * 12.0).min(1.0);
+            }
             if was_alive && !r.alive {
                 r.death_time = Some(now);
+                deaths.push((*id, r.pos, r.yaw, r.stance, r.vel, r.team, r.weapon));
+            }
+            match (r.flags & flags::RELOADING != 0 && r.alive, r.reload_since) {
+                (true, None) => r.reload_since = Some(now),
+                (false, Some(_)) => r.reload_since = None,
+                _ => {}
             }
             if r.alive {
                 r.death_time = None;
@@ -1565,6 +1879,15 @@ impl GameClient {
             while r.buf.len() > 2 && r.buf[1].0 < rt - 0.5 {
                 r.buf.pop_front();
             }
+        }
+        for (id, pos, yaw, stance, vel, team, weapon) in deaths {
+            let blow = self.blows.get(&id).map(|b| b.0).unwrap_or(DeathBlow {
+                cause: Cause::World,
+                headshot: false,
+                from: None,
+            });
+            let r = Ragdoll::new(pos, yaw, stance, vel, team, weapon, blow, &mut self.rng);
+            self.add_ragdoll(id, r);
         }
     }
 
@@ -1628,6 +1951,9 @@ impl GameClient {
 
     /// Camera position/orientation for this frame.
     pub fn camera(&self) -> (Vec3, f32, f32) {
+        if let Some(k) = &self.killcam {
+            return k.camera(self.now);
+        }
         let shake = vec2(
             ((self.now * 53.0).sin() as f32) * self.shake * 0.02,
             ((self.now * 61.0).cos() as f32) * self.shake * 0.02,

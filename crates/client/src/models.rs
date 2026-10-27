@@ -7,7 +7,7 @@ use toon_shared::weapons::{WeaponClass, WeaponId};
 use toon_shared::Team;
 
 pub const SKIN: [u8; 3] = [255, 214, 170];
-const BOOT: [u8; 3] = [60, 52, 48];
+pub const BOOT: [u8; 3] = [60, 52, 48];
 const METAL: [u8; 3] = [58, 62, 72];
 const METAL_L: [u8; 3] = [96, 102, 116];
 const WOOD: [u8; 3] = [170, 104, 52];
@@ -52,8 +52,47 @@ pub fn team_color(t: Team) -> Color {
     }
 }
 
-/// Gun parts in gun space: barrel along -Z, origin at the grip. (center, half extents, colour)
-pub fn gun_parts(w: WeaponId) -> Vec<(Vec3, Vec3, [u8; 3])> {
+/// One box of a gun model.
+#[derive(Clone, Copy)]
+pub struct GunPart {
+    pub c: Vec3,
+    pub h: Vec3,
+    pub col: [u8; 3],
+    /// Detachable magazine / ammo box (moves during reloads).
+    pub mag: bool,
+}
+
+/// Gun parts in gun space: barrel along -Z, origin at the grip.
+pub fn gun_parts(w: WeaponId) -> Vec<GunPart> {
+    gun_boxes(w)
+        .into_iter()
+        .map(|(c, h, col)| GunPart {
+            c,
+            h,
+            col,
+            mag: false,
+        })
+        .chain(gun_mag(w).map(|(c, h, col)| GunPart {
+            c,
+            h,
+            col,
+            mag: true,
+        }))
+        .collect()
+}
+
+/// Magazine box of a gun (None for tube-fed / internal magazines).
+pub fn gun_mag(w: WeaponId) -> Option<(Vec3, Vec3, [u8; 3])> {
+    match w.def().class {
+        WeaponClass::Pistol => Some((vec3(0.0, -0.075, 0.0), vec3(0.022, 0.02, 0.028), METAL)),
+        WeaponClass::Lmg => Some((vec3(0.0, -0.03, -0.12), vec3(0.06, 0.07, 0.07), OLIVE)),
+        WeaponClass::Shotgun => None,
+        WeaponClass::Sniper => Some((vec3(0.0, -0.01, -0.14), vec3(0.022, 0.035, 0.04), METAL)),
+        _ => Some((vec3(0.0, -0.04, -0.17), vec3(0.025, 0.07, 0.035), METAL)),
+    }
+}
+
+fn gun_boxes(w: WeaponId) -> Vec<(Vec3, Vec3, [u8; 3])> {
     let d = w.def();
     let accent = match w {
         WeaponId::Ak47 | WeaponId::Rpd | WeaponId::Ak74u => WOOD,
@@ -97,7 +136,6 @@ pub fn gun_parts(w: WeaponId) -> Vec<(Vec3, Vec3, [u8; 3])> {
             v.push((vec3(0.0, -0.02, 0.0), vec3(0.025, 0.06, 0.03), METAL));
             match d.class {
                 WeaponClass::Lmg => {
-                    v.push((vec3(0.0, -0.03, -0.12), vec3(0.06, 0.07, 0.07), OLIVE));
                     v.push((vec3(0.0, 0.0, -0.6), vec3(0.04, 0.008, 0.008), METAL));
                 }
                 WeaponClass::Sniper => {
@@ -108,8 +146,6 @@ pub fn gun_parts(w: WeaponId) -> Vec<(Vec3, Vec3, [u8; 3])> {
                     v.push((vec3(0.0, 0.035, -0.38), vec3(0.03, 0.025, 0.1), WOOD));
                 }
                 _ => {
-                    // magazine
-                    v.push((vec3(0.0, -0.04, -0.17), vec3(0.025, 0.07, 0.035), METAL));
                     // front sight
                     v.push((vec3(0.0, 0.13, -0.5), vec3(0.008, 0.02, 0.008), METAL));
                     v.push((vec3(0.0, 0.13, -0.02), vec3(0.015, 0.015, 0.012), METAL));
@@ -141,9 +177,62 @@ pub fn muzzle(w: WeaponId) -> Vec3 {
 }
 
 pub fn add_gun(m: &mut ToonMesh, base: &Mat4, w: WeaponId, outline: f32) {
-    for (c, h, col) in gun_parts(w) {
-        m.boxed(&(*base * Mat4::from_translation(c)), h, col, outline);
+    add_gun_ex(m, base, w, outline, Vec3::ZERO);
+}
+
+/// Gun with its magazine moved by `mag_off` (gun space) — used by reload animations.
+pub fn add_gun_ex(m: &mut ToonMesh, base: &Mat4, w: WeaponId, outline: f32, mag_off: Vec3) {
+    for p in gun_parts(w) {
+        let c = if p.mag { p.c + mag_off } else { p.c };
+        m.boxed(&(*base * Mat4::from_translation(c)), p.h, p.col, outline);
     }
+}
+
+/// Big cartoon head with helmet, eyes and nose. `head` is the head centre transform.
+pub fn add_head(m: &mut ToonMesh, head: &Mat4, team: Team, blink: bool, dead: bool, ow: f32) {
+    let look = team_look(team);
+    m.sphere(head, 0.3, SKIN, ow);
+    let helmet = *head
+        * Mat4::from_translation(vec3(0.0, 0.1, 0.02))
+        * Mat4::from_scale(vec3(1.08, 0.78, 1.08));
+    m.sphere(&helmet, 0.3, look.helmet, ow);
+    m.boxed(
+        &(*head * Mat4::from_translation(vec3(0.0, 0.07, -0.27))),
+        vec3(0.3, 0.025, 0.07),
+        look.helmet,
+        0.0,
+    );
+    let eye_h = if blink && !dead { 0.012 } else { 0.075 };
+    for x in [-0.11f32, 0.11] {
+        let e = *head
+            * Mat4::from_translation(vec3(x, -0.02, -0.25))
+            * Mat4::from_scale(vec3(1.0, eye_h / 0.075, 1.0));
+        m.fill.add_sphere(&e, 0.075, [255, 255, 255], 8, 5);
+        if dead {
+            // cartoon "X" eyes
+            for r in [0.7f32, -0.7] {
+                let xm = *head
+                    * Mat4::from_translation(vec3(x, -0.02, -0.31))
+                    * Mat4::from_rotation_z(r);
+                m.fill.add_box(&xm, vec3(0.06, 0.012, 0.01), [20, 20, 30]);
+            }
+        } else if !blink {
+            m.fill.add_sphere(
+                &(e * Mat4::from_translation(vec3(0.0, 0.0, -0.05))),
+                0.038,
+                [20, 20, 30],
+                6,
+                4,
+            );
+        }
+    }
+    m.fill.add_sphere(
+        &(*head * Mat4::from_translation(vec3(0.0, -0.1, -0.29))),
+        0.05,
+        [255, 180, 150],
+        6,
+        4,
+    );
 }
 
 pub struct SoldierPose {
@@ -164,6 +253,8 @@ pub struct SoldierPose {
     pub blink: bool,
     /// Third-person melee swing 0..1.
     pub melee: f32,
+    /// Seconds into a reload (None = not reloading).
+    pub reload: Option<f32>,
 }
 
 /// Builds a soldier with big cartoon proportions. Returns the world-space muzzle position.
@@ -273,64 +364,45 @@ pub fn add_soldier(m: &mut ToonMesh, p: &SoldierPose) -> Vec3 {
         * Mat4::from_translation(vec3(0.0, 0.62, 0.0))
         * Mat4::from_rotation_x(p.pitch * 0.35);
     let head = neck * Mat4::from_translation(vec3(0.0, 0.2, 0.0));
-    m.sphere(&head, 0.3, SKIN, ow);
-    let helmet = head
-        * Mat4::from_translation(vec3(0.0, 0.1, 0.02))
-        * Mat4::from_scale(vec3(1.08, 0.78, 1.08));
-    m.sphere(&helmet, 0.3, look.helmet, ow);
-    m.boxed(
-        &(head * Mat4::from_translation(vec3(0.0, 0.07, -0.27))),
-        vec3(0.3, 0.025, 0.07),
-        look.helmet,
-        0.0,
-    );
-    // eyes
-    let eye_h = if p.blink { 0.012 } else { 0.075 };
-    for x in [-0.11f32, 0.11] {
-        let e = head
-            * Mat4::from_translation(vec3(x, -0.02, -0.25))
-            * Mat4::from_scale(vec3(1.0, eye_h / 0.075, 1.0));
-        m.fill.add_sphere(&e, 0.075, [255, 255, 255], 8, 5);
-        if !p.blink && p.dead.is_none() {
-            m.fill.add_sphere(
-                &(e * Mat4::from_translation(vec3(0.0, 0.0, -0.05))),
-                0.038,
-                [20, 20, 30],
-                6,
-                4,
-            );
-        }
-        if p.dead.is_some() {
-            // cartoon "X" eyes
-            for r in [0.7f32, -0.7] {
-                let xm =
-                    head * Mat4::from_translation(vec3(x, -0.02, -0.31)) * Mat4::from_rotation_z(r);
-                m.fill.add_box(&xm, vec3(0.06, 0.012, 0.01), [20, 20, 30]);
-            }
-        }
-    }
-    // nose & cheeks
-    m.fill.add_sphere(
-        &(head * Mat4::from_translation(vec3(0.0, -0.1, -0.29))),
-        0.05,
-        [255, 180, 150],
-        6,
-        4,
-    );
+    add_head(m, &head, p.team, p.blink, p.dead.is_some(), ow);
 
     // arms + gun pivot at the shoulders, pitched with the aim
     let aim_pitch = if p.sprint { -0.7 } else { p.pitch };
     let melee_push = (p.melee * std::f32::consts::PI).sin() * 0.35;
+    // reload: gun tilts, the off hand pulls the magazine down and slaps it back in
+    let (reload_k, mag_drop) = match p.reload {
+        Some(t) if p.dead.is_none() => {
+            let k = (t / 0.25).min(1.0);
+            let cyc = (t * 2.6).sin().abs();
+            (k, cyc * 0.22)
+        }
+        _ => (0.0, 0.0),
+    };
+    let aim_pitch = aim_pitch * (1.0 - reload_k) - 0.35 * reload_k;
     let shoulder =
         torso_base * Mat4::from_translation(vec3(0.0, 0.5, 0.0)) * Mat4::from_rotation_x(aim_pitch);
     let gun_base = shoulder
         * Mat4::from_translation(vec3(0.1, -0.08, -0.32 - melee_push))
         * Mat4::from_rotation_y(if p.sprint { 0.7 } else { 0.0 })
+        * Mat4::from_rotation_z(0.5 * reload_k)
         * Mat4::from_scale(Vec3::splat(1.25));
-    add_gun(m, &gun_base, p.weapon, 0.016);
+    let mag_off = vec3(0.0, -mag_drop, 0.0);
+    add_gun_ex(m, &gun_base, p.weapon, 0.016, mag_off);
     // arms: boxes from shoulders to the hands
     let right_hand = gun_base.transform_point3(vec3(0.0, -0.02, 0.0));
-    let left_hand = gun_base.transform_point3(vec3(0.0, 0.03, -0.38));
+    let left_hand = if reload_k > 0.0 {
+        let mag = gun_mag(p.weapon)
+            .map(|g| g.0)
+            .unwrap_or(vec3(0.0, 0.0, -0.3));
+        gun_base
+            .transform_point3(mag + mag_off + vec3(0.0, -0.06, 0.0))
+            .lerp(
+                gun_base.transform_point3(vec3(0.0, 0.03, -0.38)),
+                1.0 - reload_k,
+            )
+    } else {
+        gun_base.transform_point3(vec3(0.0, 0.03, -0.38))
+    };
     for (sx, hand) in [(0.28f32, right_hand), (-0.28, left_hand)] {
         let sh = torso_base.transform_point3(vec3(sx, 0.5, 0.0));
         let mid = (sh + hand) * 0.5;

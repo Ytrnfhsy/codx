@@ -5,10 +5,12 @@ mod audio;
 mod effects;
 mod game;
 mod hud;
+mod killcam;
 mod menu;
 mod mesh;
 mod models;
 mod netclient;
+mod ragdoll;
 mod render;
 mod settings;
 mod ui;
@@ -31,6 +33,9 @@ struct Args {
     no_sound: bool,
     shot: Option<String>,
     shot_after: f32,
+    /// Take the screenshot this many seconds into the first killcam instead.
+    shot_killcam: Option<f32>,
+    score_limit: Option<i32>,
     auto: bool,
     class: Option<usize>,
     team: Option<String>,
@@ -77,6 +82,14 @@ fn parse_args() -> Args {
             }
             "--screenshot-after" => {
                 a.shot_after = next.and_then(|s| s.parse().ok()).unwrap_or(6.0);
+                i += 1;
+            }
+            "--screenshot-killcam" => {
+                a.shot_killcam = next.and_then(|s| s.parse().ok());
+                i += 1;
+            }
+            "--score-limit" => {
+                a.score_limit = next.and_then(|s| s.parse().ok());
                 i += 1;
             }
             "--auto" => a.auto = true,
@@ -131,7 +144,7 @@ fn parse_args() -> Args {
             }
             "-h" | "--help" => {
                 println!(
-                    "toon-warfare [--connect IP:порт] [--name ім'я] [--host] [--map wreck|site|depot|market|cargo] [--mode tdm|sab] [--bots N] [--no-sound] [--size 1280x720]"
+                    "toon-warfare [--connect IP:порт] [--name ім'я] [--host] [--map wreck|site|depot|market|cargo] [--mode tdm|sab] [--bots N] [--score-limit N] [--no-sound] [--size 1280x720]"
                 );
                 std::process::exit(0);
             }
@@ -273,6 +286,9 @@ async fn amain(args: Args) {
         cfg.password = hs.password.clone();
         cfg.max_players = hs.max_players;
         cfg.min_players = 1;
+        if let Some(n) = args.score_limit {
+            cfg.tdm.score_limit = n.max(1);
+        }
         let map = args.map.clone().unwrap_or(hs.map.clone());
         let mode = args.mode.clone().unwrap_or(hs.mode.clone());
         cfg.rotation.retain(|r| !(r.map == map && r.mode == mode));
@@ -658,7 +674,11 @@ async fn amain(args: Args) {
 
         // screenshot for automated testing
         if let Some(path) = &args.shot {
-            if get_time() - start > args.shot_after as f64 {
+            let in_killcam = match (&screen, args.shot_killcam) {
+                (Screen::Game(g), Some(t)) => g.killcam.as_ref().is_some_and(|k| k.age >= t),
+                _ => false,
+            };
+            if in_killcam || get_time() - start > args.shot_after as f64 {
                 get_screen_data().export_png(path);
                 println!("screenshot saved: {path}");
                 if let Screen::Game(g) = &mut screen {

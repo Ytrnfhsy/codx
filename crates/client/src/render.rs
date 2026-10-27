@@ -8,7 +8,55 @@ use macroquad::prelude::*;
 use toon_shared::look_dir;
 use toon_shared::physics::Stance;
 use toon_shared::protocol::{flags, EntSnap, MatchState};
-use toon_shared::weapons::WeaponClass;
+use toon_shared::weapons::{WeaponClass, WeaponId};
+use toon_shared::Team;
+
+/// A living soldier to draw (from live interpolation or from a killcam replay).
+#[derive(Clone)]
+pub struct Actor {
+    pub id: u8,
+    pub pos: Vec3,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub stance: Stance,
+    pub team: Team,
+    pub weapon: WeaponId,
+    pub flags: u8,
+    pub phase: f32,
+    pub walk: f32,
+    /// Melee swing progress 0..1.
+    pub melee: f32,
+    /// Seconds into a reload.
+    pub reload: Option<f32>,
+    /// Spawn protection bubble (shown to teammates only).
+    pub protected: bool,
+}
+
+/// Everything the first-person weapon animation needs.
+pub struct VmState {
+    pub weapon: WeaponId,
+    pub team: Team,
+    pub ads: f32,
+    pub bob_phase: f32,
+    /// Bob amount (walk speed × view bob setting).
+    pub bob: f32,
+    pub sway: Vec2,
+    pub recoil: f32,
+    pub sprint: bool,
+    /// Reload progress 0..1.
+    pub reload: Option<f32>,
+    /// Weapon being raised: 1 = fully down, 0 = ready.
+    pub raise: f32,
+    /// Knife swing progress 0..1.
+    pub knife: Option<f32>,
+    pub throwing: bool,
+    pub flash: bool,
+}
+
+fn smooth(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
 
 pub struct View {
     pub cam: Camera3D,
@@ -73,13 +121,17 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
     let aspect = screen_width() / screen_height().max(1.0);
     let hfov = settings.fov.clamp(60.0, 120.0).to_radians();
     let mut fovy = 2.0 * ((hfov * 0.5).tan() / aspect).atan();
-    let zoom = 1.0 + (g.ws().ads_zoom - 1.0) * g.ads_t;
-    let zoom = if g.weapon().def().scoped && !g.scoped() {
+    let (weapon, ads, scoped, first_person) = match &g.killcam {
+        Some(k) => (k.weapon, k.ads_t, k.scoped(), true),
+        None => (g.weapon(), g.ads_t, g.scoped(), g.alive),
+    };
+    let zoom = 1.0 + (g.tuning.weapon(weapon).ads_zoom - 1.0) * ads;
+    let zoom = if weapon.def().scoped && !scoped {
         1.0 + (zoom - 1.0) * 0.25
     } else {
         zoom
     };
-    if g.alive {
+    if first_person {
         fovy = 2.0 * ((fovy * 0.5).tan() / zoom).atan();
     }
     let dir = look_dir(yaw, pitch);
@@ -164,41 +216,42 @@ pub fn render_world(
     let mut tags = Vec::new();
     let now = g.now;
     let my_team = g.team;
-    let ids: Vec<u8> = g.remotes.keys().copied().collect();
-    for id in ids {
-        let r = g.remotes.get(&id).unwrap();
-        let dead = r.death_time.map(|t| (now - t) as f32);
-        if !r.alive && dead.map(|d| d > 6.0).unwrap_or(true) {
-            continue;
-        }
-        let has_bomb = r.flags & flags::HAS_BOMB != 0;
+    let kc = g.killcam.as_ref();
+    let actors: Vec<Actor> = match kc {
+        Some(k) => k.actors.clone(),
+        None => g.live_actors(),
+    };
+    let mut muzzles = Vec::with_capacity(actors.len());
+    for a in &actors {
+        let has_bomb = a.flags & flags::HAS_BOMB != 0;
         let pose = SoldierPose {
-            pos: r.pos,
-            yaw: r.yaw,
-            pitch: r.pitch,
-            stance: r.stance,
-            team: r.team,
-            weapon: r.weapon,
-            phase: r.phase,
-            walk: r.walk,
-            sprint: r.flags & flags::SPRINT != 0,
-            dead,
+            pos: a.pos,
+            yaw: a.yaw,
+            pitch: a.pitch,
+            stance: a.stance,
+            team: a.team,
+            weapon: a.weapon,
+            phase: a.phase,
+            walk: a.walk,
+            sprint: a.flags & flags::SPRINT != 0,
+            dead: None,
             has_bomb,
-            blink: ((now * 0.37 + id as f64 * 0.31).fract()) < 0.035,
-            melee: ((now - r.melee_t) as f32 / 0.4).clamp(0.0, 1.0)
-                * if now - r.melee_t < 0.4 { 1.0 } else { 0.0 },
+            blink: ((now * 0.37 + a.id as f64 * 0.31).fract()) < 0.035,
+            melee: a.melee,
+            reload: a.reload,
         };
         let muzzle = models::add_soldier(&mut m, &pose);
+
         let floor = g
             .world
-            .floor_below(r.pos + vec3(0.0, 0.3, 0.0), 3.0)
-            .unwrap_or(r.pos.y);
-        blob_shadow(&mut shadows, vec3(r.pos.x, floor + 0.03, r.pos.z), 0.5);
-        if r.protected && r.team == my_team {
+            .floor_below(a.pos + vec3(0.0, 0.3, 0.0), 3.0)
+            .unwrap_or(a.pos.y);
+        blob_shadow(&mut shadows, vec3(a.pos.x, floor + 0.03, a.pos.z), 0.5);
+        if a.protected && a.team == my_team && kc.is_none() {
             // spawn protection: a soft pulsing bubble in team colour
-            let c = crate::models::team_look(r.team).helmet;
+            let c = crate::models::team_look(a.team).helmet;
             let pulse = 0.5 + 0.5 * ((now * 5.0) as f32).sin();
-            let centre = r.pos + vec3(0.0, r.stance.height() * 0.5, 0.0);
+            let centre = a.pos + vec3(0.0, a.stance.height() * 0.5, 0.0);
             let m = Mat4::from_translation(centre) * Mat4::from_scale(vec3(1.0, 1.25, 1.0));
             shadows.add_sphere_ex(
                 &m,
@@ -210,10 +263,10 @@ pub fn render_world(
                 true,
             );
         }
-        if r.alive {
-            let head = r.pos + vec3(0.0, r.stance.height() + 0.45, 0.0);
-            let friendly = r.team == my_team;
-            let name = g.name_of(id).unwrap_or("?").to_string();
+        if kc.is_none() {
+            let head = a.pos + vec3(0.0, a.stance.height() + 0.45, 0.0);
+            let friendly = a.team == my_team;
+            let name = g.name_of(a.id).unwrap_or("?").to_string();
             tags.push(NameTag {
                 pos: head,
                 name,
@@ -221,12 +274,28 @@ pub fn render_world(
                 bomb: has_bomb,
             });
         }
-        if let Some(rr) = g.remotes.get_mut(&id) {
-            rr.muzzle = muzzle;
+        muzzles.push((a.id, muzzle));
+    }
+    // ragdolls
+    let ragdolls = match kc {
+        Some(k) => &k.ragdolls,
+        None => &g.ragdolls,
+    };
+    for (_, r) in ragdolls {
+        r.draw(&mut m, true, now as f32);
+
+        let c = r.centre();
+        if let Some(f) = g.world.floor_below(c + vec3(0.0, 0.2, 0.0), 2.5) {
+            blob_shadow(&mut shadows, vec3(c.x, f + 0.03, c.z), 0.7);
         }
     }
+    let ents = kc.map(|k| &k.ents).unwrap_or(&g.ents);
+    let bomb = match kc {
+        Some(k) => k.bomb.as_ref(),
+        None => g.bomb.as_ref(),
+    };
     // entities
-    for e in &g.ents {
+    for e in ents {
         match e {
             EntSnap::Grenade { id, pos } => {
                 models::add_grenade(&mut m, Vec3::from_array(*pos), now as f32 + *id as f32)
@@ -240,7 +309,12 @@ pub fn render_world(
         }
     }
     // airstrike jets (purely visual)
-    for (from, to, t0) in &g.airstrikes {
+    let jets = if kc.is_some() {
+        &[][..]
+    } else {
+        &g.airstrikes[..]
+    };
+    for (from, to, t0) in jets {
         let k = ((now - t0) / 3.6) as f32;
         if (0.0..=1.0).contains(&k) {
             let dir = (*to - *from).normalize();
@@ -253,7 +327,7 @@ pub fn render_world(
         }
     }
     // bomb
-    if let Some(b) = &g.bomb {
+    if let Some(b) = bomb {
         if b.carrier.is_none() && g.state != MatchState::Warmup {
             models::add_bomb(
                 &mut m,
@@ -269,12 +343,20 @@ pub fn render_world(
     mats.draw_toon(&m);
 
     // shadows + particles (blended)
-    g.fx.build(&mut shadows, view.pos);
+    let fx = kc.map(|k| &k.fx).unwrap_or(&g.fx);
+    fx.build(&mut shadows, view.pos);
     gl_use_material(&mats.fx);
     shadows.draw();
     gl_use_default_material();
-    g.fx.draw_tracers();
+    fx.draw_tracers();
 
+    if g.killcam.is_none() {
+        for (id, mz) in muzzles {
+            if let Some(r) = g.remotes.get_mut(&id) {
+                r.muzzle = mz;
+            }
+        }
+    }
     g.frame_mesh = m;
     g.fx_mesh = shadows;
     tags
@@ -304,9 +386,12 @@ pub fn render_viewmodel(
     settings: &Settings,
     target: Option<RenderTarget>,
 ) {
-    if !g.alive || g.scoped() {
-        return;
-    }
+    let vm = match &g.killcam {
+        Some(k) if !k.scoped() => k.vm_state(&g.tuning),
+        Some(_) => return,
+        None if g.alive && !g.scoped() => g.vm_state(),
+        None => return,
+    };
     let cam = ViewmodelCamera(Camera3D {
         position: Vec3::ZERO,
         target: vec3(0.0, 0.0, -1.0),
@@ -321,11 +406,14 @@ pub fn render_viewmodel(
     });
     set_camera(&cam);
     mats.set_view(Vec3::ZERO, Color::new(0.0, 0.0, 0.0, 1.0), 100.0, 200.0);
+    draw_viewmodel(&vm, mats, settings);
+}
 
-    let now = g.now;
-    let w = g.weapon();
+fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
+    use std::f32::consts::PI;
+    let w = vm.weapon;
     let def = w.def();
-    let ads = g.ads_t;
+    let ads = vm.ads;
     let hip = vec3(0.26, -0.27, -0.66);
     let ads_pos = vec3(0.0, -0.132, -0.5);
     let mut pos = hip.lerp(ads_pos, ads);
@@ -333,58 +421,118 @@ pub fn render_viewmodel(
     let mut yaw = 0.0f32;
     let mut roll = 0.0f32;
     // bob & sway
-    let bob_k = g.walk_amount * (1.0 - ads * 0.85) * g.tuning.movement.view_bob;
     pos += vec3(
-        g.bob_phase.sin() * 0.012,
-        -(g.bob_phase.cos().abs()) * 0.016,
+        vm.bob_phase.sin() * 0.012,
+        -(vm.bob_phase.cos().abs()) * 0.016,
         0.0,
-    ) * bob_k;
-    pos += vec3(-g.sway.x, g.sway.y, 0.0) * (1.0 - ads * 0.7);
-    // recoil
-    pos.z += g.recoil_vis * 0.035;
-    pitch += g.recoil_vis * 0.06;
-    // sprint
-    if g.sprinting {
+    ) * vm.bob;
+    pos += vec3(-vm.sway.x, vm.sway.y, 0.0) * (1.0 - ads * 0.7);
+    // recoil: kick back and up, with a little random-looking roll
+    pos.z += vm.recoil * 0.035;
+    pitch += vm.recoil * 0.06;
+    roll += (vm.recoil * 9.0).sin() * vm.recoil * 0.02;
+    // sprint: gun across the chest, bouncing with the stride
+    if vm.sprint {
         pos += vec3(-0.04, -0.06, 0.04);
+        pos += vec3(
+            vm.bob_phase.sin() * 0.025,
+            -(vm.bob_phase.cos().abs()) * 0.03,
+            0.0,
+        );
         yaw += 0.7;
-        roll += 0.25;
+        roll += 0.25 + vm.bob_phase.sin() * 0.05;
         pitch -= 0.15;
     }
-    // reload
-    if let Some((end, dur)) = g.reload_until {
-        let t = (1.0 - ((end - now) / dur) as f32).clamp(0.0, 1.0);
-        let k = (t * std::f32::consts::PI).sin();
-        pitch -= k * 0.7;
-        roll += k * 0.5;
-        pos.y -= k * 0.08;
+    // reload: tilt the gun, pull the magazine, slap a new one in, rack the bolt
+    let mut mag_off = Vec3::ZERO;
+    let mut hand_to_mag = 0.0f32;
+    let mut pump = 0.0f32;
+    let shotgun = def.class == WeaponClass::Shotgun;
+    if let Some(t) = vm.reload {
+        let tilt = smooth(t / 0.12) * (1.0 - smooth((t - 0.86) / 0.14));
+        pitch += tilt * 0.22;
+        roll += tilt * 0.55;
+        yaw += tilt * 0.12;
+        pos += vec3(-0.05, -0.03, 0.03) * tilt;
+        if shotgun {
+            // feed shells one by one into the loading port, then pump
+            if (0.08..0.82).contains(&t) {
+                let ph = ((t - 0.08) / 0.74 * 4.0).fract();
+                hand_to_mag = (ph * PI).sin();
+            }
+            if t > 0.84 {
+                pump = ((t - 0.84) / 0.14 * PI).sin().max(0.0);
+            }
+        } else {
+            let out = smooth((t - 0.14) / 0.18);
+            let back_in = smooth((t - 0.44) / 0.2);
+            let drop = out * (1.0 - back_in);
+            mag_off = vec3(0.02 * drop, -0.5 * drop, 0.1 * drop);
+            hand_to_mag = smooth((t - 0.08) / 0.1) * (1.0 - smooth((t - 0.66) / 0.1));
+            // magazine seats with a jolt
+            if (0.64..0.74).contains(&t) {
+                let k = ((t - 0.64) / 0.1 * PI).sin();
+                pos.y += 0.014 * k;
+                pitch += 0.04 * k;
+            }
+            // charging handle / bolt: the gun kicks back
+            if (0.78..0.92).contains(&t) {
+                let k = ((t - 0.78) / 0.14 * PI).sin();
+                pos.z += 0.035 * k;
+                roll -= 0.08 * k;
+            }
+        }
     }
-    // weapon switch
-    if now < g.switch_until {
-        let k = ((g.switch_until - now) as f32 / g.switch_dur.max(0.05)).clamp(0.0, 1.0);
+    // weapon raise / switch
+    if vm.raise > 0.0 {
+        let k = smooth(vm.raise);
         pos.y -= k * 0.35;
         pitch -= k * 0.8;
+        roll += k * 0.3;
     }
-    // knife / grenade: lower the gun
-    let knife = now < g.melee_until;
-    let throwing = g.cooking.is_some() || now < g.throw_until;
-    if knife || throwing {
-        pos.y -= 0.25;
-        pitch -= 0.6;
+    // knife / grenade: lower the gun out of the way
+    let knife = vm.knife;
+    if knife.is_some() || vm.throwing {
+        let k = knife
+            .map(|t| (t * PI).sin().min(1.0) * 1.4)
+            .unwrap_or(1.0)
+            .min(1.0);
+        pos.y -= 0.25 * k;
+        pos.x -= 0.08 * k;
+        pitch -= 0.6 * k;
     }
     let base = trs(pos, yaw, pitch, roll) * Mat4::from_scale(Vec3::splat(0.85));
     let mut m = ToonMesh::new();
     let ow = if settings.outlines { 0.004 } else { 0.0 };
-    for (c, h, col) in models::gun_parts(w) {
-        m.boxed(&(base * Mat4::from_translation(c)), h, col, ow);
+    for p in models::gun_parts(w) {
+        let c = if p.mag { p.c + mag_off } else { p.c };
+        m.boxed(&(base * Mat4::from_translation(c)), p.h, p.col, ow);
+    }
+    // shotgun pump slides back
+    if pump > 0.0 {
+        m.boxed(
+            &(base * Mat4::from_translation(vec3(0.0, 0.035, -0.38 + pump * 0.1))),
+            vec3(0.034, 0.03, 0.1),
+            [170, 104, 52],
+            ow,
+        );
     }
     // arms
-    let sleeve = models::team_look(g.team).shirt;
+    let sleeve = models::team_look(vm.team).shirt;
     let grip = base.transform_point3(vec3(0.0, -0.03, 0.02));
-    let fore = base.transform_point3(if def.class == WeaponClass::Pistol {
+    let fore_rest = if def.class == WeaponClass::Pistol {
         vec3(-0.02, -0.03, 0.03)
     } else {
-        vec3(0.0, 0.02, -0.36)
-    });
+        vec3(0.0, 0.02, -0.36 + pump * 0.1)
+    };
+    let mag_spot = if shotgun {
+        vec3(0.02, 0.0, -0.12)
+    } else {
+        models::gun_mag(w)
+            .map(|g| g.0 + mag_off - vec3(0.0, 0.06, 0.0))
+            .unwrap_or(fore_rest)
+    };
+    let fore = base.transform_point3(fore_rest.lerp(mag_spot, hand_to_mag));
     for (hand, shoulder) in [
         (grip, vec3(0.38, -0.55, -0.1)),
         (fore, vec3(-0.3, -0.6, -0.2)),
@@ -400,16 +548,28 @@ pub fn render_viewmodel(
         );
         m.sphere(&Mat4::from_translation(hand), 0.04, [240, 236, 228], ow);
     }
-    // knife swing
-    if knife {
-        let t = 1.0 - ((g.melee_until - now) / 0.45) as f32;
-        let k = (t * std::f32::consts::PI).sin();
-        let kb = trs(
-            vec3(0.12 - k * 0.1, -0.12, -0.25 - k * 0.25),
-            -0.3 + k * 0.4,
-            0.0,
-            0.0,
+    // a shell in the off hand while loading the shotgun
+    if shotgun && hand_to_mag > 0.05 {
+        m.boxed(
+            &(Mat4::from_translation(fore + vec3(0.0, 0.03, 0.0))),
+            vec3(0.012, 0.012, 0.03),
+            [220, 50, 40],
+            ow,
         );
+    }
+    // knife slash: a sweeping arc from right to left
+    let mut swoosh = crate::mesh::MeshBuilder::new();
+    if let Some(t) = knife {
+        let knife_at = |t: f32| {
+            let e = smooth(t * 1.15);
+            let s = (e * PI).sin();
+            (
+                vec3(0.32 - 0.6 * e, -0.06 - 0.06 * s, -0.32 - 0.18 * s),
+                0.9 - 1.8 * e,
+            )
+        };
+        let (kp, ky) = knife_at(t);
+        let kb = trs(kp, ky, -0.15, -0.5);
         m.boxed(&kb, vec3(0.012, 0.025, 0.12), [220, 225, 235], ow);
         m.boxed(
             &(kb * Mat4::from_translation(vec3(0.0, 0.0, 0.14))),
@@ -423,9 +583,37 @@ pub fn render_viewmodel(
             [240, 236, 228],
             ow,
         );
+        // arm to the knife hand
+        let hand = kb.transform_point3(vec3(0.0, 0.0, 0.16));
+        let shoulder = vec3(0.38, -0.55, -0.1);
+        let d = hand - shoulder;
+        m.boxed(
+            &Mat4::from_rotation_translation(
+                Quat::from_rotation_arc(Vec3::NEG_Z, d.normalize()),
+                (hand + shoulder) * 0.5,
+            ),
+            vec3(0.036, 0.036, d.length() * 0.5),
+            sleeve,
+            ow,
+        );
+        // motion trail
+        if (0.1..0.75).contains(&t) {
+            let n = 8;
+            for i in 0..n {
+                let a = t - 0.2 * (i as f32 / n as f32);
+                let b = t - 0.2 * ((i + 1) as f32 / n as f32);
+                let (pa, ya) = knife_at(a.max(0.0));
+                let (pb, yb) = knife_at(b.max(0.0));
+                let tip = |p: Vec3, y: f32| {
+                    trs(p, y, -0.15, -0.5).transform_point3(vec3(0.0, 0.0, -0.12))
+                };
+                let alpha = (150.0 * (1.0 - i as f32 / n as f32)) as u8;
+                swoosh.add_quad([pa, tip(pa, ya), tip(pb, yb), pb], [255, 255, 255, alpha]);
+            }
+        }
     }
     // grenade in hand
-    if throwing {
+    if vm.throwing {
         let gpos = vec3(0.16, -0.15, -0.3);
         m.sphere(&Mat4::from_translation(gpos), 0.05, [70, 110, 60], ow);
         m.sphere(
@@ -437,9 +625,9 @@ pub fn render_viewmodel(
     }
     mats.draw_toon(&m);
     // muzzle flash
-    if now - g.muzzle_flash < 0.05 {
+    let mut f = swoosh;
+    if vm.flash {
         let mp = base.transform_point3(models::muzzle(w));
-        let mut f = crate::mesh::MeshBuilder::new();
         let s = 0.06 + def.heft * 0.05;
         for (a, b) in [
             (Vec3::X, Vec3::Y),
@@ -466,9 +654,8 @@ pub fn render_viewmodel(
             220,
             true,
         );
-        gl_use_material(&mats.fx);
-        f.draw();
-        gl_use_default_material();
     }
-    let _ = Stance::Stand;
+    gl_use_material(&mats.fx);
+    f.draw();
+    gl_use_default_material();
 }

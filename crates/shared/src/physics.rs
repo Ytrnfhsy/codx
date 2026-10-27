@@ -144,6 +144,39 @@ impl World {
         self.raycast(a, d / len, len).is_none()
     }
 
+    /// Pushes a sphere out of every box it overlaps (smallest-penetration axis).
+    /// Returns the corrected centre and the summed push normal, if anything was hit.
+    pub fn push_out_sphere(&self, p: Vec3, r: f32) -> Option<(Vec3, Vec3)> {
+        let mut c = p;
+        let mut normal = Vec3::ZERO;
+        let bb = Aabb {
+            min: p - Vec3::splat(r),
+            max: p + Vec3::splat(r),
+        };
+        self.for_candidates(&bb, |b| {
+            let min = b.min - Vec3::splat(r);
+            let max = b.max + Vec3::splat(r);
+            if c.cmpgt(min).all() && c.cmplt(max).all() {
+                let pen = [
+                    (c.x - min.x, vec3(-1.0, 0.0, 0.0)),
+                    (max.x - c.x, vec3(1.0, 0.0, 0.0)),
+                    (c.y - min.y, vec3(0.0, -1.0, 0.0)),
+                    (max.y - c.y, vec3(0.0, 1.0, 0.0)),
+                    (c.z - min.z, vec3(0.0, 0.0, -1.0)),
+                    (max.z - c.z, vec3(0.0, 0.0, 1.0)),
+                ];
+                let (d, n) =
+                    pen.iter()
+                        .copied()
+                        .fold((f32::MAX, Vec3::ZERO), |a, b| if b.0 < a.0 { b } else { a });
+                c += n * d;
+                normal += n;
+            }
+            false
+        });
+        (normal != Vec3::ZERO).then(|| (c, normal.normalize_or_zero()))
+    }
+
     /// Height of the floor below `p` (searching down to `p.y - max_drop`).
     pub fn floor_below(&self, p: Vec3, max_drop: f32) -> Option<f32> {
         self.raycast(
