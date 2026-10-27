@@ -35,7 +35,9 @@ pub struct Actor {
 /// Everything the first-person weapon animation needs.
 pub struct VmState {
     pub weapon: WeaponId,
-    pub team: Team,
+    /// Sleeve and hand colours.
+    pub sleeve: [u8; 3],
+    pub hand: [u8; 3],
     pub ads: f32,
     pub bob_phase: f32,
     /// Bob amount (walk speed × view bob setting).
@@ -240,79 +242,11 @@ pub fn render_world(
     let mut tags = Vec::new();
     let now = g.now;
     let my_team = g.team;
+    let mut painted = std::mem::take(&mut g.painted_meshes);
+    for pm in painted.values_mut() {
+        pm.clear();
+    }
     let kc = g.killcam.as_ref();
-    let actors: Vec<Actor> = match kc {
-        Some(k) => k.actors.clone(),
-        None => g.live_actors(),
-    };
-    let mut muzzles = Vec::with_capacity(actors.len());
-    for a in &actors {
-        let has_bomb = a.flags & flags::HAS_BOMB != 0;
-        let pose = SoldierPose {
-            pos: a.pos,
-            yaw: a.yaw,
-            pitch: a.pitch,
-            stance: a.stance,
-            team: a.team,
-            weapon: a.weapon,
-            phase: a.phase,
-            walk: a.walk,
-            sprint: a.flags & flags::SPRINT != 0,
-            dead: None,
-            has_bomb,
-            blink: ((now * 0.37 + a.id as f64 * 0.31).fract()) < 0.035,
-            melee: a.melee,
-            reload: a.reload,
-        };
-        let muzzle = models::add_soldier(&mut m, &pose);
-
-        let floor = g
-            .world
-            .floor_below(a.pos + vec3(0.0, 0.3, 0.0), 3.0)
-            .unwrap_or(a.pos.y);
-        blob_shadow(&mut shadows, vec3(a.pos.x, floor + 0.03, a.pos.z), 0.5);
-        if a.protected && a.team == my_team && kc.is_none() {
-            // spawn protection: a soft pulsing bubble in team colour
-            let c = crate::models::team_look(a.team).helmet;
-            let pulse = 0.5 + 0.5 * ((now * 5.0) as f32).sin();
-            let centre = a.pos + vec3(0.0, a.stance.height() * 0.5, 0.0);
-            let m = Mat4::from_translation(centre) * Mat4::from_scale(vec3(1.0, 1.25, 1.0));
-            shadows.add_sphere_ex(
-                &m,
-                0.95 + pulse * 0.05,
-                c,
-                14,
-                9,
-                (45.0 + pulse * 35.0) as u8,
-                true,
-            );
-        }
-        if kc.is_none() {
-            let head = a.pos + vec3(0.0, a.stance.height() + 0.45, 0.0);
-            let friendly = a.team == my_team;
-            let name = g.name_of(a.id).unwrap_or("?").to_string();
-            tags.push(NameTag {
-                pos: head,
-                name,
-                friendly,
-                bomb: has_bomb,
-            });
-        }
-        muzzles.push((a.id, muzzle));
-    }
-    // ragdolls
-    let ragdolls = match kc {
-        Some(k) => &k.ragdolls,
-        None => &g.ragdolls,
-    };
-    for (_, r) in ragdolls {
-        r.draw(&mut m, true, now as f32);
-
-        let c = r.centre();
-        if let Some(f) = g.world.floor_below(c + vec3(0.0, 0.2, 0.0), 2.5) {
-            blob_shadow(&mut shadows, vec3(c.x, f + 0.03, c.z), 0.7);
-        }
-    }
     let ents = kc.map(|k| &k.ents).unwrap_or(&g.ents);
     let bomb = match kc {
         Some(k) => k.bomb.as_ref(),
@@ -379,10 +313,112 @@ pub fn render_world(
             );
         }
     }
+    // the black cartoon outlines can be turned off; characters always keep their
+    // team-coloured silhouette
     if !settings.outlines {
         m.outline.clear();
     }
+    let actors: Vec<Actor> = match kc {
+        Some(k) => k.actors.clone(),
+        None => g.live_actors(),
+    };
+    let mut muzzles = Vec::with_capacity(actors.len());
+    for a in &actors {
+        let has_bomb = a.flags & flags::HAS_BOMB != 0;
+        let pose = SoldierPose {
+            pos: a.pos,
+            yaw: a.yaw,
+            pitch: a.pitch,
+            stance: a.stance,
+            team: a.team,
+            weapon: a.weapon,
+            skin: g.look_of(a.id).0,
+            lod: {
+                let d = a.pos.distance(view.pos);
+                if d < 8.0 {
+                    4
+                } else if d < 22.0 {
+                    3
+                } else {
+                    2
+                }
+            },
+            phase: a.phase,
+            walk: a.walk,
+            sprint: a.flags & flags::SPRINT != 0,
+            dead: None,
+            has_bomb,
+            blink: ((now * 0.37 + a.id as f64 * 0.31).fract()) < 0.035,
+            melee: a.melee,
+            reload: a.reload,
+        };
+        let muzzle = match g.look_of(a.id).1 {
+            Some(sid) => models::add_soldier(&mut m, Some(painted.entry(sid).or_default()), &pose),
+            None => models::add_soldier(&mut m, None, &pose),
+        };
+
+        let floor = g
+            .world
+            .floor_below(a.pos + vec3(0.0, 0.3, 0.0), 3.0)
+            .unwrap_or(a.pos.y);
+        blob_shadow(&mut shadows, vec3(a.pos.x, floor + 0.03, a.pos.z), 0.5);
+        if a.protected && a.team == my_team && kc.is_none() {
+            // spawn protection: a soft pulsing bubble in team colour
+            let c = crate::models::team_look(a.team).helmet;
+            let pulse = 0.5 + 0.5 * ((now * 5.0) as f32).sin();
+            let centre = a.pos + vec3(0.0, a.stance.height() * 0.5, 0.0);
+            let m = Mat4::from_translation(centre) * Mat4::from_scale(vec3(1.0, 1.25, 1.0));
+            shadows.add_sphere_ex(
+                &m,
+                0.95 + pulse * 0.05,
+                c,
+                14,
+                9,
+                (45.0 + pulse * 35.0) as u8,
+                true,
+            );
+        }
+        if kc.is_none() {
+            let head = a.pos + vec3(0.0, a.stance.height() + 0.45, 0.0);
+            let friendly = a.team == my_team;
+            let name = g.name_of(a.id).unwrap_or("?").to_string();
+            tags.push(NameTag {
+                pos: head,
+                name,
+                friendly,
+                bomb: has_bomb,
+            });
+        }
+        muzzles.push((a.id, muzzle));
+    }
+    // ragdolls
+    let ragdolls = match kc {
+        Some(k) => &k.ragdolls,
+        None => &g.ragdolls,
+    };
+    for (id, r) in ragdolls {
+        let (skin, sid) = g.look_of(*id);
+        match sid {
+            Some(sid) => r.draw(
+                &mut m,
+                Some(painted.entry(sid).or_default()),
+                &skin,
+                now as f32,
+            ),
+            None => r.draw(&mut m, None, &skin, now as f32),
+        }
+
+        let c = r.centre();
+        if let Some(f) = g.world.floor_below(c + vec3(0.0, 0.2, 0.0), 2.5) {
+            blob_shadow(&mut shadows, vec3(c.x, f + 0.03, c.z), 0.7);
+        }
+    }
     mats.draw_toon(&m);
+    for (sid, pm) in &painted {
+        if let Some(tex) = g.skin_assets.get(sid).and_then(|a| a.tex.as_ref()) {
+            mats.draw_toon_painted(pm, tex);
+        }
+    }
 
     // shadows + particles (blended)
     let fx = kc.map(|k| &k.fx).unwrap_or(&g.fx);
@@ -401,6 +437,7 @@ pub fn render_world(
     }
     g.frame_mesh = m;
     g.fx_mesh = shadows;
+    g.painted_meshes = painted;
     tags
 }
 
@@ -437,7 +474,11 @@ pub fn render_viewmodel(
     target: Option<RenderTarget>,
 ) {
     let vm = match &g.killcam {
-        Some(k) if !k.scoped() => k.vm_state(&g.tuning),
+        Some(k) if !k.scoped() => {
+            let mut vm = k.vm_state(&g.tuning);
+            (vm.sleeve, vm.hand) = g.vm_colors(k.info.killer, k.team);
+            vm
+        }
         Some(_) => return,
         None if g.alive && !g.scoped() => g.vm_state(),
         None => return,
@@ -588,7 +629,7 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
         );
     }
     // arms
-    let sleeve = models::team_look(vm.team).shirt;
+    let sleeve = vm.sleeve;
     let grip = base.transform_point3(vec3(0.0, -0.03, 0.02));
     let fore_rest = if def.class == WeaponClass::Pistol {
         vec3(-0.02, -0.03, 0.03)
@@ -616,7 +657,7 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
             sleeve,
             ow,
         );
-        m.sphere(&Mat4::from_translation(hand), 0.04, [240, 236, 228], ow);
+        m.sphere(&Mat4::from_translation(hand), 0.045, vm.hand, ow);
     }
     // a shell in the off hand while loading the shotgun
     if shotgun && hand_to_mag > 0.05 {

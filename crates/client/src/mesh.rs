@@ -33,6 +33,41 @@ pub fn shade(c: [u8; 3], n: Vec3) -> [u8; 4] {
     ]
 }
 
+/// One lit vertex. With a painted-skin `rect`, the colour is just the light (the texture
+/// supplies the paint), `normal.w = 1` tells the shader to sample it, and (u, v) are mapped
+/// into the rectangle.
+#[allow(clippy::too_many_arguments)]
+fn vert(
+    p: Vec3,
+    wn: Vec3,
+    color: [u8; 3],
+    alpha: u8,
+    flat_color: bool,
+    rect: Option<[f32; 4]>,
+    u: f32,
+    v: f32,
+) -> Vertex {
+    let mut col = if flat_color {
+        [color[0], color[1], color[2], 255]
+    } else {
+        shade(color, wn)
+    };
+    col[3] = alpha;
+    let (uv, w) = match rect {
+        Some(r) => (
+            vec2(r[0] + (r[2] - r[0]) * u, r[1] + (r[3] - r[1]) * v),
+            1.0,
+        ),
+        None => (Vec2::ZERO, 0.0),
+    };
+    Vertex {
+        position: p,
+        uv,
+        color: col,
+        normal: if flat_color { Vec4::ZERO } else { wn.extend(w) },
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct Chunk {
     pub verts: Vec<Vertex>,
@@ -214,6 +249,26 @@ impl MeshBuilder {
         alpha: u8,
         flat_color: bool,
     ) {
+        self.sphere_impl(m, r, color, seg, rings, alpha, flat_color, None);
+    }
+
+    /// Sphere textured with a painted-skin rectangle (latitude/longitude unwrap).
+    pub fn add_sphere_painted(&mut self, m: &Mat4, r: f32, seg: u32, rings: u32, rect: [f32; 4]) {
+        self.sphere_impl(m, r, [255, 255, 255], seg, rings, 255, false, Some(rect));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn sphere_impl(
+        &mut self,
+        m: &Mat4,
+        r: f32,
+        color: [u8; 3],
+        seg: u32,
+        rings: u32,
+        alpha: u8,
+        flat_color: bool,
+        rect: Option<[f32; 4]>,
+    ) {
         let n_verts = ((seg + 1) * (rings + 1)) as usize;
         let c = self.chunk_for(n_verts);
         let base = c.verts.len() as u16;
@@ -226,22 +281,8 @@ impl MeshBuilder {
                 let n = Vec3::new(phi.sin() * th.cos(), phi.cos(), phi.sin() * th.sin());
                 let p = m.transform_point3(n * r);
                 let wn = m.transform_vector3(n).normalize_or_zero();
-                let mut col = if flat_color {
-                    [color[0], color[1], color[2], 255]
-                } else {
-                    shade(color, wn)
-                };
-                col[3] = alpha;
-                c.verts.push(Vertex {
-                    position: p,
-                    uv: Vec2::ZERO,
-                    color: col,
-                    normal: if flat_color {
-                        Vec4::ZERO
-                    } else {
-                        wn.extend(0.0)
-                    },
-                });
+                c.verts
+                    .push(vert(p, wn, color, alpha, flat_color, rect, u, v));
             }
         }
         for j in 0..rings {
@@ -249,6 +290,208 @@ impl MeshBuilder {
                 let a = base + (j * (seg + 1) + i) as u16;
                 let b = a + (seg + 1) as u16;
                 // CCW from outside
+                c.idx.extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
+            }
+        }
+    }
+
+    /// Box with rounded edges and corners (radius `r`), `n` subdivisions per face.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_rounded_box_ex(
+        &mut self,
+        m: &Mat4,
+        half: Vec3,
+        r: f32,
+        color: [u8; 3],
+        alpha: u8,
+        flat_color: bool,
+        n: u32,
+    ) {
+        self.rounded_impl(m, half, r, color, alpha, flat_color, n, None);
+    }
+
+    /// Rounded box with one painted-skin rectangle per face, in `BOX_FACES` order
+    /// (+X, -X, +Y, -Y, +Z, -Z).
+    pub fn add_rounded_box_painted(
+        &mut self,
+        m: &Mat4,
+        half: Vec3,
+        r: f32,
+        n: u32,
+        rects: &[[f32; 4]; 6],
+    ) {
+        self.rounded_impl(m, half, r, [255, 255, 255], 255, false, n, Some(rects));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn rounded_impl(
+        &mut self,
+        m: &Mat4,
+        half: Vec3,
+        r: f32,
+        color: [u8; 3],
+        alpha: u8,
+        flat_color: bool,
+        n: u32,
+        rects: Option<&[[f32; 4]; 6]>,
+    ) {
+        let n = n.max(1);
+        let r = r.min(half.min_element()).max(0.0);
+        let inner = half - Vec3::splat(r);
+        let verts = 6 * ((n + 1) * (n + 1)) as usize;
+        let c = self.chunk_for(verts);
+        // more vertices near the edges, where the surface curves
+        let warp = |t: f32| (((t * 2.0 - 1.0) * std::f32::consts::FRAC_PI_2).sin() + 1.0) * 0.5;
+        for (f, (fnorm, corners)) in BOX_FACES.iter().enumerate() {
+            let base = c.verts.len() as u16;
+            let rect = rects.map(|r| r[f]);
+            for j in 0..=n {
+                let v = warp(j as f32 / n as f32);
+                for i in 0..=n {
+                    let u = warp(i as f32 / n as f32);
+                    let a = corners[0].lerp(corners[1], u);
+                    let b = corners[3].lerp(corners[2], u);
+                    let q = a.lerp(b, v) * half;
+                    let core = q.clamp(-inner, inner);
+                    let d = q - core;
+                    let dir = if d.length_squared() > 1e-10 {
+                        d.normalize()
+                    } else {
+                        *fnorm
+                    };
+                    let p = m.transform_point3(core + dir * r);
+                    let wn = m.transform_vector3(dir).normalize_or_zero();
+                    // texture: u left→right seen from outside, v from the face's top down
+                    c.verts
+                        .push(vert(p, wn, color, alpha, flat_color, rect, u, 1.0 - v));
+                }
+            }
+            let row = (n + 1) as u16;
+            for j in 0..n as u16 {
+                for i in 0..n as u16 {
+                    let a = base + j * row + i;
+                    let b = a + row;
+                    c.idx.extend_from_slice(&[a, a + 1, b + 1, a, b + 1, b]);
+                }
+            }
+        }
+    }
+
+    /// Capsule (cylinder with round ends) between `a` and `b`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_capsule_ex(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        r: f32,
+        color: [u8; 3],
+        alpha: u8,
+        flat_color: bool,
+        seg: u32,
+        half_rings: u32,
+    ) {
+        self.capsule_impl(a, b, r, color, alpha, flat_color, seg, half_rings, None);
+    }
+
+    /// Painted capsule: the rectangle wraps around it, its top edge at `b`; `right` points
+    /// to where the texture's left/right seam starts (keeps limb textures stable).
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_capsule_painted(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        r: f32,
+        seg: u32,
+        half_rings: u32,
+        right: Vec3,
+        rect: [f32; 4],
+    ) {
+        self.capsule_impl(
+            a,
+            b,
+            r,
+            [255, 255, 255],
+            255,
+            false,
+            seg,
+            half_rings,
+            Some((right, rect)),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn capsule_impl(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        r: f32,
+        color: [u8; 3],
+        alpha: u8,
+        flat_color: bool,
+        seg: u32,
+        half_rings: u32,
+        paint: Option<(Vec3, [f32; 4])>,
+    ) {
+        let d = b - a;
+        let len = d.length();
+        let axis = if len > 1e-5 { d / len } else { Vec3::Y };
+        let rot = match paint {
+            Some((right, _)) => {
+                let x = (right - axis * right.dot(axis)).normalize_or_zero();
+                let x = if x == Vec3::ZERO {
+                    axis.any_orthonormal_vector()
+                } else {
+                    x
+                };
+                let z = x.cross(axis);
+                Quat::from_mat3(&Mat3::from_cols(x, axis, z))
+            }
+            None => Quat::from_rotation_arc(Vec3::Y, axis),
+        };
+        let half_rings = half_rings.max(1);
+        // rings from the top pole (at b) down to the bottom pole (at a)
+        let mut rings: Vec<(f32, f32)> = Vec::new(); // (phi, y offset)
+        for k in 0..=half_rings {
+            rings.push((
+                k as f32 / half_rings as f32 * std::f32::consts::FRAC_PI_2,
+                len,
+            ));
+        }
+        for k in 0..=half_rings {
+            rings.push((
+                std::f32::consts::FRAC_PI_2
+                    + k as f32 / half_rings as f32 * std::f32::consts::FRAC_PI_2,
+                0.0,
+            ));
+        }
+        let n_verts = rings.len() * (seg + 1) as usize;
+        let c = self.chunk_for(n_verts);
+        let base = c.verts.len() as u16;
+        let last = (rings.len() - 1) as f32;
+        for (k, (phi, off)) in rings.iter().enumerate() {
+            for i in 0..=seg {
+                let u = i as f32 / seg as f32;
+                let th = u * std::f32::consts::TAU;
+                let nl = Vec3::new(phi.sin() * th.cos(), phi.cos(), phi.sin() * th.sin());
+                let wn = rot * nl;
+                let p = a + rot * (nl * r + Vec3::Y * *off);
+                let rect = paint.map(|p| p.1);
+                c.verts.push(vert(
+                    p,
+                    wn,
+                    color,
+                    alpha,
+                    flat_color,
+                    rect,
+                    u,
+                    k as f32 / last,
+                ));
+            }
+        }
+        for j in 0..(rings.len() - 1) as u16 {
+            for i in 0..seg as u16 {
+                let a = base + j * (seg as u16 + 1) + i;
+                let b = a + seg as u16 + 1;
                 c.idx.extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
             }
         }
@@ -301,6 +544,10 @@ pub struct ToonMesh {
     /// Flat ground paint (roads, pads). Each decal is lifted a few millimetres above the
     /// previous one in creation order, so overlapping paint never z-fights.
     pub decals: MeshBuilder,
+    /// Level of detail for spheres and capsules (1 = coarse … 5+ = smooth).
+    pub detail: u32,
+    /// Outline colour override (characters get a team-coloured silhouette).
+    pub ink: Option<[u8; 3]>,
 }
 
 pub const OUTLINE: [u8; 3] = [24, 22, 30];
@@ -318,15 +565,79 @@ impl ToonMesh {
     pub fn boxed(&mut self, m: &Mat4, half: Vec3, color: [u8; 3], w: f32) {
         self.fill.add_box(m, half, color);
         if w > 0.0 {
-            self.outline
-                .add_box_ex(m, half + Vec3::splat(w), OUTLINE, 255, true);
+            self.outline.add_box_ex(
+                m,
+                half + Vec3::splat(w),
+                self.ink.unwrap_or(OUTLINE),
+                255,
+                true,
+            );
+        }
+    }
+    /// Rounded box plus outline. `n` = subdivisions per face (level of detail).
+    pub fn rounded(&mut self, m: &Mat4, half: Vec3, r: f32, color: [u8; 3], w: f32, n: u32) {
+        self.fill
+            .add_rounded_box_ex(m, half, r, color, 255, false, n);
+        if w > 0.0 {
+            self.outline.add_rounded_box_ex(
+                m,
+                half + Vec3::splat(w),
+                r + w,
+                self.ink.unwrap_or(OUTLINE),
+                255,
+                true,
+                n.min(3),
+            );
+        }
+    }
+    /// Capsule plus outline.
+    fn lod(&self) -> u32 {
+        if self.detail == 0 {
+            5
+        } else {
+            self.detail
+        }
+    }
+    pub fn capsule(&mut self, a: Vec3, b: Vec3, r: f32, color: [u8; 3], w: f32, seg: u32) {
+        let (max_seg, rings) = match self.lod() {
+            5.. => (10, 3),
+            3 | 4 => (7, 2),
+            _ => (5, 1),
+        };
+        let seg = seg.min(max_seg);
+        self.fill
+            .add_capsule_ex(a, b, r, color, 255, false, seg, rings);
+        if w > 0.0 {
+            self.outline.add_capsule_ex(
+                a,
+                b,
+                r + w,
+                self.ink.unwrap_or(OUTLINE),
+                255,
+                true,
+                seg.min(8),
+                rings,
+            );
         }
     }
     pub fn sphere(&mut self, m: &Mat4, r: f32, color: [u8; 3], w: f32) {
-        self.fill.add_sphere(m, r, color, 10, 7);
-        if w > 0.0 {
-            self.outline
-                .add_sphere_ex(m, r + w, OUTLINE, 10, 7, 255, true);
+        let (seg, rings) = match self.lod() {
+            5.. => (10, 7),
+            3 | 4 => (8, 5),
+            _ => (6, 4),
+        };
+        self.fill.add_sphere(m, r, color, seg, rings);
+        // tiny far-away bits don't need outlines
+        if w > 0.0 && (self.lod() > 2 || r > 0.07) {
+            self.outline.add_sphere_ex(
+                m,
+                r + w,
+                self.ink.unwrap_or(OUTLINE),
+                seg,
+                rings,
+                255,
+                true,
+            );
         }
     }
 }
@@ -356,6 +667,7 @@ varying highp vec3 vWorld;
 varying mediump vec3 vN;
 varying mediump vec2 vTile;
 varying highp vec3 vShadow;
+varying lowp float vPaint;
 uniform mat4 Model;
 uniform mat4 Projection;
 uniform vec3 CamPos;
@@ -369,6 +681,7 @@ void main() {
     vWorld = wp.xyz;
     vN = normal.xyz;
     vTile = texcoord;
+    vPaint = normal.w;
     // offset along the normal so surfaces don't shadow themselves
     vec4 sp = SunMatrix * vec4(wp.xyz + normal.xyz * 0.08, 1.0);
     vShadow = sp.xyz * 0.5 + 0.5;
@@ -387,6 +700,7 @@ varying highp vec3 vWorld;
 varying mediump vec3 vN;
 varying mediump vec2 vTile;
 varying highp vec3 vShadow;
+varying lowp float vPaint;
 uniform sampler2D Texture;
 uniform sampler2D ShadowMap;
 uniform vec4 FogColor;
@@ -403,7 +717,10 @@ float occluder(vec2 uv) {
 
 void main() {
     vec3 col = color.rgb;
-    if (vTile.x > 0.5 && Params.y > 0.5) {
+    if (vPaint > 0.5) {
+        // painted skin: the vertex colour holds only the toon light
+        col *= texture2D(Texture, vTile).rgb;
+    } else if (vTile.x > 0.5 && Params.y > 0.5) {
         // triplanar detail texture from the 4x4 atlas, faded out with distance
         vec3 an = abs(vN);
         vec2 p = an.y > an.x && an.y > an.z ? vWorld.xz : (an.x > an.z ? vWorld.zy : vWorld.xy);
@@ -651,6 +968,17 @@ impl Materials {
             m.set_uniform("Params", params);
             m.set_uniform("Tint", l.tint);
         }
+    }
+
+    /// Draws a character mesh painted with a skin texture.
+    pub fn draw_toon_painted(&self, m: &ToonMesh, tex: &Texture2D) {
+        if !m.outline.is_empty() {
+            gl_use_material(&self.outline);
+            m.outline.draw();
+        }
+        gl_use_material(&self.world);
+        m.fill.draw_tex(Some(tex));
+        gl_use_default_material();
     }
 
     /// Draws a toon mesh: outline pass then fill.

@@ -2,11 +2,13 @@
 //! sticks, tumbles from the hit that killed him and flops against the level geometry.
 
 use crate::mesh::{trs, ToonMesh};
-use crate::models::{self, team_look, BOOT, SKIN};
+use crate::models::{self, BOOT};
 use macroquad::prelude::*;
 use toon_shared::physics::{Stance, World};
 use toon_shared::rng::Rng;
-use toon_shared::weapons::{Cause, WeaponId};
+use toon_shared::skin::tex;
+use toon_shared::skin::Skin;
+use toon_shared::weapons::Cause;
 use toon_shared::Team;
 
 const HEAD: usize = 0;
@@ -93,7 +95,6 @@ impl Ragdoll {
         stance: Stance,
         vel: Vec3,
         team: Team,
-        _weapon: WeaponId,
         blow: DeathBlow,
         rng: &mut Rng,
     ) -> Ragdoll {
@@ -318,9 +319,20 @@ impl Ragdoll {
         self.p[CHEST]
     }
 
-    pub fn draw(&self, m: &mut ToonMesh, outlines: bool, now: f32) {
-        let look = team_look(self.team);
-        let ow = if outlines { 0.025 } else { 0.0 };
+    /// Draws the body; with `painted` the skin's body parts go there (textured).
+    pub fn draw(
+        &self,
+        m: &mut ToonMesh,
+        mut painted: Option<&mut ToonMesh>,
+        skin: &Skin,
+        now: f32,
+    ) {
+        let pal = models::palette(skin, self.team);
+        let ow = 0.03;
+        m.ink = Some(models::team_ink(self.team));
+        if let Some(pm) = painted.as_deref_mut() {
+            pm.ink = m.ink;
+        }
         let sink = ((self.age - (LIFETIME - 1.5)) / 1.5).clamp(0.0, 1.0) * 0.7;
         let p: [Vec3; N] = std::array::from_fn(|i| self.p[i] - vec3(0.0, sink, 0.0));
 
@@ -338,19 +350,63 @@ impl Ragdoll {
             )
         };
         let tc = p[PELVIS].lerp(p[CHEST], 0.53);
-        m.boxed(&torso(tc), vec3(0.27, 0.3, 0.17), look.shirt, ow);
-        m.boxed(
-            &torso(tc + up * 0.01),
-            vec3(0.285, 0.2, 0.185),
-            look.vest,
-            0.0,
-        );
-        m.boxed(
-            &torso(p[PELVIS] - up * 0.03),
-            vec3(0.28, 0.04, 0.18),
-            BOOT,
-            0.0,
-        );
+        let torso_rects = [
+            tex::cell(tex::TORSO_RIGHT),
+            tex::cell(tex::TORSO_LEFT),
+            tex::half(tex::TORSO_ENDS, false),
+            tex::half(tex::TORSO_ENDS, true),
+            tex::cell(tex::TORSO_BACK),
+            tex::cell(tex::TORSO_FRONT),
+        ];
+        match painted.as_deref_mut() {
+            Some(pm) => {
+                pm.fill.add_rounded_box_painted(
+                    &torso(tc),
+                    vec3(0.27, 0.3, 0.18),
+                    0.13,
+                    3,
+                    &torso_rects,
+                );
+                m.outline.add_rounded_box_ex(
+                    &torso(tc),
+                    vec3(0.27, 0.3, 0.18) + Vec3::splat(ow),
+                    0.13 + ow,
+                    m.ink.unwrap(),
+                    255,
+                    true,
+                    3,
+                );
+            }
+            None => {
+                m.rounded(&torso(tc), vec3(0.27, 0.3, 0.18), 0.13, pal.shirt, ow, 3);
+                m.rounded(
+                    &torso(tc + up * 0.04),
+                    vec3(0.29, 0.19, 0.2),
+                    0.1,
+                    pal.vest,
+                    ow * 0.5,
+                    2,
+                );
+                m.rounded(
+                    &torso(p[PELVIS] - up * 0.03),
+                    vec3(0.28, 0.045, 0.19),
+                    0.04,
+                    BOOT,
+                    0.0,
+                    2,
+                );
+                for sh in [LSH, RSH] {
+                    m.rounded(
+                        &torso(p[sh] + up * 0.05),
+                        vec3(0.1, 0.06, 0.13),
+                        0.05,
+                        pal.team,
+                        ow * 0.6,
+                        2,
+                    );
+                }
+            }
+        }
 
         // head
         let hu = (p[HEAD] - p[CHEST]).normalize_or(up);
@@ -362,7 +418,17 @@ impl Ragdoll {
             hb.extend(0.0),
             p[HEAD].extend(1.0),
         );
-        models::add_head(m, &head, self.team, false, true, ow);
+        models::add_head(
+            m,
+            painted.as_deref_mut(),
+            &head,
+            skin,
+            self.team,
+            false,
+            true,
+            ow,
+            3,
+        );
         if self.dizzy && self.age < 3.5 {
             for k in 0..3 {
                 let a = now * 5.0 + k as f32 * std::f32::consts::TAU / 3.0;
@@ -373,33 +439,88 @@ impl Ragdoll {
         }
 
         // limbs
-        let seg = |m: &mut ToonMesh, a: Vec3, b: Vec3, half: f32, col: [u8; 3]| {
-            let d = b - a;
-            let len = d.length();
-            let dir = if len > 1e-3 { d / len } else { Vec3::NEG_Y };
+        let ink = m.ink.unwrap();
+        let mut limb =
+            |m: &mut ToonMesh, bottom: Vec3, top: Vec3, r: f32, col: [u8; 3], rect: [f32; 4]| {
+                match painted.as_deref_mut() {
+                    Some(pm) => {
+                        pm.fill
+                            .add_capsule_painted(bottom, top, r, 6, 2, right, rect);
+                        m.outline
+                            .add_capsule_ex(bottom, top, r + ow, ink, 255, true, 6, 2);
+                    }
+                    None => m.capsule(top, bottom, r, col, ow, 6),
+                }
+            };
+        for (hip, knee, foot, cell) in [
+            (LHIP, LKNEE, LFOOT, tex::LEG_LEFT),
+            (RHIP, RKNEE, RFOOT, tex::LEG_RIGHT),
+        ] {
+            let r = tex::cell(cell);
+            let mid = (r[1] + r[3]) * 0.5;
+            limb(m, p[knee], p[hip], 0.11, pal.pants, [r[0], r[1], r[2], mid]);
+            limb(
+                m,
+                p[foot],
+                p[knee],
+                0.105,
+                pal.pants,
+                [r[0], mid, r[2], r[3]],
+            );
+        }
+        for (sh, hand, cell) in [(LSH, LHAND, tex::ARM_LEFT), (RSH, RHAND, tex::ARM_RIGHT)] {
+            limb(m, p[hand], p[sh], 0.08, pal.shirt, tex::cell(cell));
+        }
+        let boots = [tex::half(tex::HANDS_BOOTS, true); 6];
+        for (knee, foot) in [(LKNEE, LFOOT), (RKNEE, RFOOT)] {
+            let d = p[foot] - p[knee];
+            let dir = if d.length() > 1e-3 {
+                d.normalize()
+            } else {
+                Vec3::NEG_Y
+            };
             let rot = Quat::from_rotation_arc(Vec3::NEG_Y, dir);
-            m.boxed(
-                &Mat4::from_rotation_translation(rot, (a + b) * 0.5),
-                vec3(half, len * 0.5, half * 1.1),
-                col,
-                ow,
-            );
-            rot
-        };
-        for (hip, knee, foot) in [(LHIP, LKNEE, LFOOT), (RHIP, RKNEE, RFOOT)] {
-            seg(m, p[hip], p[knee], 0.1, look.pants);
-            let rot = seg(m, p[knee], p[foot], 0.095, look.pants);
-            m.boxed(
-                &(Mat4::from_rotation_translation(rot, p[foot])
-                    * Mat4::from_translation(vec3(0.0, 0.0, -0.05))),
-                vec3(0.11, 0.06, 0.15),
-                BOOT,
-                ow,
-            );
+            let mat = Mat4::from_rotation_translation(rot, p[foot])
+                * Mat4::from_translation(vec3(0.0, 0.0, -0.05));
+            match painted.as_deref_mut() {
+                Some(pm) => {
+                    pm.fill.add_rounded_box_painted(
+                        &mat,
+                        vec3(0.115, 0.075, 0.16),
+                        0.06,
+                        2,
+                        &boots,
+                    );
+                    m.outline.add_rounded_box_ex(
+                        &mat,
+                        vec3(0.145, 0.105, 0.19),
+                        0.09,
+                        ink,
+                        255,
+                        true,
+                        2,
+                    );
+                }
+                None => m.rounded(&mat, vec3(0.115, 0.075, 0.16), 0.06, BOOT, ow, 2),
+            }
         }
-        for (sh, hand) in [(LSH, LHAND), (RSH, RHAND)] {
-            seg(m, p[sh], p[hand], 0.075, look.shirt);
-            m.sphere(&Mat4::from_translation(p[hand]), 0.08, SKIN, ow);
+        for hand in [LHAND, RHAND] {
+            let mat = Mat4::from_translation(p[hand]);
+            match painted.as_deref_mut() {
+                Some(pm) => {
+                    pm.fill.add_sphere_painted(
+                        &mat,
+                        0.09,
+                        8,
+                        6,
+                        tex::half(tex::HANDS_BOOTS, false),
+                    );
+                    m.outline
+                        .add_sphere_ex(&mat, 0.09 + ow, ink, 8, 6, 255, true);
+                }
+                None => m.sphere(&mat, 0.09, pal.tone, ow),
+            }
         }
+        m.ink = None;
     }
 }

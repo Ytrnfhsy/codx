@@ -13,6 +13,7 @@ mod netclient;
 mod ragdoll;
 mod render;
 mod settings;
+mod skins;
 mod textures;
 mod ui;
 
@@ -601,6 +602,10 @@ async fn amain(args: Args) {
                 }
 
                 g.update(dt, &settings, Some(&audio));
+                if let Some(code) = g.new_skin_code.take() {
+                    settings.add_skin_code(&code);
+                    settings.save();
+                }
                 // optional low-resolution 3D for weak GPUs
                 let scale = settings.render_scale.clamp(0.4, 1.0);
                 let target = if scale < 0.99 {

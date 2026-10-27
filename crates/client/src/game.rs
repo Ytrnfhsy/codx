@@ -16,6 +16,7 @@ use toon_shared::physics::{Body, MoveInput, Stance, World};
 use toon_shared::protocol::*;
 use toon_shared::ray::ray_player;
 use toon_shared::rng::Rng;
+use toon_shared::skin::Skin;
 use toon_shared::tuning::{Tuning, WeaponStats};
 use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
 use toon_shared::{look_dir, maps, wrap_angle, yaw_basis, Mode, Team};
@@ -202,6 +203,14 @@ pub struct GameClient {
     fall_speed: f32,
     /// When each dropped weapon was first seen (for the falling animation).
     pub pickup_seen: HashMap<u16, f64>,
+    /// How every player looks (from the server).
+    pub skin_of: HashMap<u8, u32>,
+    /// Painted skins received from the server.
+    pub skin_assets: HashMap<u32, crate::skins::SkinAsset>,
+    /// Per-frame meshes of painted characters, one per skin texture.
+    pub painted_meshes: HashMap<u32, ToonMesh>,
+    /// A code typed with /skin, for the settings to remember.
+    pub new_skin_code: Option<String>,
     /// Sun shadow map of the current level (rendered on the first frame after a map loads).
     pub shadow: Option<crate::mesh::ShadowMap>,
     /// Dropped weapon we can pick up right now.
@@ -441,6 +450,10 @@ impl GameClient {
             was_on_ground: true,
             fall_speed: 0.0,
             pickup_seen: HashMap::new(),
+            skin_of: HashMap::new(),
+            skin_assets: HashMap::new(),
+            painted_meshes: HashMap::new(),
+            new_skin_code: None,
             shadow: None,
             pickup_target: None,
             next_pickup: 0.0,
@@ -458,6 +471,10 @@ impl GameClient {
                 .into(),
             crate::ui::MUTED,
         );
+        let codes = settings.skin_code_list();
+        if !codes.is_empty() {
+            g.net.send(C2S::SkinCodes(codes));
+        }
         let mut audio_dummy = None;
         for m in pending {
             g.handle_msg(m, &mut audio_dummy);
@@ -666,7 +683,6 @@ impl GameClient {
                             self.body.stance,
                             self.body.vel,
                             self.team,
-                            self.weapon(),
                             blow,
                             &mut self.rng,
                         );
@@ -835,6 +851,21 @@ impl GameClient {
                 }
             }
             S2C::Ping(ms) => self.net.send_unreliable(C2S::Pong(ms)),
+            S2C::Skins(list) => {
+                for (id, skin) in list {
+                    self.skin_of.insert(id, skin);
+                }
+            }
+            S2C::SkinDef { id, skin, png_len } => {
+                self.skin_assets
+                    .insert(id, crate::skins::SkinAsset::new(skin, png_len));
+            }
+            S2C::SkinData { id, offset, data } => {
+                if let Some(a) = self.skin_assets.get_mut(&id) {
+                    a.add(offset, &data);
+                    a.try_load();
+                }
+            }
             S2C::Tuning(mut t) => {
                 t.finalize();
                 if self.tuning.movement != t.movement || self.tuning.weapons != t.weapons {
@@ -1144,6 +1175,31 @@ impl GameClient {
                 .any(|s| flat(*s) < SAB_SITE_RADIUS + 0.4)
     }
 
+    /// How a player looks: skin options and the painted skin id, if its texture is ready.
+    pub fn look_of(&self, id: u8) -> (Skin, Option<u32>) {
+        match self.skin_of.get(&id).copied().filter(|s| *s != 0) {
+            Some(sid) => match self.skin_assets.get(&sid) {
+                Some(a) if a.tex.is_some() => (a.skin, Some(sid)),
+                _ => (Skin::default(), None),
+            },
+            None => (Skin::default(), None),
+        }
+    }
+
+    /// Sleeve and hand colours for a first-person view.
+    pub fn vm_colors(&self, id: u8, team: Team) -> ([u8; 3], [u8; 3]) {
+        match self.look_of(id) {
+            (_, Some(sid)) => {
+                let a = &self.skin_assets[&sid];
+                (a.sleeve, a.hand)
+            }
+            (skin, None) => {
+                let pal = crate::models::palette(&skin, team);
+                (pal.shirt, pal.tone)
+            }
+        }
+    }
+
     /// Living remote players, interpolated for this frame.
     pub fn live_actors(&self) -> Vec<Actor> {
         let now = self.now;
@@ -1177,7 +1233,8 @@ impl GameClient {
         let now = self.now;
         VmState {
             weapon: self.weapon(),
-            team: self.team,
+            sleeve: self.vm_colors(self.my_id, self.team).0,
+            hand: self.vm_colors(self.my_id, self.team).1,
             ads: self.ads_t,
             bob_phase: self.bob_phase,
             bob: self.walk_amount * (1.0 - self.ads_t * 0.85) * self.tuning.movement.view_bob,
@@ -1980,7 +2037,8 @@ impl GameClient {
                 headshot: false,
                 from: None,
             });
-            let r = Ragdoll::new(pos, yaw, stance, vel, team, weapon, blow, &mut self.rng);
+            let _ = weapon;
+            let r = Ragdoll::new(pos, yaw, stance, vel, team, blow, &mut self.rng);
             self.add_ragdoll(id, r);
         }
     }
@@ -1988,6 +2046,19 @@ impl GameClient {
     pub fn send_chat(&mut self, text: String, team_only: bool) {
         let t = text.trim().to_string();
         if t.is_empty() {
+            return;
+        }
+        if let Some(rest) = t.strip_prefix("/skin") {
+            let code = rest.trim().to_uppercase();
+            if code.is_empty() {
+                self.push_chat(
+                    "Скін: /skin КОД (код видає адміністратор сервера)".into(),
+                    crate::ui::ACCENT,
+                );
+            } else {
+                self.net.send(C2S::SkinCodes(vec![code.clone()]));
+                self.new_skin_code = Some(code);
+            }
             return;
         }
         if let Some(rest) = t.strip_prefix("/rcon") {

@@ -66,6 +66,8 @@ pub struct Settings {
     /// FPS cap when vsync is off (0 = unlimited).
     pub fps_limit: u32,
     pub custom: Vec<CustomClass>,
+    /// Skin codes given out by server admins (space separated).
+    pub skin_codes: String,
     pub last_class: usize,
     pub recent: Vec<String>,
     pub host: HostSettings,
@@ -96,9 +98,32 @@ impl Default for Settings {
                 })
                 .collect(),
             last_class: 0,
+            skin_codes: String::new(),
             recent: Vec::new(),
             host: HostSettings::default(),
         }
+    }
+}
+
+impl Settings {
+    /// Skin codes as a list.
+    pub fn skin_code_list(&self) -> Vec<String> {
+        self.skin_codes
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter(|c| !c.is_empty())
+            .map(|c| c.trim().to_uppercase())
+            .take(8)
+            .collect()
+    }
+
+    /// Remembers a code (newest first, no duplicates).
+    pub fn add_skin_code(&mut self, code: &str) {
+        let code = code.trim().to_uppercase();
+        let mut list = self.skin_code_list();
+        list.retain(|c| *c != code);
+        list.insert(0, code);
+        list.truncate(8);
+        self.skin_codes = list.join(" ");
     }
 }
 

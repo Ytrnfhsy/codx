@@ -68,6 +68,8 @@ pub enum C2S {
     DropProtection,
     /// Swap the current weapon for a dropped one (entity id).
     PickUp(u16),
+    /// Skin codes the player owns (given out by the server admin).
+    SkinCodes(Vec<String>),
     Disconnect,
 }
 
@@ -316,4 +318,19 @@ pub enum S2C {
     Tuning(Box<crate::tuning::Tuning>),
     /// Latency probe; the client answers with `C2S::Pong`.
     Ping(u32),
+    /// Which skin each player wears (0 = standard look). All of them after joining,
+    /// then single changes.
+    Skins(Vec<(u8, u32)>),
+    /// A painted skin: its shape options and the size of its PNG, which follows in
+    /// `SkinData` chunks (sent once per client).
+    SkinDef {
+        id: u32,
+        skin: crate::skin::Skin,
+        png_len: u32,
+    },
+    SkinData {
+        id: u32,
+        offset: u32,
+        data: Vec<u8>,
+    },
 }

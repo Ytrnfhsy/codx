@@ -537,7 +537,6 @@ impl Killcam {
                     Stance::from_u8(snap.stance & 3),
                     vel,
                     snap.team,
-                    snap.weapon,
                     blow,
                     &mut self.rng,
                 );
@@ -615,7 +614,8 @@ impl Killcam {
         let since = |t: f64| (self.pt - t) as f32;
         VmState {
             weapon: self.weapon,
-            team: self.team,
+            sleeve: [200, 200, 200],
+            hand: [255, 214, 170],
             ads: self.ads_t,
             bob_phase: self.bob_phase,
             bob: self.walk_amount * (1.0 - self.ads_t * 0.85) * tuning.movement.view_bob,

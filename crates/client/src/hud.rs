@@ -1234,7 +1234,7 @@ impl GameClient {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 420.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.22);
-                ui.panel(x, y, pw, 400.0);
+                ui.panel(x, y, pw, 460.0);
                 ui.bold("Пауза", x + 24.0, y + 44.0, 28, ACCENT);
                 ui.text("(гра на сервері триває)", x + 24.0, y + 70.0, 14, MUTED);
                 let bw = pw - 48.0;
@@ -1250,7 +1250,14 @@ impl GameClient {
                 if ui.button2("Налаштування", x + 24.0, y + 258.0, bw, 46.0) {
                     self.overlay = Overlay::Settings;
                 }
-                if ui.button_colored("Відключитися", x + 24.0, y + 330.0, bw, 46.0, BAD)
+                ui.text(
+                    "Скін: введи в чаті /skin КОД (код видає адмін сервера)",
+                    x + 24.0,
+                    y + 350.0,
+                    14,
+                    MUTED,
+                );
+                if ui.button_colored("Відключитися", x + 24.0, y + 392.0, bw, 46.0, BAD)
                 {
                     return Some(HudAction::Leave);
                 }

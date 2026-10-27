@@ -11,6 +11,7 @@ pub mod nav;
 pub mod netserver;
 pub mod pickups;
 pub mod sab;
+pub mod skins;
 
 use config::ServerConfig;
 use std::net::UdpSocket;
@@ -82,9 +83,14 @@ pub fn start(cfg: ServerConfig, cfg_path: Option<PathBuf>) -> Result<ServerHandl
         UdpSocket::bind(&addr).map_err(|e| format!("Не вдалося відкрити UDP {addr}: {e}"))?;
     let (tx, rx) = channel();
     let stop = Arc::new(AtomicBool::new(false));
-    let http_port = if cfg.http_enabled {
-        match http::spawn(&cfg.bind, cfg.port, tx.clone()) {
-            Ok(_) => Some(cfg.port),
+    let http_enabled = cfg.http_enabled;
+    let bind = cfg.bind.clone();
+    let port = cfg.port;
+    let mut game = game::Game::new(cfg);
+    game.cfg_path = cfg_path;
+    let http_port = if http_enabled {
+        match http::spawn(&bind, port, tx.clone(), game.skins.clone()) {
+            Ok(_) => Some(port),
             Err(e) => {
                 eprintln!("[http] веб-панель недоступна ({e})");
                 None
@@ -93,9 +99,6 @@ pub fn start(cfg: ServerConfig, cfg_path: Option<PathBuf>) -> Result<ServerHandl
     } else {
         None
     };
-    let port = cfg.port;
-    let mut game = game::Game::new(cfg);
-    game.cfg_path = cfg_path;
     let stop2 = stop.clone();
     let thread = std::thread::Builder::new()
         .name("game".into())

@@ -120,6 +120,15 @@
     <div id="tfields" class="tgrid"></div>
   </section>
 
+  <section class="card wide">
+    <h2>Скіни</h2>
+    <p class="sub" style="margin:0 0 10px">Гравці малюють скіни на <a href="/skins" target="_blank" style="color:var(--acc)">/skins</a> і надсилають сюди.
+      «Схвалити / новий код» — видає код (наприклад, після донату); гравець вводить його в грі (Скіни або <code>/skin КОД</code> у чаті).
+      Боти й гравці без коду мають стандартний вигляд.</p>
+    <div class="row"><button class="ghost" id="skin_new">Намалювати новий скін</button><button class="ghost" id="skin_reload">Оновити список</button><span id="skmsg" class="sub"></span></div>
+    <table><thead><tr><th>Вигляд</th><th>#</th><th>Назва</th><th>Автор / контакт</th><th>Стан</th><th>Коди</th><th>Дії</th></tr></thead><tbody id="skins"></tbody></table>
+  </section>
+
   <section class="card">
     <h2>Бани</h2>
     <table><thead><tr><th>IP</th><th>Ім'я</th><th>Причина</th><th></th></tr></thead><tbody id="bans"></tbody></table>
@@ -152,7 +161,7 @@ $("go").onclick = async () => {
   $("lerr").textContent = "";
   try {
     const r = await api("/api/login", { password: $("pass").value });
-    if (r.token) { token = r.token; sessionStorage.setItem("tw_token", token); showApp(); }
+    if (r.token) { token = r.token; sessionStorage.setItem("tw_token", token); showApp(); loadSkins(); }
     else $("lerr").textContent = r.error || "Помилка";
   } catch (e) { $("lerr").textContent = "Сервер недоступний"; }
 };
@@ -319,8 +328,43 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+// ---- skins
+async function loadSkins() {
+  let r; try { r = await api("/api/skins"); } catch (e) { return; }
+  const tb = $("skins"); tb.replaceChildren();
+  for (const k of r.skins) {
+    const tr = el("tr");
+    const img = el("img"); img.src = "/api/skins/png?id=" + k.id; img.width = 64; img.height = 64;
+    img.style.imageRendering = "pixelated"; img.style.background = "#fff"; img.style.borderRadius = "6px";
+    const ti = el("td"); ti.append(img); tr.append(ti);
+    tr.append(el("td", k.id));
+    tr.append(el("td", k.name));
+    const au = el("td", k.author); au.append(el("div", k.contact, "bot")); tr.append(au);
+    tr.append(el("td", k.status === "approved" ? "схвалено" : "на розгляді", k.status === "approved" ? "t0" : "t2"));
+    const codes = el("td");
+    for (const c of k.codes) {
+      const d = el("div"); d.append(el("code", c), " ");
+      const x = el("button", "відкликати", "small ghost");
+      x.onclick = async () => { if (confirm("Відкликати код " + c + "?")) { await api("/api/skins/revoke", { code: c }); loadSkins(); } };
+      d.append(x); codes.append(d);
+    }
+    tr.append(codes);
+    const td = el("td");
+    const ap = el("button", k.status === "approved" ? "Новий код" : "Схвалити", "small");
+    ap.onclick = async () => { const a = await api("/api/skins/approve", { id: k.id }); $("skmsg").textContent = a.code ? "Код для гравця: " + a.code : (a.error || ""); loadSkins(); };
+    const ed = el("button", "Редагувати", "small ghost");
+    ed.onclick = () => window.open("/skins#token=" + encodeURIComponent(token) + "&id=" + k.id, "_blank");
+    const del = el("button", "Видалити", "small danger");
+    del.onclick = async () => { if (confirm("Видалити скін «" + k.name + "»? Його коди перестануть діяти.")) { await api("/api/skins/delete", { id: k.id }); loadSkins(); } };
+    td.append(ap, " ", ed, " ", del);
+    tr.append(td); tb.append(tr);
+  }
+}
+$("skin_reload").onclick = loadSkins;
+$("skin_new").onclick = () => window.open("/skins#token=" + encodeURIComponent(token), "_blank");
+
 setInterval(refresh, 2000);
-if (token) showApp(); else showLogin();
+if (token) { showApp(); loadSkins(); } else showLogin();
 </script>
 </body>
 </html>
