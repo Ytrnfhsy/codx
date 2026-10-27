@@ -632,7 +632,7 @@ impl Game {
         let l = p.loadout;
         p.alive = true;
         p.hp = MAX_HEALTH;
-        p.body = Body { pos, vel: Vec3::ZERO, on_ground: true, stance: Stance::Stand };
+        p.body = Body { pos, vel: Vec3::ZERO, on_ground: true, stance: Stance::Stand, ..Default::default() };
         p.yaw = yaw;
         p.pitch = 0.0;
         p.flags = 0;

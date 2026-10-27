@@ -128,6 +128,8 @@ pub struct GameClient {
     pub switch_dur: f32,
     /// We already asked the server to drop our spawn protection.
     protection_dropped: bool,
+    /// Camera-only offset that eases out stair steps, stance changes and server corrections.
+    cam_smooth: Vec3,
     pub last_fire: f64,
     pub stamina: f32,
     pub sprinting: bool,
@@ -315,6 +317,7 @@ impl GameClient {
             sprint_end: -10.0,
             switch_dur: 0.5,
             protection_dropped: false,
+            cam_smooth: Vec3::ZERO,
             last_fire: -10.0,
             stamina: Tuning::default().movement.sprint_time,
             sprinting: false,
@@ -441,7 +444,8 @@ impl GameClient {
             S2C::Snapshot(s) => self.on_snapshot(*s, audio),
             S2C::Scoreboard(rows) => self.scoreboard = rows,
             S2C::Spawned { pos, yaw, life, loadout } => {
-                self.body = Body { pos: Vec3::from_array(pos), vel: Vec3::ZERO, on_ground: true, stance: Stance::Stand };
+                self.body = Body { pos: Vec3::from_array(pos), vel: Vec3::ZERO, on_ground: true, stance: Stance::Stand, ..Default::default() };
+                self.cam_smooth = Vec3::ZERO;
                 self.want_stance = Stance::Stand;
                 self.yaw = yaw;
                 self.pitch = 0.0;
@@ -484,7 +488,13 @@ impl GameClient {
             }
             S2C::Correction { pos, life } => {
                 if life == self.life {
-                    self.body.pos = Vec3::from_array(pos);
+                    let new = Vec3::from_array(pos);
+                    // small corrections glide instead of teleporting the view
+                    let err = self.body.pos - new;
+                    if err.length() < 2.0 {
+                        self.cam_smooth += err;
+                    }
+                    self.body.pos = new;
                     self.body.vel = Vec3::ZERO;
                 }
             }
@@ -1003,11 +1013,17 @@ impl GameClient {
                 sprint_mult: def.sprint_mult,
                 weight: def.weight,
             };
+            let eye_before = self.body.stance.eye();
             let mut t = dt.min(0.1);
             while t > 0.0 {
                 let h = t.min(1.0 / 60.0);
                 self.body.step(&self.world, &inp, &self.tuning.movement, h);
                 t -= h;
+            }
+            // stairs and stance changes move the view smoothly, not in one jump
+            let snap = self.body.take_snap() + (self.body.stance.eye() - eye_before);
+            if snap.abs() < 1.5 {
+                self.cam_smooth.y -= snap;
             }
             if self.body.stance != self.want_stance && self.want_stance == Stance::Stand {
                 // blocked from standing up — keep trying silently
@@ -1183,6 +1199,10 @@ impl GameClient {
 
         // ---- misc timers
         self.shake = (self.shake - dt * 2.5).max(0.0);
+        self.cam_smooth *= (-dt * 14.0).exp();
+        if self.cam_smooth.length() < 0.001 {
+            self.cam_smooth = Vec3::ZERO;
+        }
         self.dmg_dirs.retain(|d| now - d.1 < 1.6);
         self.popups.retain(|p| now - p.1 < 1.6);
         if let Some((_, until, _)) = &self.center {
@@ -1370,7 +1390,7 @@ impl GameClient {
         );
         if self.alive {
             let s = self.sway_offset();
-            return (self.eye(), self.yaw + s.x + shake.x, self.pitch + s.y + shake.y);
+            return (self.eye() + self.cam_smooth, self.yaw + s.x + shake.x, self.pitch + s.y + shake.y);
         }
         if !self.team.is_playing() {
             return (self.spec_pos, self.yaw, self.pitch);

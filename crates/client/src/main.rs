@@ -41,6 +41,8 @@ struct Args {
     spec_pos: Option<Vec3>,
     render_scale: Option<f32>,
     rcon: Option<String>,
+    no_vsync: bool,
+    log_fps: bool,
     width: i32,
     height: i32,
 }
@@ -61,6 +63,8 @@ fn parse_args() -> Args {
                 i += 1;
             }
             "--host" => a.host = true,
+            "--no-vsync" => a.no_vsync = true,
+            "--log-fps" => a.log_fps = true,
             "--no-sound" | "--mute" => a.no_sound = true,
             "--screenshot" => {
                 a.shot = next;
@@ -139,9 +143,15 @@ enum Screen {
     Game(Box<GameClient>),
 }
 
-fn window_conf(a: &Args) -> macroquad::conf::Conf {
+/// Whether the window was created with vsync (changing it needs a restart).
+pub static VSYNC_AT_START: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+fn window_conf(a: &Args, vsync: bool) -> macroquad::conf::Conf {
+    let mut platform = macroquad::miniquad::conf::Platform::default();
+    platform.swap_interval = Some(if vsync { 1 } else { 0 });
     macroquad::conf::Conf {
         miniquad_conf: macroquad::miniquad::conf::Conf {
+            platform,
             window_title: "Toon Warfare".to_owned(),
             window_width: a.width,
             window_height: a.height,
@@ -158,7 +168,9 @@ fn window_conf(a: &Args) -> macroquad::conf::Conf {
 
 fn main() {
     let args = parse_args();
-    let conf = window_conf(&args);
+    let vsync = Settings::load().vsync && !args.no_vsync;
+    VSYNC_AT_START.store(vsync, std::sync::atomic::Ordering::Relaxed);
+    let conf = window_conf(&args, vsync);
     macroquad::Window::from_config(conf, amain(args));
 }
 
@@ -227,6 +239,8 @@ async fn amain(args: Args) {
     let start = get_time();
     let mut auto_done = false;
     let mut low_res: Option<RenderTarget> = None;
+    let mut frame_start = std::time::Instant::now();
+    let mut fps_window = (std::time::Instant::now(), 0u32);
     prevent_quit();
 
     let host = |settings: &Settings, args: &Args| -> Result<toon_server::ServerHandle, String> {
@@ -503,7 +517,30 @@ async fn amain(args: Args) {
             screen = s;
         }
         let _ = Mode::Tdm;
+        // FPS cap when vsync is off: wait until a full frame period has passed since the
+        // previous frame began (this includes the time spent presenting it)
+        if !VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed) && settings.fps_limit > 0 {
+            let target = std::time::Duration::from_secs_f64(1.0 / settings.fps_limit as f64);
+            let elapsed = frame_start.elapsed();
+            if elapsed < target {
+                let left = target - elapsed;
+                if left > std::time::Duration::from_micros(1500) {
+                    std::thread::sleep(left - std::time::Duration::from_micros(1000));
+                }
+                while frame_start.elapsed() < target {
+                    std::hint::spin_loop();
+                }
+            }
+        }
+        frame_start = std::time::Instant::now();
         next_frame().await;
+        if args.log_fps {
+            fps_window.1 += 1;
+            if fps_window.0.elapsed().as_secs_f32() >= 1.0 {
+                println!("fps {:.0}", fps_window.1 as f32 / fps_window.0.elapsed().as_secs_f32());
+                fps_window = (std::time::Instant::now(), 0);
+            }
+        }
     }
     if let Some(mut s) = server.take() {
         s.shutdown();

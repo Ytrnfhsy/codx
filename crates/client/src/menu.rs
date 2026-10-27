@@ -50,6 +50,20 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
     ui.toggle("Показувати FPS і пінг", &mut s.show_fps, x, y + 186.0);
     ui.toggle("Мультяшні контури (вимкни на дуже слабких ПК)", &mut s.outlines, x, y + 222.0);
     s.render_scale = (ui.slider("Масштаб рендеру (менше = швидше)", s.render_scale * 100.0, 40.0, 100.0, x, y + 280.0, w, "{}%") / 5.0).round() * 5.0 / 100.0;
+    let was = s.vsync;
+    ui.toggle("Вертикальна синхронізація (FPS = частота монітора)", &mut s.vsync, x, y + 318.0);
+    if s.vsync != was || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed) {
+        ui.text("Зміниться після перезапуску гри", x + 36.0, y + 362.0, 14, ACCENT);
+    }
+    if !s.vsync {
+        const LIMITS: [u32; 6] = [60, 120, 144, 165, 240, 0];
+        let i = LIMITS.iter().position(|l| *l == s.fps_limit).unwrap_or(2);
+        let label = if s.fps_limit == 0 { "без обмеження".to_string() } else { format!("{} FPS", s.fps_limit) };
+        let d = ui.stepper("Обмеження FPS", &label, x + w - 260.0, y + 390.0, 260.0);
+        if d != 0 {
+            s.fps_limit = LIMITS[((i as i32 + d).rem_euclid(LIMITS.len() as i32)) as usize];
+        }
+    }
 }
 
 pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_running: Option<u16>) -> Option<MenuAction> {
@@ -179,10 +193,10 @@ pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_runni
             }
         }
         Page::Settings => {
-            ui.panel(x, y, pw, 450.0);
+            ui.panel(x, y, pw, 550.0);
             ui.bold("Налаштування", x + 24.0, y + 40.0, 26, ACCENT);
             settings_widgets(ui, s, x + 24.0, y + 90.0, pw - 48.0);
-            if ui.button("Зберегти", x + pw - 200.0, y + 390.0, 176.0, 44.0) {
+            if ui.button("Зберегти", x + pw - 200.0, y + 490.0, 176.0, 44.0) {
                 s.save();
                 st.page = Page::Main;
             }

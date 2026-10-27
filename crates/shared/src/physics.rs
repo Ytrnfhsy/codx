@@ -181,6 +181,9 @@ pub struct Body {
     pub vel: Vec3,
     pub on_ground: bool,
     pub stance: Stance,
+    /// Sum of instant vertical snaps (stairs up/down) since last read — lets the
+    /// camera smooth them out. See [`Body::take_snap`].
+    pub snap: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -214,6 +217,11 @@ pub fn fits(world: &World, pos: Vec3, stance: Stance) -> bool {
 }
 
 impl Body {
+    /// Returns and clears the accumulated vertical snap.
+    pub fn take_snap(&mut self) -> f32 {
+        std::mem::take(&mut self.snap)
+    }
+
     pub fn is_sprinting(&self, inp: &MoveInput) -> bool {
         self.stance == Stance::Stand && inp.sprint && !inp.ads && inp.forward > 0.1
     }
@@ -306,6 +314,7 @@ impl Body {
             if let Some(fy) = world.floor_below(self.pos, STEP_HEIGHT) {
                 let np = vec3(self.pos.x, fy + 0.001, self.pos.z);
                 if fits(world, np, self.stance) {
+                    self.snap += np.y - self.pos.y;
                     self.pos = np;
                     self.on_ground = true;
                     self.vel.y = 0.0;
@@ -334,6 +343,7 @@ impl Body {
                     if lift > 0.0 && lift <= STEP_HEIGHT {
                         let up = vec3(np.x, top + 0.001, np.z);
                         if fits(world, up, self.stance) && fits(world, vec3(self.pos.x, top + 0.001, self.pos.z), self.stance) {
+                            self.snap += up.y - self.pos.y;
                             self.pos = up;
                             self.on_ground = true;
                             return;
@@ -490,6 +500,9 @@ mod tests {
             b.step(&w, &inp, &mt(), 1.0 / 60.0);
         }
         assert!(b.pos.y > 3.0, "y={} z={}", b.pos.y, b.pos.z);
+        // every step-up is reported so the camera can smooth it
+        assert!(b.take_snap() > 2.5);
+        assert_eq!(b.snap, 0.0);
         // step west off the top onto the floor
         let inp = MoveInput { forward: 1.0, yaw: std::f32::consts::FRAC_PI_2, ..Default::default() };
         for _ in 0..60 {

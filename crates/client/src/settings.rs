@@ -57,6 +57,10 @@ pub struct Settings {
     pub outlines: bool,
     /// 3D resolution scale (0.5 = half resolution, much faster on weak GPUs).
     pub render_scale: f32,
+    /// Vertical sync (FPS locked to the monitor refresh rate). Applied on restart.
+    pub vsync: bool,
+    /// FPS cap when vsync is off (0 = unlimited).
+    pub fps_limit: u32,
     pub custom: Vec<CustomClass>,
     pub last_class: usize,
     pub recent: Vec<String>,
@@ -77,6 +81,8 @@ impl Default for Settings {
             fullscreen: false,
             outlines: true,
             render_scale: 1.0,
+            vsync: true,
+            fps_limit: 144,
             custom: (1..=3)
                 .map(|i| CustomClass { name: format!("Мій клас {i}"), loadout: DEFAULT_CLASSES[(i - 1) % DEFAULT_CLASSES.len()].1 })
                 .collect(),
