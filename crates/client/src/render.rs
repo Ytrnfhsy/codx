@@ -92,8 +92,9 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         projection: Projection::Perspective,
         render_target: target,
         viewport: None,
-        z_near: 0.05,
-        z_far: 600.0,
+        // a near plane this far keeps the depth buffer precise at range (no shimmering)
+        z_near: 0.15,
+        z_far: 420.0,
     };
     let matrix = cam.matrix();
     View {

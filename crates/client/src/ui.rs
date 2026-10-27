@@ -31,12 +31,25 @@ impl Fonts {
             "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯабвгґдеєжзиіїйклмнопрстуфхцчшщьюя'—·«»…×°☠✦★▮▄▁"
                 .chars(),
         );
-        // grow each atlas to its final size while it is still empty (growing later re-packs every glyph)
-        regular.populate_font_cache(&['W'], 1100);
-        bold.populate_font_cache(&['W'], 1100);
+        // Grow each atlas while it is still empty (growing later re-packs every glyph, which is
+        // slow). A wide but *short* glyph does it: a tall one would leave a huge row in the
+        // packer and make every later growth cascade until the texture size overflows.
+        regular.populate_font_cache(&['—'], 1000);
+        bold.populate_font_cache(&['—'], 1000);
         for size in [
             12u16, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 30, 34,
         ] {
+            regular.populate_font_cache(&chars, size);
+            bold.populate_font_cache(&chars, size);
+        }
+        // the few big headings only need their own letters
+        let big: [(u16, &str); 3] = [
+            (64, "TOON WARFARE"),
+            (48, "ПЕРЕМОГА!ПОРАЗКАМАТЧ ЗАВЕРШЕНО"),
+            (46, "0123456789"),
+        ];
+        for (size, text) in big {
+            let chars: Vec<char> = text.chars().collect();
             regular.populate_font_cache(&chars, size);
             bold.populate_font_cache(&chars, size);
         }

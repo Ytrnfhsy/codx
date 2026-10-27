@@ -4,8 +4,10 @@
 pub mod consts;
 pub mod map;
 pub mod maps;
+pub mod maps_extra;
 pub mod net;
 pub mod physics;
+pub mod props;
 pub mod protocol;
 pub mod ray;
 pub mod rng;

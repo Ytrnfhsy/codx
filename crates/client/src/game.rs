@@ -185,6 +185,7 @@ pub struct GameClient {
 pub fn build_map_mesh(map: &Map) -> ToonMesh {
     let mut m = ToonMesh::new();
     let mut rng = Rng::new(map.id as u64 + 3);
+    let mut decal_layer = 0;
     for b in &map.boxes {
         if !b.visible {
             continue;
@@ -196,8 +197,24 @@ pub fn build_map_mesh(map: &Map) -> ToonMesh {
             (b.color[1] as f32 + j).clamp(0.0, 255.0) as u8,
             (b.color[2] as f32 + j * 0.8).clamp(0.0, 255.0) as u8,
         ];
-        m.fill.add_aabb(b.min, b.max, c);
         let size = b.max - b.min;
+        if !b.solid && size.y <= 0.035 && b.min.y < 0.3 {
+            // flat paint on the ground: just the top face, drawn as a decal
+            decal_layer += 1;
+            let y = b.max.y + decal_layer as f32 * 0.004;
+            let col = crate::mesh::shade(c, Vec3::Y);
+            m.decals.add_quad(
+                [
+                    vec3(b.min.x, y, b.min.z),
+                    vec3(b.min.x, y, b.max.z),
+                    vec3(b.max.x, y, b.max.z),
+                    vec3(b.max.x, y, b.min.z),
+                ],
+                col,
+            );
+            continue;
+        }
+        m.fill.add_aabb(b.min, b.max, c);
         let is_ground = b.min.y < -0.5;
         if b.solid && !is_ground && size.min_element() > 0.15 {
             let w = Vec3::splat(0.045);

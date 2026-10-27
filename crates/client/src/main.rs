@@ -131,7 +131,7 @@ fn parse_args() -> Args {
             }
             "-h" | "--help" => {
                 println!(
-                    "toon-warfare [--connect IP:порт] [--name ім'я] [--host] [--map depot|market|cargo] [--mode tdm|sab] [--bots N] [--no-sound] [--size 1280x720]"
+                    "toon-warfare [--connect IP:порт] [--name ім'я] [--host] [--map wreck|site|depot|market|cargo] [--mode tdm|sab] [--bots N] [--no-sound] [--size 1280x720]"
                 );
                 std::process::exit(0);
             }

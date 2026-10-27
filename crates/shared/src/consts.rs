@@ -9,7 +9,7 @@ pub const INTERP_DELAY: f32 = 0.1;
 pub const MAX_REWIND: f32 = 0.35;
 
 pub const DEFAULT_PORT: u16 = 27015;
-pub const PROTOCOL_VERSION: u16 = 7;
+pub const PROTOCOL_VERSION: u16 = 8;
 /// Prefix of a connectionless server info query.
 pub const QUERY_MAGIC: &[u8; 4] = b"TWQ?";
 pub const QUERY_REPLY_MAGIC: &[u8; 4] = b"TWQ!";

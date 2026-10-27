@@ -264,6 +264,9 @@ impl MeshBuilder {
 pub struct ToonMesh {
     pub fill: MeshBuilder,
     pub outline: MeshBuilder,
+    /// Flat ground paint (roads, pads). Each decal is lifted a few millimetres above the
+    /// previous one in creation order, so overlapping paint never z-fights.
+    pub decals: MeshBuilder,
 }
 
 pub const OUTLINE: [u8; 3] = [24, 22, 30];
@@ -275,6 +278,7 @@ impl ToonMesh {
     pub fn clear(&mut self) {
         self.fill.clear();
         self.outline.clear();
+        self.decals.clear();
     }
     /// Box plus outline of width `w` (0 = no outline).
     pub fn boxed(&mut self, m: &Mat4, half: Vec3, color: [u8; 3], w: f32) {
@@ -296,7 +300,9 @@ impl ToonMesh {
 pub struct Materials {
     pub world: Material,
     pub outline: Material,
-    /// Unlit, blended, no depth write (particles, glows).
+    /// Unlit, blended (particles, glows, shadows). Note: miniquad's GL backend turns the
+    /// depth *test* off together with depth writes, so this must keep depth writes on —
+    /// otherwise muzzle flashes and tracers would be visible through walls.
     pub fx: Material,
 }
 
@@ -365,7 +371,7 @@ impl Materials {
         Materials {
             world: mat(CullFace::Nothing, true),
             outline: mat(CullFace::Front, true),
-            fx: mat(CullFace::Nothing, false),
+            fx: mat(CullFace::Nothing, true),
         }
     }
 
@@ -385,6 +391,7 @@ impl Materials {
         }
         gl_use_material(&self.world);
         m.fill.draw();
+        m.decals.draw();
         gl_use_default_material();
     }
 }

@@ -1,4 +1,7 @@
-//! Ground-level navigation grid with A* path finding for bots.
+//! Multi-level navigation for bots: a 0.5 m grid where each column can hold several walkable
+//! floors (ground, upper storeys, rooftops). Neighbouring floors are linked when the height
+//! difference can be stepped (stairs) or dropped down (jumping off a roof), so A* paths lead
+//! up stairwells, across balconies and onto roofs.
 
 use glam::{vec3, Vec3};
 use std::cmp::Ordering;
@@ -7,28 +10,43 @@ use toon_shared::map::Map;
 use toon_shared::physics::{Aabb, World};
 use toon_shared::rng::Rng;
 
-const CELL: f32 = 1.0;
+const CELL: f32 = 0.5;
+const CLEAR_R: f32 = 0.4;
+/// Highest step a bot climbs between neighbouring cells (stairs are 0.34).
+const MAX_UP: f32 = 0.55;
+/// Highest drop a bot takes on purpose.
+const MAX_DROP: f32 = 3.2;
+
+struct NavNode {
+    pos: Vec3,
+    links: Vec<(u32, f32)>,
+    /// Reachable from the spawn areas (rooftops without stairs are not).
+    reachable: bool,
+}
 
 pub struct Nav {
     ox: f32,
     oz: f32,
     pub w: i32,
     pub h: i32,
-    walk: Vec<bool>,
+    /// Node ids per column, sorted by height.
+    cols: Vec<Vec<u32>>,
+    nodes: Vec<NavNode>,
+    reachable_ids: Vec<u32>,
 }
 
 #[derive(PartialEq)]
-struct Node {
+struct Open {
     f: f32,
-    i: usize,
+    i: u32,
 }
-impl Eq for Node {}
-impl PartialOrd for Node {
+impl Eq for Open {}
+impl PartialOrd for Open {
     fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
         Some(self.cmp(o))
     }
 }
-impl Ord for Node {
+impl Ord for Open {
     fn cmp(&self, o: &Self) -> Ordering {
         o.f.partial_cmp(&self.f).unwrap_or(Ordering::Equal)
     }
@@ -40,31 +58,147 @@ impl Nav {
         let oz = map.min.y;
         let w = ((map.max.x - map.min.x) / CELL).ceil() as i32;
         let h = ((map.max.y - map.min.y) / CELL).ceil() as i32;
-        let mut walk = vec![false; (w * h) as usize];
-        for j in 0..h {
-            for i in 0..w {
-                let x = ox + (i as f32 + 0.5) * CELL;
-                let z = oz + (j as f32 + 0.5) * CELL;
-                let bb = Aabb {
-                    min: vec3(x - 0.42, 0.05, z - 0.42),
-                    max: vec3(x + 0.42, 1.85, z + 0.42),
-                };
-                walk[(j * w + i) as usize] = !world.overlaps(&bb);
+        let center = |i: i32, j: i32| (ox + (i as f32 + 0.5) * CELL, oz + (j as f32 + 0.5) * CELL);
+
+        // candidate floor heights: the top of every solid box under a column's centre
+        let mut tops: Vec<Vec<f32>> = vec![Vec::new(); (w * h) as usize];
+        for b in &world.boxes {
+            if b.max.y > 30.0 {
+                continue; // invisible clip ceilings
+            }
+            let i0 = (((b.min.x - ox) / CELL) - 0.5).ceil().max(0.0) as i32;
+            let i1 = (((b.max.x - ox) / CELL) - 0.5).floor().min((w - 1) as f32) as i32;
+            let j0 = (((b.min.z - oz) / CELL) - 0.5).ceil().max(0.0) as i32;
+            let j1 = (((b.max.z - oz) / CELL) - 0.5).floor().min((h - 1) as f32) as i32;
+            for j in j0..=j1 {
+                for i in i0..=i1 {
+                    tops[(j * w + i) as usize].push(b.max.y);
+                }
             }
         }
-        Nav { ox, oz, w, h, walk }
+
+        let mut cols: Vec<Vec<u32>> = vec![Vec::new(); (w * h) as usize];
+        let mut nodes: Vec<NavNode> = Vec::new();
+        for j in 0..h {
+            for i in 0..w {
+                let k = (j * w + i) as usize;
+                let t = &mut tops[k];
+                t.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                t.dedup_by(|a, b| (*a - *b).abs() < 0.03);
+                let (x, z) = center(i, j);
+                for &y in t.iter() {
+                    // obstacles lower than a step (stairs, kerbs) are stepped over, so they do not block
+                    let bb = Aabb {
+                        min: vec3(x - CLEAR_R, y + 0.5, z - CLEAR_R),
+                        max: vec3(x + CLEAR_R, y + 1.85, z + CLEAR_R),
+                    };
+                    if !world.overlaps(&bb) {
+                        cols[k].push(nodes.len() as u32);
+                        nodes.push(NavNode {
+                            pos: vec3(x, y, z),
+                            links: Vec::new(),
+                            reachable: false,
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut nav = Nav {
+            ox,
+            oz,
+            w,
+            h,
+            cols,
+            nodes,
+            reachable_ids: Vec::new(),
+        };
+        // links
+        for j in 0..h {
+            for i in 0..w {
+                let ids = nav.cols[(j * w + i) as usize].clone();
+                for n in ids {
+                    let y = nav.nodes[n as usize].pos.y;
+                    let mut links = Vec::new();
+                    for (di, dj) in [
+                        (1, 0),
+                        (-1, 0),
+                        (0, 1),
+                        (0, -1),
+                        (1, 1),
+                        (1, -1),
+                        (-1, 1),
+                        (-1, -1),
+                    ] {
+                        let diag = di != 0 && dj != 0;
+                        let Some(m) = nav.step_target(i + di, j + dj, y, !diag) else {
+                            continue;
+                        };
+                        if diag
+                            && (nav.step_target(i + di, j, y, false).is_none()
+                                || nav.step_target(i, j + dj, y, false).is_none())
+                        {
+                            continue;
+                        }
+                        let dy = nav.nodes[m as usize].pos.y - y;
+                        let flat = if diag { CELL * 1.414 } else { CELL };
+                        let cost = flat
+                            + if dy > 0.0 {
+                                dy * 0.6
+                            } else if dy < -MAX_UP {
+                                1.0 - dy * 0.3
+                            } else {
+                                0.0
+                            };
+                        links.push((m, cost));
+                    }
+                    nav.nodes[n as usize].links = links;
+                }
+            }
+        }
+        // flood fill from every spawn point
+        let mut stack: Vec<u32> = map
+            .all_spawns()
+            .filter_map(|sp| nav.nearest(sp.pos))
+            .collect();
+        while let Some(n) = stack.pop() {
+            if nav.nodes[n as usize].reachable {
+                continue;
+            }
+            nav.nodes[n as usize].reachable = true;
+            for k in 0..nav.nodes[n as usize].links.len() {
+                let m = nav.nodes[n as usize].links[k].0;
+                if !nav.nodes[m as usize].reachable {
+                    stack.push(m);
+                }
+            }
+        }
+        nav.reachable_ids = (0..nav.nodes.len() as u32)
+            .filter(|&i| nav.nodes[i as usize].reachable)
+            .collect();
+        nav
     }
 
-    fn idx(&self, i: i32, j: i32) -> Option<usize> {
+    /// Node in column (i, j) reachable from height `y` (by stepping, or dropping if allowed).
+    fn step_target(&self, i: i32, j: i32, y: f32, allow_drop: bool) -> Option<u32> {
+        let col = self.col(i, j)?;
+        let mut best: Option<(u32, f32)> = None;
+        for &m in col {
+            let dy = self.nodes[m as usize].pos.y - y;
+            let ok = dy.abs() <= MAX_UP || (allow_drop && dy < 0.0 && dy >= -MAX_DROP);
+            if ok && best.map(|b| dy.abs() < b.1).unwrap_or(true) {
+                best = Some((m, dy.abs()));
+            }
+        }
+        best.map(|b| b.0)
+    }
+
+    fn col(&self, i: i32, j: i32) -> Option<&Vec<u32>> {
         if i < 0 || j < 0 || i >= self.w || j >= self.h {
             None
         } else {
-            Some((j * self.w + i) as usize)
+            Some(&self.cols[(j * self.w + i) as usize])
         }
-    }
-
-    pub fn walkable(&self, i: i32, j: i32) -> bool {
-        self.idx(i, j).map(|k| self.walk[k]).unwrap_or(false)
     }
 
     pub fn cell_of(&self, p: Vec3) -> (i32, i32) {
@@ -74,137 +208,142 @@ impl Nav {
         )
     }
 
-    pub fn center(&self, i: i32, j: i32) -> Vec3 {
-        vec3(
-            self.ox + (i as f32 + 0.5) * CELL,
-            0.0,
-            self.oz + (j as f32 + 0.5) * CELL,
-        )
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
     }
 
-    pub fn nearest_walkable(&self, c: (i32, i32)) -> Option<(i32, i32)> {
-        if self.walkable(c.0, c.1) {
-            return Some(c);
-        }
-        for r in 1..6i32 {
+    /// Closest walkable node to `p` (same floor preferred).
+    fn nearest(&self, p: Vec3) -> Option<u32> {
+        let (ci, cj) = self.cell_of(p);
+        for r in 0..10i32 {
+            let mut best: Option<(u32, f32)> = None;
             for dj in -r..=r {
                 for di in -r..=r {
                     if di.abs() != r && dj.abs() != r {
                         continue;
                     }
-                    if self.walkable(c.0 + di, c.1 + dj) {
-                        return Some((c.0 + di, c.1 + dj));
+                    let Some(col) = self.col(ci + di, cj + dj) else {
+                        continue;
+                    };
+                    for &m in col {
+                        // once the reachable set is known, never snap onto isolated rooftops
+                        if !self.reachable_ids.is_empty() && !self.nodes[m as usize].reachable {
+                            continue;
+                        }
+                        let q = self.nodes[m as usize].pos;
+                        // floors far above us are much "further" than ones below
+                        let dy = q.y - p.y;
+                        let vertical = if dy > 0.6 { dy * 3.0 } else { dy.abs() };
+                        let d = vec3(q.x - p.x, 0.0, q.z - p.z).length() + vertical;
+                        if best.map(|b| d < b.1).unwrap_or(true) {
+                            best = Some((m, d));
+                        }
                     }
                 }
+            }
+            if best.is_some() {
+                return best.map(|b| b.0);
             }
         }
         None
     }
 
-    pub fn random_point(&self, rng: &mut Rng) -> Vec3 {
-        for _ in 0..200 {
-            let i = rng.below(self.w as usize) as i32;
-            let j = rng.below(self.h as usize) as i32;
-            if self.walkable(i, j) {
-                return self.center(i, j);
-            }
-        }
-        self.center(self.w / 2, self.h / 2)
+    /// Snaps a point onto the navigation mesh.
+    pub fn snap(&self, p: Vec3) -> Option<Vec3> {
+        self.nearest(p).map(|n| self.nodes[n as usize].pos)
     }
 
-    /// Walkable straight line between two points (sampled).
-    pub fn clear_line(&self, a: Vec3, b: Vec3) -> bool {
+    /// Random reachable point (bots roam over every floor they can actually get to).
+    pub fn random_point(&self, rng: &mut Rng) -> Vec3 {
+        if self.reachable_ids.is_empty() {
+            return Vec3::ZERO;
+        }
+        self.nodes[self.reachable_ids[rng.below(self.reachable_ids.len())] as usize].pos
+    }
+
+    pub fn reachable_count(&self) -> usize {
+        self.reachable_ids.len()
+    }
+
+    /// Straight walk from `a` to `b` stays on floors close to the interpolated height.
+    fn clear_line(&self, a: Vec3, b: Vec3) -> bool {
         let d = b - a;
         let len = vec3(d.x, 0.0, d.z).length();
-        let n = (len / 0.35).ceil().max(1.0) as i32;
+        // nothing walkable is steeper than stairs (stacked flights share the same footprint)
+        if d.y.abs() > len * 0.75 + 0.3 {
+            return false;
+        }
+        let n = (len / 0.25).ceil().max(1.0) as i32;
         for k in 0..=n {
-            let p = a + d * (k as f32 / n as f32);
+            let t = k as f32 / n as f32;
+            let p = a + d * t;
             let (i, j) = self.cell_of(p);
-            if !self.walkable(i, j) {
+            let Some(col) = self.col(i, j) else {
+                return false;
+            };
+            if !col
+                .iter()
+                .any(|&m| (self.nodes[m as usize].pos.y - p.y).abs() < 0.6)
+            {
                 return false;
             }
         }
         true
     }
 
-    /// A* path from `a` to `b`. Returns waypoints (excluding the start).
+    /// A* path from `a` to `b`. Returns waypoints (excluding the start), with heights.
     pub fn path(&self, a: Vec3, b: Vec3) -> Option<Vec<Vec3>> {
-        let s = self.nearest_walkable(self.cell_of(a))?;
-        let g = self.nearest_walkable(self.cell_of(b))?;
-        let si = self.idx(s.0, s.1)?;
-        let gi = self.idx(g.0, g.1)?;
-        let n = self.walk.len();
+        let s = self.nearest(a)?;
+        let g = self.nearest(b)?;
+        let goal = self.nodes[g as usize].pos;
+        let n = self.nodes.len();
         let mut cost = vec![f32::INFINITY; n];
-        let mut from = vec![usize::MAX; n];
+        let mut from = vec![u32::MAX; n];
         let mut open = BinaryHeap::new();
-        let hfn = |i: usize| {
-            let (x, z) = ((i as i32 % self.w), (i as i32 / self.w));
-            let dx = (x - g.0).abs() as f32;
-            let dz = (z - g.1).abs() as f32;
-            dx.max(dz) + 0.414 * dx.min(dz)
-        };
-        cost[si] = 0.0;
-        open.push(Node { f: hfn(si), i: si });
+        cost[s as usize] = 0.0;
+        open.push(Open {
+            f: self.nodes[s as usize].pos.distance(goal),
+            i: s,
+        });
         let mut expanded = 0;
-        while let Some(Node { i, .. }) = open.pop() {
-            if i == gi {
+        while let Some(Open { i, .. }) = open.pop() {
+            if i == g {
                 break;
             }
             expanded += 1;
-            if expanded > 40_000 {
+            if expanded > 120_000 {
                 return None;
             }
-            let (x, z) = (i as i32 % self.w, i as i32 / self.w);
-            for (dx, dz) in [
-                (1, 0),
-                (-1, 0),
-                (0, 1),
-                (0, -1),
-                (1, 1),
-                (1, -1),
-                (-1, 1),
-                (-1, -1),
-            ] {
-                let (nx, nz) = (x + dx, z + dz);
-                if !self.walkable(nx, nz) {
-                    continue;
-                }
-                if dx != 0 && dz != 0 && (!self.walkable(x + dx, z) || !self.walkable(x, z + dz)) {
-                    continue;
-                }
-                let ni = (nz * self.w + nx) as usize;
-                let c = cost[i] + if dx != 0 && dz != 0 { 1.414 } else { 1.0 };
-                if c < cost[ni] {
-                    cost[ni] = c;
-                    from[ni] = i;
-                    open.push(Node {
-                        f: c + hfn(ni),
-                        i: ni,
+            for &(m, c) in &self.nodes[i as usize].links {
+                let nc = cost[i as usize] + c;
+                if nc < cost[m as usize] {
+                    cost[m as usize] = nc;
+                    from[m as usize] = i;
+                    open.push(Open {
+                        f: nc + self.nodes[m as usize].pos.distance(goal),
+                        i: m,
                     });
                 }
             }
         }
-        if from[gi] == usize::MAX && si != gi {
+        if from[g as usize] == u32::MAX && s != g {
             return None;
         }
-        let mut cells = vec![gi];
-        let mut cur = gi;
-        while cur != si {
-            cur = from[cur];
-            if cur == usize::MAX {
+        let mut chain = vec![g];
+        let mut cur = g;
+        while cur != s {
+            cur = from[cur as usize];
+            if cur == u32::MAX {
                 return None;
             }
-            cells.push(cur);
+            chain.push(cur);
         }
-        cells.reverse();
-        let pts: Vec<Vec3> = cells
-            .iter()
-            .map(|&c| self.center(c as i32 % self.w, c as i32 / self.w))
-            .collect();
+        chain.reverse();
+        let pts: Vec<Vec3> = chain.iter().map(|&c| self.nodes[c as usize].pos).collect();
         // string pulling
         let mut out = Vec::new();
-        let mut anchor = a;
-        let mut k = 0;
+        let mut anchor = pts[0];
+        let mut k = 1;
         while k < pts.len() {
             let mut far = k;
             for m in (k..pts.len()).rev() {
@@ -217,10 +356,12 @@ impl Nav {
             anchor = pts[far];
             k = far + 1;
         }
+        if out.is_empty() {
+            out.push(pts[0]);
+        }
         if let Some(last) = out.last_mut() {
-            let (bi, bj) = self.cell_of(b);
-            if self.walkable(bi, bj) {
-                *last = vec3(b.x, 0.0, b.z);
+            if vec3(b.x - last.x, 0.0, b.z - last.z).length() < 1.5 && (b.y - last.y).abs() < 0.6 {
+                *last = vec3(b.x, last.y, b.z);
             }
         }
         Some(out)
@@ -245,6 +386,97 @@ mod tests {
                     let p = nav.path(s, goal);
                     assert!(p.is_some(), "{:?}: no path {:?} -> {:?}", id, s, goal);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn upper_floors_are_reachable() {
+        for id in MapId::ALL {
+            let m = maps::build(id);
+            let w = World::from_map(&m);
+            if id == MapId::Cargo {
+                continue; // deliberately flat close-quarters map
+            }
+            let nav = Nav::build(&m, &w);
+            let s = m.spawns[0][0].pos;
+            // every map must offer some high ground bots can walk up to
+            let high = nav
+                .nodes
+                .iter()
+                .filter(|n| n.pos.y > 2.5)
+                .map(|n| n.pos)
+                .collect::<Vec<_>>();
+            if high.is_empty() {
+                continue;
+            }
+            let reachable = high
+                .iter()
+                .step_by((high.len() / 40).max(1))
+                .filter(|p| {
+                    nav.path(s, **p)
+                        .map(|path| {
+                            path.last()
+                                .map(|l| (l.y - p.y).abs() < 0.6)
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false)
+                })
+                .count();
+            assert!(reachable > 0, "{:?}: no upper floor reachable", id);
+        }
+    }
+
+    #[test]
+    fn key_high_ground_is_reachable() {
+        let spots: &[(MapId, [f32; 3], &str)] = &[
+            (
+                MapId::Wreck,
+                [-30.0, 10.2, -8.0],
+                "roof of the three-storey block",
+            ),
+            (
+                MapId::Wreck,
+                [-30.0, 6.8, -14.0],
+                "third floor of the block",
+            ),
+            (
+                MapId::Wreck,
+                [21.2, 3.4, -10.0],
+                "market balcony over the square",
+            ),
+            (MapId::Wreck, [30.0, 3.4, -8.0], "market house roof"),
+            (MapId::Wreck, [30.0, 3.6, 7.5], "south-east house roof"),
+            (MapId::Wreck, [-25.2, 3.4, 13.0], "south-west balcony"),
+            (
+                MapId::Site,
+                [0.0, 3.4, -3.5],
+                "first floor of the unfinished building",
+            ),
+            (MapId::Site, [0.0, 3.4, 7.7], "scaffolding"),
+            (MapId::Site, [-4.0, 6.8, -3.5], "half roof"),
+            (MapId::Site, [-29.0, 6.8, -16.0], "office roof"),
+            (MapId::Site, [-22.3, 3.4, -16.0], "office balcony"),
+            (MapId::Market, [-30.0, 3.4, -5.25], "north balcony"),
+            (MapId::Market, [-18.0, 3.4, 5.25], "south balcony"),
+            (MapId::Depot, [25.0, 3.4, 0.0], "office upper floor"),
+        ];
+        for &(id, p, what) in spots {
+            let m = maps::build(id);
+            let w = World::from_map(&m);
+            let nav = Nav::build(&m, &w);
+            let target = Vec3::from_array(p);
+            for team in 0..2 {
+                let s = m.spawns[team][0].pos;
+                let path = nav
+                    .path(s, target)
+                    .unwrap_or_else(|| panic!("{id:?}: no path to {what}"));
+                let end = *path.last().unwrap();
+                assert!(
+                    vec3(end.x - p[0], 0.0, end.z - p[2]).length() < 1.0
+                        && (end.y - p[1]).abs() < 0.3,
+                    "{id:?}: {what} not reached, path ends at {end:?}"
+                );
             }
         }
     }

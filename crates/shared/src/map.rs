@@ -8,15 +8,25 @@ pub enum MapId {
     Depot,
     Market,
     Cargo,
+    Wreck,
+    Site,
 }
 
 impl MapId {
-    pub const ALL: [MapId; 3] = [MapId::Depot, MapId::Market, MapId::Cargo];
+    pub const ALL: [MapId; 5] = [
+        MapId::Wreck,
+        MapId::Site,
+        MapId::Depot,
+        MapId::Market,
+        MapId::Cargo,
+    ];
     pub fn short(self) -> &'static str {
         match self {
             MapId::Depot => "depot",
             MapId::Market => "market",
             MapId::Cargo => "cargo",
+            MapId::Wreck => "wreck",
+            MapId::Site => "site",
         }
     }
     pub fn parse(s: &str) -> Option<MapId> {
@@ -154,6 +164,19 @@ pub mod pal {
     pub const CAR_C: [u8; 3] = [230, 120, 190];
     pub const GLASS: [u8; 3] = [150, 210, 240];
     pub const DARK: [u8; 3] = [70, 70, 80];
+    pub const SAND: [u8; 3] = [222, 196, 142];
+    pub const ADOBE: [u8; 3] = [214, 172, 120];
+    pub const ADOBE_LIGHT: [u8; 3] = [236, 206, 160];
+    pub const HELI_OLIVE: [u8; 3] = [112, 124, 78];
+    pub const BURNT: [u8; 3] = [60, 54, 50];
+    pub const RUST: [u8; 3] = [168, 92, 52];
+    pub const BARREL_BLUE: [u8; 3] = [60, 110, 190];
+    pub const BARREL_RED: [u8; 3] = [200, 64, 52];
+    pub const CONCRETE_DARK: [u8; 3] = [150, 150, 146];
+    pub const SCAFFOLD: [u8; 3] = [240, 190, 40];
+    pub const LEAVES: [u8; 3] = [92, 168, 84];
+    pub const TRUNK: [u8; 3] = [130, 90, 60];
+    pub const BRICK: [u8; 3] = [190, 92, 72];
 }
 
 #[derive(Default)]

@@ -126,6 +126,14 @@ impl Default for ServerConfig {
             motd: "Ласкаво просимо! Грай чесно :)".into(),
             rotation: vec![
                 RotationEntry {
+                    map: "wreck".into(),
+                    mode: "tdm".into(),
+                },
+                RotationEntry {
+                    map: "site".into(),
+                    mode: "sab".into(),
+                },
+                RotationEntry {
                     map: "depot".into(),
                     mode: "tdm".into(),
                 },

@@ -1,6 +1,7 @@
 //! The built-in maps. Geometry is generated in code so client and server always agree.
 
 use crate::map::{door, pal, wide_door, window, Map, MapBuilder, MapId, Opening, Side, Spawn};
+use crate::props::Tower;
 use glam::{vec2, vec3, Vec3};
 use std::f32::consts::{FRAC_PI_2, PI};
 
@@ -9,6 +10,8 @@ pub fn build(id: MapId) -> Map {
         MapId::Depot => depot(),
         MapId::Market => market(),
         MapId::Cargo => cargo(),
+        MapId::Wreck => crate::maps_extra::wreck(),
+        MapId::Site => crate::maps_extra::site(),
     }
 }
 
@@ -321,6 +324,44 @@ fn market() -> Map {
                 0.0,
                 pal::CONCRETE,
             );
+        } else if i == 0 || i == 4 {
+            // two-storey end houses with a balcony over the street (sniper spots)
+            b.tower(&Tower {
+                x0,
+                z0: -15.0,
+                x1,
+                z1: -6.0,
+                floors: 2,
+                storey: 3.4,
+                color: north_c,
+                roof: if i == 0 {
+                    pal::ROOF_RED
+                } else {
+                    pal::ROOF_GREY
+                },
+                ground: &[
+                    (Side::MaxZ, door(cx - 2.5)),
+                    (Side::MaxZ, window(cx + 2.5)),
+                    (Side::MinZ, door(cx + 2.5)),
+                    (Side::MaxX, window(-10.5)),
+                ],
+                upper: &[
+                    (
+                        Side::MaxZ,
+                        Opening {
+                            at: cx + 2.5,
+                            w: 1.6,
+                            bottom: 0.0,
+                            top: 2.4,
+                        },
+                    ),
+                    (Side::MaxZ, window(cx - 2.5)),
+                    (Side::MinX, window(-10.5)),
+                    (Side::MaxX, window(-10.5)),
+                ],
+                roof_access: false,
+            });
+            b.balcony(Side::MaxZ, cx - 0.5, cx + 5.0, -6.0, 3.4, 1.5);
         } else {
             b.building(
                 x0,
@@ -374,6 +415,43 @@ fn market() -> Map {
                     },
                 );
             }
+        } else if i == 1 || i == 3 {
+            b.tower(&Tower {
+                x0,
+                z0: 6.0,
+                x1,
+                z1: 15.0,
+                floors: 2,
+                storey: 3.4,
+                color: south_c,
+                roof: if i == 1 {
+                    pal::ROOF_RED
+                } else {
+                    pal::ROOF_GREY
+                },
+                ground: &[
+                    (Side::MinZ, door(cx + 2.5)),
+                    (Side::MinZ, window(cx - 2.5)),
+                    (Side::MaxZ, door(cx - 2.0)),
+                    (Side::MaxX, window(10.5)),
+                ],
+                upper: &[
+                    (
+                        Side::MinZ,
+                        Opening {
+                            at: cx - 2.0,
+                            w: 1.6,
+                            bottom: 0.0,
+                            top: 2.4,
+                        },
+                    ),
+                    (Side::MinZ, window(cx + 3.0)),
+                    (Side::MinX, window(10.5)),
+                    (Side::MaxX, window(10.5)),
+                ],
+                roof_access: false,
+            });
+            b.balcony(Side::MinZ, cx - 5.0, cx + 0.5, 6.0, 3.4, 1.5);
         } else {
             b.building(
                 x0,

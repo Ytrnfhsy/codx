@@ -536,7 +536,10 @@ impl Game {
                 bot.repath_at = time + 2.5;
             }
             while let Some(wp) = bot.path.first() {
-                if vec3(wp.x - pos.x, 0.0, wp.z - pos.z).length() < 0.6 {
+                // reached when close horizontally and on (roughly) the same floor
+                if vec3(wp.x - pos.x, 0.0, wp.z - pos.z).length() < 0.55
+                    && (wp.y - pos.y).abs() < 1.5
+                {
                     bot.path.remove(0);
                 } else {
                     break;
@@ -735,9 +738,8 @@ impl Game {
             let a = self.rng.range(0.0, std::f32::consts::TAU);
             let rr = self.rng.range(1.5, r);
             let mut g = around + vec3(a.cos() * rr, 0.0, a.sin() * rr);
-            let c = self.nav.cell_of(g);
-            if let Some(w) = self.nav.nearest_walkable(c) {
-                g = self.nav.center(w.0, w.1);
+            if let Some(w) = self.nav.snap(g) {
+                g = w;
             }
             bot.roam_goal = Some(g);
         }

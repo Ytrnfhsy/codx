@@ -8,6 +8,14 @@
   "motd": "Ласкаво просимо! Грай чесно :)",
   "rotation": [
     {
+      "map": "wreck",
+      "mode": "tdm"
+    },
+    {
+      "map": "site",
+      "mode": "sab"
+    },
+    {
       "map": "depot",
       "mode": "tdm"
     },
