@@ -337,20 +337,23 @@ impl Game {
             return;
         }
         let time = self.time;
-        let Some(p) = self.pm(id) else { return };
+        let Some(p) = self.players[id as usize].as_mut() else { return };
         if !p.alive || p.grenades == 0 || !dir.is_finite() || dir.length_squared() < 0.1 || time < p.protected_until {
             return;
         }
         p.grenades -= 1;
         let eye = p.eye();
         let origin = if origin.is_finite() && origin.distance(eye) < 1.2 { origin } else { eye };
-        let vel = dir.normalize() * GRENADE_SPEED + p.body.vel * 0.5;
-        let cook = cook.clamp(0.0, GRENADE_FUSE - 0.3);
+        let gt = &self.tuning.grenade;
+        let vel = dir.normalize() * gt.throw_speed + p.body.vel * gt.inherit_velocity;
+        let fuse = gt.fuse;
+        let cook = cook.clamp(0.0, (fuse - 0.3).max(0.0));
         let gid = self.new_ent_id();
-        self.grenades.push(Grenade { id: gid, owner: id, pos: origin, vel, explode_at: time + (GRENADE_FUSE - cook) as f64 });
+        self.grenades.push(Grenade { id: gid, owner: id, pos: origin, vel, explode_at: time + (fuse - cook) as f64 });
     }
 
     pub fn update_grenades(&mut self, dt: f32) {
+        let bounce = self.tuning.grenade.bounce;
         let mut boom = Vec::new();
         for g in self.grenades.iter_mut() {
             g.vel.y -= self.tuning.movement.gravity * dt;
@@ -361,7 +364,7 @@ impl Game {
                 if let Some((t, n)) = self.world.raycast(g.pos, d, len + 0.08) {
                     g.pos += d * (t - 0.08).max(0.0);
                     g.vel = g.vel - 2.0 * g.vel.dot(n) * n;
-                    g.vel *= 0.4;
+                    g.vel *= bounce;
                     if n.y > 0.5 && g.vel.y.abs() < 1.0 {
                         g.vel.y = 0.0;
                         g.vel *= 0.6;
@@ -377,7 +380,8 @@ impl Game {
         let now = self.time;
         self.grenades.retain(|g| now < g.explode_at);
         for (pos, owner) in boom {
-            self.explode(pos + vec3(0.0, 0.2, 0.0), GRENADE_RADIUS, GRENADE_DAMAGE, Some(owner), Cause::Grenade, false);
+            let (r, dmg) = (self.tuning.grenade.radius, self.tuning.grenade.damage);
+            self.explode(pos + vec3(0.0, 0.2, 0.0), r, dmg, Some(owner), Cause::Grenade, false);
         }
     }
 

@@ -474,7 +474,7 @@ impl GameClient {
             draw_circle_lines(x + 200.0 + i as f32 * 22.0, y + 30.0, 8.0, 2.0, BLACK);
         }
         if let Some(start) = self.cooking {
-            let left = (GRENADE_FUSE as f64 - (self.now - start)).max(0.0);
+            let left = (self.tuning.grenade.fuse as f64 - (self.now - start)).max(0.0);
             ui.centered(&format!("Граната: {left:.1}"), w / 2.0, h * 0.62, 22, BAD);
         }
         // killstreak

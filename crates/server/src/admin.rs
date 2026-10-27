@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use toon_shared::map::MapId;
 use toon_shared::protocol::S2C;
-use toon_shared::tuning::{FieldInfo, MoveTuning, Tuning, WeaponStats};
+use toon_shared::tuning::{FieldInfo, GrenadeTuning, MoveTuning, Tuning, WeaponStats};
 use toon_shared::weapons::WeaponId;
 use toon_shared::{Mode, Team};
 
@@ -394,7 +394,7 @@ fn list_fields(obj: &serde_json::Value, fields: &[FieldInfo], prefix: &str) -> S
 pub fn tune(g: &mut Game, rest: &str) -> String {
     let mut args = rest.split_whitespace();
     let Some(first) = args.next() else {
-        return "Тонке налаштування:\n  tune movement — параметри руху\n  tune weapons — список зброї\n  tune <зброя> — параметри зброї (напр. tune m249)\n  tune <шлях> <значення> — tune movement.sprint_speed 8, tune m249.weight 10\n  tune reset [movement|<зброя>|all]".into();
+        return "Тонке налаштування:\n  tune movement — параметри руху\n  tune grenade — гранати (дальність кидка тощо)\n  tune weapons — список зброї\n  tune <зброя> — параметри зброї (напр. tune m249)\n  tune <шлях> <значення> — tune movement.sprint_speed 8, tune m249.weight 10\n  tune reset [movement|grenade|<зброя>|all]".into();
     };
     let json = serde_json::to_value(&g.tuning).unwrap_or_default();
     let first_l = first.to_lowercase();
@@ -405,6 +405,7 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
         match what.as_str() {
             "all" => t = def,
             "movement" | "move" => t.movement = def.movement,
+            "grenade" | "grenades" => t.grenade = def.grenade,
             w => match WeaponId::from_key(w) {
                 Some(id) => {
                     t.weapons.insert(id.key().into(), def.weapon(id).clone());
@@ -419,6 +420,11 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
         // show
         return match first_l.as_str() {
             "movement" | "move" => format!("Рух (tune movement.<ключ> <значення>):\n{}", list_fields(&json["movement"], MoveTuning::FIELDS, "")),
+            "grenade" | "grenades" => format!(
+                "Гранати (tune grenade.<ключ> <значення>), макс. дальність кидка під 45° ≈ {:.0} м:\n{}",
+                g.tuning.grenade.max_range(g.tuning.movement.gravity),
+                list_fields(&json["grenade"], GrenadeTuning::FIELDS, "")
+            ),
             "weapons" => WeaponId::all()
                 .map(|w| {
                     let s = g.tuning.weapon(w);
@@ -436,15 +442,16 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
     let parts: Vec<&str> = first_l.split('.').collect();
     let (path, fields): (Vec<String>, &[FieldInfo]) = match parts.as_slice() {
         ["movement" | "move", f] => (vec!["movement".into(), f.to_string()], MoveTuning::FIELDS),
+        ["grenade" | "grenades", f] => (vec!["grenade".into(), f.to_string()], GrenadeTuning::FIELDS),
         ["weapons", w, f] | [w, f] if WeaponId::from_key(w).is_some() => {
             (vec!["weapons".into(), WeaponId::from_key(w).unwrap().key().into(), f.to_string()], WeaponStats::FIELDS)
         }
         [f] if MoveTuning::FIELDS.iter().any(|x| x.0 == *f) => (vec!["movement".into(), f.to_string()], MoveTuning::FIELDS),
-        _ => return format!("Невірний шлях «{first}». Приклади: movement.sprint_speed, m249.rpm"),
+        _ => return format!("Невірний шлях «{first}». Приклади: movement.sprint_speed, m249.rpm, grenade.throw_speed"),
     };
     let field = path.last().unwrap().clone();
     let Some(info) = fields.iter().find(|x| x.0 == field) else {
-        return format!("Невідомий параметр «{field}». Список: tune {}", if path[0] == "movement" { "movement" } else { &path[1] });
+        return format!("Невідомий параметр «{field}». Список: tune {}", if path[0] == "weapons" { &path[1] } else { &path[0] });
     };
     let mut json = json;
     let slot = path.iter().fold(&mut json, |v, k| &mut v[k.as_str()]);

@@ -87,6 +87,7 @@ fn state_json_raw(g: &Game) -> serde_json::Value {
         "tuning": g.tuning,
         "tuning_fields": {
             "movement": toon_shared::tuning::MoveTuning::FIELDS,
+            "grenade": toon_shared::tuning::GrenadeTuning::FIELDS,
             "weapon": toon_shared::tuning::WeaponStats::FIELDS,
         },
         "weapon_names": toon_shared::weapons::WeaponId::all().map(|w| (w.key(), w.def().name)).collect::<Vec<_>>(),

@@ -120,6 +120,28 @@ tuned! {
     }
 }
 
+tuned! {
+    /// Frag grenades.
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(default)]
+    pub struct GrenadeTuning {
+        throw_speed: f32 = 17.0, [3.0, 60.0], "Швидкість кидка, м/с (більше = далі)";
+        throw_arc: f32 = 10.0, [-10.0, 45.0], "Додатковий кут кидка вгору, °";
+        inherit_velocity: f32 = 0.5, [0.0, 1.0], "Частка швидкості бігу, що передається гранаті";
+        fuse: f32 = 3.5, [0.5, 10.0], "Запал, с";
+        radius: f32 = 6.5, [1.0, 30.0], "Радіус вибуху, м";
+        damage: f32 = 150.0, [1.0, 1000.0], "Урон в епіцентрі";
+        bounce: f32 = 0.4, [0.0, 0.95], "Пружність відскоку (0 — прилипає)";
+    }
+}
+
+impl GrenadeTuning {
+    /// Approximate max throw distance on flat ground (45°), metres.
+    pub fn max_range(&self, gravity: f32) -> f32 {
+        self.throw_speed * self.throw_speed / gravity.max(0.1)
+    }
+}
+
 impl WeaponStats {
     pub fn fire_interval(&self) -> f32 {
         60.0 / self.rpm.max(1.0)
@@ -198,6 +220,7 @@ impl WeaponStats {
 #[serde(default)]
 pub struct Tuning {
     pub movement: MoveTuning,
+    pub grenade: GrenadeTuning,
     /// Keyed by [`WeaponId::key`] for readable configs.
     pub weapons: BTreeMap<String, WeaponStats>,
     /// Fast lookup by weapon id, rebuilt by [`Tuning::finalize`].
@@ -213,7 +236,7 @@ fn default_weapons() -> &'static Vec<WeaponStats> {
 impl Default for Tuning {
     fn default() -> Self {
         let weapons = WEAPONS.iter().map(|d| (d.id.key().to_string(), WeaponStats::from_def(d))).collect();
-        let mut t = Tuning { movement: MoveTuning::default(), weapons, cache: Vec::new() };
+        let mut t = Tuning { movement: MoveTuning::default(), grenade: GrenadeTuning::default(), weapons, cache: Vec::new() };
         t.finalize();
         t
     }
@@ -224,6 +247,7 @@ impl Tuning {
     /// Must be called after deserializing.
     pub fn finalize(&mut self) {
         self.movement.clamp_all();
+        self.grenade.clamp_all();
         self.weapons.retain(|k, _| WeaponId::from_key(k).is_some());
         for d in WEAPONS.iter() {
             self.weapons.entry(d.id.key().to_string()).or_insert_with(|| WeaponStats::from_def(d));

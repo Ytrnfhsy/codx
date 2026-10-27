@@ -118,3 +118,50 @@ fn admin_tuning_applies_live_and_reaches_clients() {
     // persisted into the config section that `save` writes
     assert_eq!(g.cfg.tuning["weapons"]["m249"]["rpm"], 750.0);
 }
+
+/// Throws one grenade straight ahead (with the client's arc) and returns where it came to rest.
+fn grenade_landing(g: &mut Game, id: u8) -> f32 {
+    let start = g.p(id).unwrap().body.pos;
+    let eye = g.p(id).unwrap().eye();
+    let arc = g.tuning.grenade.throw_arc.to_radians();
+    let dir = glam::vec3(arc.cos(), arc.sin(), 0.0);
+    g.grenades.clear();
+    if let Some(p) = g.pm(id) {
+        p.grenades = 1;
+        p.protected_until = 0.0;
+    }
+    g.throw_grenade(id, eye, dir, 0.0);
+    assert_eq!(g.grenades.len(), 1, "grenade was not thrown");
+    let mut last = start;
+    while let Some(gr) = g.grenades.first() {
+        last = gr.pos;
+        g.tick(TICK_DT);
+        g.outbox.clear();
+    }
+    (last - start).length()
+}
+
+#[test]
+fn grenade_throw_range_is_tunable() {
+    let (mut g, id) = setup(MapId::Depot, Mode::Tdm);
+    toon_server::admin::exec(&mut g, "bots 0");
+    run(&mut g, 1.0);
+    // stand at the west end of the road (z = 0) and throw east along it: ~38 m of open ground
+    let place = |g: &mut Game| {
+        if let Some(p) = g.pm(id) {
+            p.body.pos = glam::vec3(-18.0, 0.0, 0.0);
+            p.alive = true;
+        }
+    };
+    place(&mut g);
+    let normal = grenade_landing(&mut g, id);
+    toon_server::admin::exec(&mut g, "tune grenade.throw_speed 26");
+    place(&mut g);
+    let far = grenade_landing(&mut g, id);
+    toon_server::admin::exec(&mut g, "tune grenade.throw_speed 9");
+    place(&mut g);
+    let near = grenade_landing(&mut g, id);
+    println!("grenade lands at: speed 9 → {near:.1} m, 17 → {normal:.1} m, 26 → {far:.1} m");
+    assert!(near < normal && normal < far, "{near} {normal} {far}");
+    assert!(toon_server::admin::exec(&mut g, "tune grenade").contains("дальність"));
+}

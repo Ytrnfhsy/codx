@@ -418,12 +418,17 @@ impl Game {
                 }
             }
             // grenade
-            if !protected_me && grenades > 0 && time > bot.nade_ready && (9.0..24.0).contains(&dist_to_target) && self.rng.chance(lerp(0.004, 0.015, skill)) {
+            let gt = &self.tuning.grenade;
+            let (g_speed, g_reach) = (gt.throw_speed, gt.max_range(self.tuning.movement.gravity) * 0.9);
+            if !protected_me && grenades > 0 && time > bot.nade_ready && dist_to_target > 7.0 && dist_to_target < g_reach && self.rng.chance(lerp(0.004, 0.015, skill)) {
                 bot.nade_ready = time + 15.0;
                 if let Some((_, chest, _, _, _)) = target {
+                    // low ballistic arc for the configured throw speed: R = v² sin(2θ) / g
                     let d = chest - eye;
                     let flat = vec3(d.x, 0.0, d.z);
-                    let dir = (flat.normalize() + vec3(0.0, 0.25 + flat.length() * 0.012, 0.0)).normalize();
+                    let s = (self.tuning.movement.gravity * flat.length() / (g_speed * g_speed)).min(1.0);
+                    let theta = 0.5 * s.asin();
+                    let dir = flat.normalize() * theta.cos() + vec3(0.0, theta.sin(), 0.0);
                     let dir = cone(&mut self.rng, dir, lerp(0.15, 0.03, skill));
                     self.throw_grenade(id, eye, dir, 0.8);
                 }

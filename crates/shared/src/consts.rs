@@ -9,7 +9,7 @@ pub const INTERP_DELAY: f32 = 0.1;
 pub const MAX_REWIND: f32 = 0.35;
 
 pub const DEFAULT_PORT: u16 = 27015;
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 /// Prefix of a connectionless server info query.
 pub const QUERY_MAGIC: &[u8; 4] = b"TWQ?";
 pub const QUERY_REPLY_MAGIC: &[u8; 4] = b"TWQ!";
@@ -35,10 +35,6 @@ pub const MELEE_RANGE: f32 = 1.8;
 pub const MELEE_DAMAGE: f32 = 135.0;
 pub const MELEE_COOLDOWN: f32 = 0.9;
 
-pub const GRENADE_FUSE: f32 = 3.5;
-pub const GRENADE_SPEED: f32 = 17.0;
-pub const GRENADE_RADIUS: f32 = 6.5;
-pub const GRENADE_DAMAGE: f32 = 150.0;
 
 pub const UAV_KILLS: u32 = 3;
 pub const AIRSTRIKE_KILLS: u32 = 5;

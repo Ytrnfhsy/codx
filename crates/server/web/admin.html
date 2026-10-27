@@ -251,14 +251,14 @@ $("say").addEventListener("keydown", (e) => { if (e.key === "Enter") document.qu
 // ---- fine tuning editor
 let tState = null;          // last tuning from the server
 let tGroup = "movement";
-function tObj(t, g) { return g === "movement" ? t.movement : t.weapons[g]; }
+function tObj(t, g) { return g === "movement" ? t.movement : g === "grenade" ? t.grenade : t.weapons[g]; }
 function renderTuning(force) {
   if (!tState) return;
   const box = $("tfields");
   if (!force && box.dataset.group === tGroup) return; // don't clobber what the admin is typing
   box.dataset.group = tGroup;
   box.replaceChildren();
-  const fields = tGroup === "movement" ? tState.fields.movement : tState.fields.weapon;
+  const fields = tGroup === "movement" ? tState.fields.movement : tGroup === "grenade" ? tState.fields.grenade : tState.fields.weapon;
   const obj = tObj(tState.tuning, tGroup);
   for (const [key, label, lo, hi] of fields) {
     const wrap = el("label"); wrap.title = key;
@@ -284,6 +284,7 @@ function updateTuningState(s) {
   if (first) {
     const sel = $("tgroup");
     sel.append(new Option("Рух персонажа", "movement"));
+    sel.append(new Option("Гранати", "grenade"));
     for (const [k, name] of s.weapon_names) sel.append(new Option("Зброя: " + name, k));
     sel.onchange = () => { tGroup = sel.value; renderTuning(true); };
     renderTuning(true);
@@ -291,7 +292,7 @@ function updateTuningState(s) {
 }
 async function applyTuning() {
   const inputs = $("tfields").querySelectorAll("input");
-  const prefix = tGroup === "movement" ? "movement." : tGroup + ".";
+  const prefix = (tGroup === "movement" || tGroup === "grenade") ? tGroup + "." : tGroup + ".";
   const outs = [];
   for (const i of inputs) {
     const v = i.type === "checkbox" ? String(i.checked) : i.value;

@@ -51,6 +51,15 @@
   "http_enabled": true,
   "data_dir": "data",
   "tuning": {
+    "grenade": {
+      "bounce": 0.4,
+      "damage": 150.0,
+      "fuse": 3.5,
+      "inherit_velocity": 0.5,
+      "radius": 6.5,
+      "throw_arc": 10.0,
+      "throw_speed": 17.0
+    },
     "movement": {
       "ads_speed_mult": 0.6,
       "air_accel": 5.0,

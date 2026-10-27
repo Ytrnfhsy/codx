@@ -1120,11 +1120,15 @@ impl GameClient {
                 self.reload_until = None;
             }
             if let Some(start) = self.cooking {
-                let release = !is_key_down(KeyCode::G) || !can_act || now - start > (GRENADE_FUSE - 0.35) as f64;
+                let release = !is_key_down(KeyCode::G) || !can_act || now - start > (self.tuning.grenade.fuse - 0.35) as f64;
                 if release {
                     self.cooking = None;
                     if self.alive {
-                        let d = (self.aim_dir() + vec3(0.0, 0.18, 0.0)).normalize();
+                        // tilt the throw upwards by the server's arc setting
+                        let aim = self.aim_dir();
+                        let pitch = aim.y.clamp(-1.0, 1.0).asin() + self.tuning.grenade.throw_arc.to_radians();
+                        let flat = vec3(aim.x, 0.0, aim.z).normalize_or_zero();
+                        let d = (flat * pitch.cos() + vec3(0.0, pitch.sin(), 0.0)).normalize();
                         self.net.send(C2S::Grenade { origin: (self.eye() + d * 0.3).to_array(), dir: d.to_array(), cook: (now - start) as f32 });
                         self.grenades = self.grenades.saturating_sub(1);
                         self.last_throw = now;
