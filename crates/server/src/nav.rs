@@ -45,7 +45,10 @@ impl Nav {
             for i in 0..w {
                 let x = ox + (i as f32 + 0.5) * CELL;
                 let z = oz + (j as f32 + 0.5) * CELL;
-                let bb = Aabb { min: vec3(x - 0.42, 0.05, z - 0.42), max: vec3(x + 0.42, 1.85, z + 0.42) };
+                let bb = Aabb {
+                    min: vec3(x - 0.42, 0.05, z - 0.42),
+                    max: vec3(x + 0.42, 1.85, z + 0.42),
+                };
                 walk[(j * w + i) as usize] = !world.overlaps(&bb);
             }
         }
@@ -65,11 +68,18 @@ impl Nav {
     }
 
     pub fn cell_of(&self, p: Vec3) -> (i32, i32) {
-        (((p.x - self.ox) / CELL).floor() as i32, ((p.z - self.oz) / CELL).floor() as i32)
+        (
+            ((p.x - self.ox) / CELL).floor() as i32,
+            ((p.z - self.oz) / CELL).floor() as i32,
+        )
     }
 
     pub fn center(&self, i: i32, j: i32) -> Vec3 {
-        vec3(self.ox + (i as f32 + 0.5) * CELL, 0.0, self.oz + (j as f32 + 0.5) * CELL)
+        vec3(
+            self.ox + (i as f32 + 0.5) * CELL,
+            0.0,
+            self.oz + (j as f32 + 0.5) * CELL,
+        )
     }
 
     pub fn nearest_walkable(&self, c: (i32, i32)) -> Option<(i32, i32)> {
@@ -145,7 +155,16 @@ impl Nav {
                 return None;
             }
             let (x, z) = (i as i32 % self.w, i as i32 / self.w);
-            for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            for (dx, dz) in [
+                (1, 0),
+                (-1, 0),
+                (0, 1),
+                (0, -1),
+                (1, 1),
+                (1, -1),
+                (-1, 1),
+                (-1, -1),
+            ] {
                 let (nx, nz) = (x + dx, z + dz);
                 if !self.walkable(nx, nz) {
                     continue;
@@ -158,7 +177,10 @@ impl Nav {
                 if c < cost[ni] {
                     cost[ni] = c;
                     from[ni] = i;
-                    open.push(Node { f: c + hfn(ni), i: ni });
+                    open.push(Node {
+                        f: c + hfn(ni),
+                        i: ni,
+                    });
                 }
             }
         }
@@ -175,7 +197,10 @@ impl Nav {
             cells.push(cur);
         }
         cells.reverse();
-        let pts: Vec<Vec3> = cells.iter().map(|&c| self.center(c as i32 % self.w, c as i32 / self.w)).collect();
+        let pts: Vec<Vec3> = cells
+            .iter()
+            .map(|&c| self.center(c as i32 % self.w, c as i32 / self.w))
+            .collect();
         // string pulling
         let mut out = Vec::new();
         let mut anchor = a;

@@ -42,7 +42,8 @@ impl ServerHandle {
         if self.admin.send(AdminMsg::Cmd(cmd.to_string(), tx)).is_err() {
             return "Сервер не працює".into();
         }
-        rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or_else(|_| "Немає відповіді".into())
+        rx.recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap_or_else(|_| "Немає відповіді".into())
     }
 
     pub fn shutdown(&mut self) {
@@ -53,7 +54,10 @@ impl ServerHandle {
     }
 
     pub fn is_running(&self) -> bool {
-        self.thread.as_ref().map(|t| !t.is_finished()).unwrap_or(false)
+        self.thread
+            .as_ref()
+            .map(|t| !t.is_finished())
+            .unwrap_or(false)
     }
 
     pub fn wait(mut self) {
@@ -73,7 +77,8 @@ impl Drop for ServerHandle {
 pub fn start(cfg: ServerConfig, cfg_path: Option<PathBuf>) -> Result<ServerHandle, String> {
     let cfg = cfg.sanitized();
     let addr = format!("{}:{}", cfg.bind, cfg.port);
-    let socket = UdpSocket::bind(&addr).map_err(|e| format!("Не вдалося відкрити UDP {addr}: {e}"))?;
+    let socket =
+        UdpSocket::bind(&addr).map_err(|e| format!("Не вдалося відкрити UDP {addr}: {e}"))?;
     let (tx, rx) = channel();
     let stop = Arc::new(AtomicBool::new(false));
     let http_port = if cfg.http_enabled {
@@ -95,5 +100,11 @@ pub fn start(cfg: ServerConfig, cfg_path: Option<PathBuf>) -> Result<ServerHandl
         .name("game".into())
         .spawn(move || netserver::run(socket, game, rx, stop2))
         .map_err(|e| e.to_string())?;
-    Ok(ServerHandle { stop, admin: tx, port, http_port, thread: Some(thread) })
+    Ok(ServerHandle {
+        stop,
+        admin: tx,
+        port,
+        http_port,
+        thread: Some(thread),
+    })
 }

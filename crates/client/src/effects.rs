@@ -40,11 +40,19 @@ pub struct Effects {
 
 impl Effects {
     pub fn new() -> Effects {
-        Effects { parts: Vec::new(), tracers: Vec::new(), rng: Rng::new(99) }
+        Effects {
+            parts: Vec::new(),
+            tracers: Vec::new(),
+            rng: Rng::new(99),
+        }
     }
 
     fn rv(&mut self, s: f32) -> Vec3 {
-        vec3(self.rng.range(-s, s), self.rng.range(-s, s), self.rng.range(-s, s))
+        vec3(
+            self.rng.range(-s, s),
+            self.rng.range(-s, s),
+            self.rng.range(-s, s),
+        )
     }
 
     fn push(&mut self, p: Particle) {
@@ -62,43 +70,143 @@ impl Effects {
     pub fn impact(&mut self, pos: Vec3) {
         for _ in 0..3 {
             let v = self.rv(1.2) + vec3(0.0, 1.2, 0.0);
-            self.push(Particle { pos, vel: v, life: 0.0, max: 0.45, size: 0.08, grow: 0.35, color: [214, 196, 160], kind: Kind::Puff, grav: 1.0 });
+            self.push(Particle {
+                pos,
+                vel: v,
+                life: 0.0,
+                max: 0.45,
+                size: 0.08,
+                grow: 0.35,
+                color: [214, 196, 160],
+                kind: Kind::Puff,
+                grav: 1.0,
+            });
         }
         let v = self.rv(3.0) + vec3(0.0, 2.0, 0.0);
-        self.push(Particle { pos, vel: v, life: 0.0, max: 0.2, size: 0.04, grow: 0.0, color: [255, 230, 120], kind: Kind::Spark, grav: 9.0 });
+        self.push(Particle {
+            pos,
+            vel: v,
+            life: 0.0,
+            max: 0.2,
+            size: 0.04,
+            grow: 0.0,
+            color: [255, 230, 120],
+            kind: Kind::Spark,
+            grav: 9.0,
+        });
     }
 
     pub fn flesh(&mut self, pos: Vec3) {
-        self.push(Particle { pos, vel: Vec3::ZERO, life: 0.0, max: 0.22, size: 0.18, grow: 1.2, color: [255, 80, 60], kind: Kind::Star, grav: 0.0 });
+        self.push(Particle {
+            pos,
+            vel: Vec3::ZERO,
+            life: 0.0,
+            max: 0.22,
+            size: 0.18,
+            grow: 1.2,
+            color: [255, 80, 60],
+            kind: Kind::Star,
+            grav: 0.0,
+        });
         for _ in 0..4 {
             let v = self.rv(2.5) + vec3(0.0, 1.5, 0.0);
-            self.push(Particle { pos, vel: v, life: 0.0, max: 0.4, size: 0.05, grow: 0.0, color: [255, 220, 80], kind: Kind::Spark, grav: 6.0 });
+            self.push(Particle {
+                pos,
+                vel: v,
+                life: 0.0,
+                max: 0.4,
+                size: 0.05,
+                grow: 0.0,
+                color: [255, 220, 80],
+                kind: Kind::Spark,
+                grav: 6.0,
+            });
         }
     }
 
     pub fn muzzle(&mut self, pos: Vec3) {
-        self.push(Particle { pos, vel: Vec3::ZERO, life: 0.0, max: 0.05, size: 0.14, grow: 1.0, color: [255, 220, 110], kind: Kind::Flash, grav: 0.0 });
+        self.push(Particle {
+            pos,
+            vel: Vec3::ZERO,
+            life: 0.0,
+            max: 0.05,
+            size: 0.14,
+            grow: 1.0,
+            color: [255, 220, 110],
+            kind: Kind::Flash,
+            grav: 0.0,
+        });
     }
 
     pub fn explosion(&mut self, pos: Vec3, radius: f32) {
         let s = (radius / 6.0).clamp(0.6, 2.2);
-        self.push(Particle { pos, vel: Vec3::ZERO, life: 0.0, max: 0.45, size: 0.6 * s, grow: 5.0 * s, color: [255, 170, 50], kind: Kind::Fire, grav: 0.0 });
-        self.push(Particle { pos: pos + vec3(0.0, 0.3, 0.0), vel: Vec3::ZERO, life: 0.0, max: 0.3, size: 0.5 * s, grow: 4.0 * s, color: [255, 240, 140], kind: Kind::Fire, grav: 0.0 });
+        self.push(Particle {
+            pos,
+            vel: Vec3::ZERO,
+            life: 0.0,
+            max: 0.45,
+            size: 0.6 * s,
+            grow: 5.0 * s,
+            color: [255, 170, 50],
+            kind: Kind::Fire,
+            grav: 0.0,
+        });
+        self.push(Particle {
+            pos: pos + vec3(0.0, 0.3, 0.0),
+            vel: Vec3::ZERO,
+            life: 0.0,
+            max: 0.3,
+            size: 0.5 * s,
+            grow: 4.0 * s,
+            color: [255, 240, 140],
+            kind: Kind::Fire,
+            grav: 0.0,
+        });
         let n = (10.0 * s) as usize;
         for _ in 0..n {
             let v = self.rv(3.0 * s) + vec3(0.0, 2.5 * s, 0.0);
             let max = self.rng.range(1.2, 2.2);
-            self.push(Particle { pos, vel: v, life: 0.0, max, size: 0.5 * s, grow: 1.2 * s, color: [120, 120, 128], kind: Kind::Smoke, grav: -0.6 });
+            self.push(Particle {
+                pos,
+                vel: v,
+                life: 0.0,
+                max,
+                size: 0.5 * s,
+                grow: 1.2 * s,
+                color: [120, 120, 128],
+                kind: Kind::Smoke,
+                grav: -0.6,
+            });
         }
         for _ in 0..n {
             let v = self.rv(9.0 * s) + vec3(0.0, 5.0 * s, 0.0);
-            self.push(Particle { pos, vel: v, life: 0.0, max: 0.7, size: 0.08, grow: 0.0, color: [255, 200, 80], kind: Kind::Spark, grav: 12.0 });
+            self.push(Particle {
+                pos,
+                vel: v,
+                life: 0.0,
+                max: 0.7,
+                size: 0.08,
+                grow: 0.0,
+                color: [255, 200, 80],
+                kind: Kind::Spark,
+                grav: 12.0,
+            });
         }
     }
 
     pub fn smoke_trail(&mut self, pos: Vec3) {
         let v = self.rv(0.3);
-        self.push(Particle { pos, vel: v, life: 0.0, max: 0.8, size: 0.2, grow: 1.0, color: [200, 200, 210], kind: Kind::Smoke, grav: -0.3 });
+        self.push(Particle {
+            pos,
+            vel: v,
+            life: 0.0,
+            max: 0.8,
+            size: 0.2,
+            grow: 1.0,
+            color: [200, 200, 210],
+            kind: Kind::Smoke,
+            grav: -0.3,
+        });
     }
 
     pub fn update(&mut self, dt: f32) {
@@ -128,7 +236,11 @@ impl Effects {
                 Kind::Flash | Kind::Star => ((1.0 - k) * 255.0) as u8,
                 _ => ((1.0 - k) * 230.0) as u8,
             };
-            let col = if p.kind == Kind::Fire && k > 0.5 { [255, 120, 40] } else { p.color };
+            let col = if p.kind == Kind::Fire && k > 0.5 {
+                [255, 120, 40]
+            } else {
+                p.color
+            };
             match p.kind {
                 Kind::Star | Kind::Flash => {
                     // camera-facing 4-point star
@@ -137,7 +249,15 @@ impl Effects {
                     let u = r.cross(to);
                     let s = p.size;
                     for (a, b) in [(r, u), (u, -r), (-r, -u), (-u, r)] {
-                        m.add_quad([p.pos, p.pos + (a + b) * s * 0.35, p.pos + a * s * 1.6, p.pos + (a - b) * s * 0.35], [col[0], col[1], col[2], alpha]);
+                        m.add_quad(
+                            [
+                                p.pos,
+                                p.pos + (a + b) * s * 0.35,
+                                p.pos + a * s * 1.6,
+                                p.pos + (a - b) * s * 0.35,
+                            ],
+                            [col[0], col[1], col[2], alpha],
+                        );
                     }
                 }
                 _ => {
@@ -153,7 +273,11 @@ impl Effects {
             let k = 1.0 - t.t / 0.07;
             let d = t.b - t.a;
             let a = t.a + d * (t.t / 0.07) * 0.6;
-            draw_line_3d(a, t.b.lerp(a, 0.3 * (1.0 - k)), Color::new(1.0, 0.92, 0.5, k));
+            draw_line_3d(
+                a,
+                t.b.lerp(a, 0.3 * (1.0 - k)),
+                Color::new(1.0, 0.92, 0.5, k),
+            );
         }
     }
 }

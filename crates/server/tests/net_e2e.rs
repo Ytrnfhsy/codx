@@ -21,8 +21,14 @@ struct Client {
 impl Client {
     fn new(port: u16) -> Client {
         let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
-        sock.set_read_timeout(Some(Duration::from_millis(5))).unwrap();
-        Client { sock, chan: Channel::new(), start: Instant::now(), port }
+        sock.set_read_timeout(Some(Duration::from_millis(5)))
+            .unwrap();
+        Client {
+            sock,
+            chan: Channel::new(),
+            start: Instant::now(),
+            port,
+        }
     }
     fn flush(&mut self) {
         let p = self.chan.build_packet(self.start.elapsed().as_secs_f64());
@@ -49,7 +55,10 @@ fn join_move_and_shoot_over_udp() {
         bots: 2,
         min_players: 1,
         data_dir: std::env::temp_dir().join("tw-e2e").to_string_lossy().into(),
-        rotation: vec![toon_server::config::RotationEntry { map: "cargo".into(), mode: "tdm".into() }],
+        rotation: vec![toon_server::config::RotationEntry {
+            map: "cargo".into(),
+            mode: "tdm".into(),
+        }],
         ..Default::default()
     };
     let server = toon_server::start(cfg, None).expect("server starts");
@@ -65,7 +74,11 @@ fn join_move_and_shoot_over_udp() {
     assert_eq!(info["map"], "Вантаж");
 
     let mut c = Client::new(port);
-    c.chan.send_reliable(&C2S::Hello { name: "E2E".into(), password: String::new(), version: PROTOCOL_VERSION });
+    c.chan.send_reliable(&C2S::Hello {
+        name: "E2E".into(),
+        password: String::new(),
+        version: PROTOCOL_VERSION,
+    });
     c.chan.send_reliable(&C2S::JoinTeam(Some(Team::Allies)));
     c.chan.send_reliable(&C2S::SetLoadout(DEFAULT_CLASSES[0].1));
 
@@ -90,7 +103,15 @@ fn join_move_and_shoot_over_udp() {
                     welcomed = true;
                 }
                 S2C::Spawned { pos, yaw, life, .. } => {
-                    spawned = Some((Body { pos: glam::Vec3::from_array(pos), on_ground: true, ..Default::default() }, yaw, life));
+                    spawned = Some((
+                        Body {
+                            pos: glam::Vec3::from_array(pos),
+                            on_ground: true,
+                            ..Default::default()
+                        },
+                        yaw,
+                        life,
+                    ));
                 }
                 S2C::Correction { pos, .. } => {
                     if state == MatchState::Playing {
@@ -123,7 +144,9 @@ fn join_move_and_shoot_over_udp() {
             if walking {
                 walked += 1.0 / 30.0;
             }
-            let t = tuning.as_ref().expect("server sends tuning before spawning us");
+            let t = tuning
+                .as_ref()
+                .expect("server sends tuning before spawning us");
             let ws = t.weapon(DEFAULT_CLASSES[0].1.primary);
             let inp = MoveInput {
                 forward: if walking { 1.0 } else { 0.0 },
@@ -151,7 +174,11 @@ fn join_move_and_shoot_over_udp() {
             }));
             if can_move && !walking && !fired {
                 let eye = body.pos + glam::vec3(0.0, STAND_EYE, 0.0);
-                c.chan.send_reliable(&C2S::Fire { weapon: DEFAULT_CLASSES[0].1.primary, origin: eye.to_array(), dirs: vec![look_dir(*yaw, 0.0).to_array()] });
+                c.chan.send_reliable(&C2S::Fire {
+                    weapon: DEFAULT_CLASSES[0].1.primary,
+                    origin: eye.to_array(),
+                    dirs: vec![look_dir(*yaw, 0.0).to_array()],
+                });
                 fired = true;
             }
         }

@@ -12,18 +12,35 @@ impl Game {
             return;
         }
         let pos = self.p(id).map(|p| p.body.pos).unwrap_or(self.map.bomb);
-        let floor = self.world.floor_below(pos + glam::vec3(0.0, 0.5, 0.0), 30.0).unwrap_or(pos.y);
+        let floor = self
+            .world
+            .floor_below(pos + glam::vec3(0.0, 0.5, 0.0), 30.0)
+            .unwrap_or(pos.y);
         self.sab.carrier = None;
         self.sab.plant = None;
         self.sab.pos = glam::vec3(pos.x, floor, pos.z);
         self.sab.dropped_since = self.time;
         let name = self.p(id).map(|p| p.name.clone()).unwrap_or_default();
-        self.broadcast(S2C::BombEvent { text: format!("{name} впустив бомбу!") });
+        self.broadcast(S2C::BombEvent {
+            text: format!("{name} впустив бомбу!"),
+        });
     }
 
     pub fn check_elimination(&mut self) {
-        let alive = |t: Team| self.players.iter().flatten().filter(|p| p.team == t && p.alive).count();
-        let present = |t: Team| self.players.iter().flatten().filter(|p| p.team == t).count();
+        let alive = |t: Team| {
+            self.players
+                .iter()
+                .flatten()
+                .filter(|p| p.team == t && p.alive)
+                .count()
+        };
+        let present = |t: Team| {
+            self.players
+                .iter()
+                .flatten()
+                .filter(|p| p.team == t)
+                .count()
+        };
         let (a, b) = (alive(Team::Allies), alive(Team::Axis));
         // a planted bomb still decides the round even if the planters died
         if self.sab.planted_at.is_some() {
@@ -69,7 +86,12 @@ impl Game {
                 .players
                 .iter()
                 .flatten()
-                .filter(|p| p.alive && p.team == site && p.flags & flags::USE != 0 && p.body.pos.distance(pos) < SAB_DEFUSE_RADIUS)
+                .filter(|p| {
+                    p.alive
+                        && p.team == site
+                        && p.flags & flags::USE != 0
+                        && p.body.pos.distance(pos) < SAB_DEFUSE_RADIUS
+                })
                 .map(|p| p.id)
                 .next();
             match defuser {
@@ -94,8 +116,16 @@ impl Game {
                         if let Some(p) = self.pm(d) {
                             p.score += SCORE_DEFUSE;
                         }
-                        self.send(d, S2C::ScorePopup { points: SCORE_DEFUSE, text: "Знешкоджено".into() });
-                        self.broadcast(S2C::BombEvent { text: format!("{name} знешкодив бомбу!") });
+                        self.send(
+                            d,
+                            S2C::ScorePopup {
+                                points: SCORE_DEFUSE,
+                                text: "Знешкоджено".into(),
+                            },
+                        );
+                        self.broadcast(S2C::BombEvent {
+                            text: format!("{name} знешкодив бомбу!"),
+                        });
                         self.logf(format!("{name} знешкодив бомбу"));
                         if self.overtime {
                             self.round_win(Some(site), "Бомбу знешкоджено в овертаймі");
@@ -108,7 +138,14 @@ impl Game {
             if time >= self.sab.explode_at {
                 let pos = self.sab.pos;
                 self.sab.planted_at = None;
-                self.explode(pos + glam::vec3(0.0, 0.5, 0.0), SAB_EXPLOSION_RADIUS, 500.0, None, Cause::Bomb, true);
+                self.explode(
+                    pos + glam::vec3(0.0, 0.5, 0.0),
+                    SAB_EXPLOSION_RADIUS,
+                    500.0,
+                    None,
+                    Cause::Bomb,
+                    true,
+                );
                 self.round_win(Some(site.enemy()), "Ціль знищено");
             }
             return;
@@ -123,24 +160,45 @@ impl Game {
                     .players
                     .iter()
                     .flatten()
-                    .filter(|p| p.alive && p.team.is_playing() && (owner.is_none() || owner == Some(p.team)))
+                    .filter(|p| {
+                        p.alive && p.team.is_playing() && (owner.is_none() || owner == Some(p.team))
+                    })
                     .filter(|p| p.body.pos.distance(pos) < SAB_PICKUP_RADIUS)
                     .map(|p| (p.id, p.team, p.name.clone()))
                     .next();
                 if let Some((id, team, name)) = picker {
                     self.sab.carrier = Some(id);
                     self.sab.owner = Some(team);
-                    self.send_team(team, S2C::BombEvent { text: format!("{name} несе бомбу — супроводжуйте!") });
-                    self.send_team(team.enemy(), S2C::BombEvent { text: "Ворог підібрав бомбу!".into() });
-                } else if time - self.sab.dropped_since > 60.0 && self.sab.pos.distance(self.map.bomb) > 1.0 {
+                    self.send_team(
+                        team,
+                        S2C::BombEvent {
+                            text: format!("{name} несе бомбу — супроводжуйте!"),
+                        },
+                    );
+                    self.send_team(
+                        team.enemy(),
+                        S2C::BombEvent {
+                            text: "Ворог підібрав бомбу!".into(),
+                        },
+                    );
+                } else if time - self.sab.dropped_since > 60.0
+                    && self.sab.pos.distance(self.map.bomb) > 1.0
+                {
                     self.reset_bomb();
-                    self.broadcast(S2C::BombEvent { text: "Бомбу повернуто в центр".into() });
+                    self.broadcast(S2C::BombEvent {
+                        text: "Бомбу повернуто в центр".into(),
+                    });
                 }
             }
             Some(c) => {
                 // planting on the enemy site
                 let (team, pos, using, name) = match self.p(c) {
-                    Some(p) => (p.team, p.body.pos, p.flags & flags::USE != 0, p.name.clone()),
+                    Some(p) => (
+                        p.team,
+                        p.body.pos,
+                        p.flags & flags::USE != 0,
+                        p.name.clone(),
+                    ),
                     None => return,
                 };
                 let site = self.map.sites[team.enemy().index()];
@@ -165,8 +223,16 @@ impl Game {
                         if let Some(p) = self.pm(c) {
                             p.score += SCORE_PLANT;
                         }
-                        self.send(c, S2C::ScorePopup { points: SCORE_PLANT, text: "Бомбу закладено".into() });
-                        self.broadcast(S2C::BombEvent { text: format!("{name} заклав бомбу!") });
+                        self.send(
+                            c,
+                            S2C::ScorePopup {
+                                points: SCORE_PLANT,
+                                text: "Бомбу закладено".into(),
+                            },
+                        );
+                        self.broadcast(S2C::BombEvent {
+                            text: format!("{name} заклав бомбу!"),
+                        });
                         self.logf(format!("{name} заклав бомбу"));
                     }
                 } else {
@@ -177,7 +243,9 @@ impl Game {
 
         if self.overtime {
             self.check_elimination();
-            if self.state == toon_shared::protocol::MatchState::Playing && time >= self.sab.overtime_end {
+            if self.state == toon_shared::protocol::MatchState::Playing
+                && time >= self.sab.overtime_end
+            {
                 self.round_win(None, "Овертайм завершився");
             }
         }

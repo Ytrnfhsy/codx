@@ -13,8 +13,8 @@ use toon_shared::physics::{Body, MoveInput, Stance, World};
 use toon_shared::protocol::*;
 use toon_shared::ray::ray_player;
 use toon_shared::rng::Rng;
-use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
 use toon_shared::tuning::{Tuning, WeaponStats};
+use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
 use toon_shared::{look_dir, maps, wrap_angle, yaw_basis, Mode, Team};
 
 pub struct Remote {
@@ -201,7 +201,13 @@ pub fn build_map_mesh(map: &Map) -> ToonMesh {
         let is_ground = b.min.y < -0.5;
         if b.solid && !is_ground && size.min_element() > 0.15 {
             let w = Vec3::splat(0.045);
-            m.outline.add_box_ex(&Mat4::from_translation((b.min + b.max) * 0.5), size * 0.5 + w, crate::mesh::OUTLINE, 255, true);
+            m.outline.add_box_ex(
+                &Mat4::from_translation((b.min + b.max) * 0.5),
+                size * 0.5 + w,
+                crate::mesh::OUTLINE,
+                255,
+                true,
+            );
         }
     }
     m
@@ -255,7 +261,11 @@ pub fn build_sky(map: &Map) -> MeshBuilder {
         let d = rng.range(120.0, 260.0);
         let base = vec3(a.cos() * d, rng.range(60.0, 110.0), a.sin() * d);
         for k in 0..4 {
-            let off = vec3(k as f32 * 9.0 - 13.0, rng.range(-2.0, 3.0), rng.range(-4.0, 4.0));
+            let off = vec3(
+                k as f32 * 9.0 - 13.0,
+                rng.range(-2.0, 3.0),
+                rng.range(-4.0, 4.0),
+            );
             let s = rng.range(7.0, 12.0);
             let m = Mat4::from_translation(base + off) * Mat4::from_scale(vec3(1.3, 0.75, 1.0));
             sky.add_sphere_ex(&m, s, [255, 255, 255], 10, 6, 255, false);
@@ -296,7 +306,10 @@ impl GameClient {
             remotes: HashMap::new(),
             team: Team::Spectator,
             has_class: false,
-            body: Body { pos: spec, ..Default::default() },
+            body: Body {
+                pos: spec,
+                ..Default::default()
+            },
             yaw: 0.0,
             pitch: -0.3,
             alive: false,
@@ -370,8 +383,15 @@ impl GameClient {
         if !w.motd.is_empty() {
             g.push_chat(format!("[{}] {}", g.server_name, w.motd), crate::ui::ACCENT);
         }
-        g.push_chat("WASD, Shift — біг, C — присід, Ctrl — лежати, ПКМ — приціл, R — перезарядка".into(), crate::ui::MUTED);
-        g.push_chat("G — граната, V — ніж, F — дія, 5 — кілстрік, T/Y — чат, Tab — рахунок, M — клас".into(), crate::ui::MUTED);
+        g.push_chat(
+            "WASD, Shift — біг, C — присід, Ctrl — лежати, ПКМ — приціл, R — перезарядка".into(),
+            crate::ui::MUTED,
+        );
+        g.push_chat(
+            "G — граната, V — ніж, F — дія, 5 — кілстрік, T/Y — чат, Tab — рахунок, M — клас"
+                .into(),
+            crate::ui::MUTED,
+        );
         let mut audio_dummy = None;
         for m in pending {
             g.handle_msg(m, &mut audio_dummy);
@@ -380,7 +400,11 @@ impl GameClient {
     }
 
     pub fn push_chat(&mut self, text: String, color: Color) {
-        self.chat.push(Line { text, color, time: get_time() });
+        self.chat.push(Line {
+            text,
+            color,
+            time: get_time(),
+        });
         if self.chat.len() > 60 {
             self.chat.remove(0);
         }
@@ -408,7 +432,10 @@ impl GameClient {
     }
 
     pub fn name_of(&self, id: u8) -> Option<&str> {
-        self.scoreboard.iter().find(|r| r.id == id).map(|r| r.name.as_str())
+        self.scoreboard
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.name.as_str())
     }
 
     fn load_map(&mut self, map: MapId, mode: Mode, gs: GameSettings) {
@@ -436,15 +463,30 @@ impl GameClient {
         match m {
             S2C::Welcome { .. } => {}
             S2C::Reject(reason) => self.leave = Some(reason),
-            S2C::MapChange { map, mode, settings } => {
+            S2C::MapChange {
+                map,
+                mode,
+                settings,
+            } => {
                 self.load_map(map, mode, settings);
                 let name = self.map.name;
                 self.center_msg(format!("{name} — {}", mode.name()), 4.0, crate::ui::ACCENT);
             }
             S2C::Snapshot(s) => self.on_snapshot(*s, audio),
             S2C::Scoreboard(rows) => self.scoreboard = rows,
-            S2C::Spawned { pos, yaw, life, loadout } => {
-                self.body = Body { pos: Vec3::from_array(pos), vel: Vec3::ZERO, on_ground: true, stance: Stance::Stand, ..Default::default() };
+            S2C::Spawned {
+                pos,
+                yaw,
+                life,
+                loadout,
+            } => {
+                self.body = Body {
+                    pos: Vec3::from_array(pos),
+                    vel: Vec3::ZERO,
+                    on_ground: true,
+                    stance: Stance::Stand,
+                    ..Default::default()
+                };
                 self.cam_smooth = Vec3::ZERO;
                 self.want_stance = Stance::Stand;
                 self.yaw = yaw;
@@ -453,8 +495,16 @@ impl GameClient {
                 self.alive = true;
                 self.loadout = loadout;
                 self.weapons = [
-                    (loadout.primary, self.tuning.weapon(loadout.primary).mag, loadout.reserve_for(loadout.primary, &self.tuning)),
-                    (loadout.secondary, self.tuning.weapon(loadout.secondary).mag, loadout.reserve_for(loadout.secondary, &self.tuning)),
+                    (
+                        loadout.primary,
+                        self.tuning.weapon(loadout.primary).mag,
+                        loadout.reserve_for(loadout.primary, &self.tuning),
+                    ),
+                    (
+                        loadout.secondary,
+                        self.tuning.weapon(loadout.secondary).mag,
+                        loadout.reserve_for(loadout.secondary, &self.tuning),
+                    ),
                 ];
                 self.slot = 0;
                 self.grenades = loadout.grenades();
@@ -498,12 +548,22 @@ impl GameClient {
                     self.body.vel = Vec3::ZERO;
                 }
             }
-            S2C::Kill { killer, victim, cause, headshot, killer_name, victim_name, killer_team, victim_team } => {
+            S2C::Kill {
+                killer,
+                victim,
+                cause,
+                headshot,
+                killer_name,
+                victim_name,
+                killer_team,
+                victim_team,
+            } => {
                 if victim == self.my_id {
                     self.alive = false;
                     self.death_time = now;
                     self.death_pos = self.eye();
-                    self.death_info = Some((killer_name.clone(), cause, killer.filter(|k| *k != victim)));
+                    self.death_info =
+                        Some((killer_name.clone(), cause, killer.filter(|k| *k != victim)));
                     self.cooking = None;
                 }
                 if killer == Some(self.my_id) && victim != self.my_id {
@@ -511,7 +571,15 @@ impl GameClient {
                         a.play(Sfx::Kill, 0.6);
                     }
                 }
-                self.killfeed.push(KillLine { killer: killer_name, victim: victim_name, kteam: killer_team, vteam: victim_team, cause, headshot, time: now });
+                self.killfeed.push(KillLine {
+                    killer: killer_name,
+                    victim: victim_name,
+                    kteam: killer_team,
+                    vteam: victim_team,
+                    cause,
+                    headshot,
+                    time: now,
+                });
                 if self.killfeed.len() > 6 {
                     self.killfeed.remove(0);
                 }
@@ -535,7 +603,9 @@ impl GameClient {
                 let p = Vec3::from_array(pos);
                 self.fx.explosion(p, radius);
                 let d = p.distance(self.eye());
-                self.shake = (self.shake + (1.0 - d / (radius * 4.0)).max(0.0) * if big { 1.0 } else { 0.6 }).min(1.2);
+                self.shake = (self.shake
+                    + (1.0 - d / (radius * 4.0)).max(0.0) * if big { 1.0 } else { 0.6 })
+                .min(1.2);
                 if let Some(a) = audio {
                     a.play_at(Sfx::Explosion, p, self.eye(), 1.0, 120.0);
                 }
@@ -551,7 +621,12 @@ impl GameClient {
             S2C::ScorePopup { points, text } => {
                 self.popups.push((format!("+{points} {text}"), now));
             }
-            S2C::Chat { from, team, text, team_only } => {
+            S2C::Chat {
+                from,
+                team,
+                text,
+                team_only,
+            } => {
                 let line = if from.is_empty() {
                     text
                 } else if team_only {
@@ -559,12 +634,22 @@ impl GameClient {
                 } else {
                     format!("{from}: {text}")
                 };
-                let color = if from.is_empty() { crate::ui::MUTED } else if from == "Адмін" { crate::ui::ACCENT } else { crate::models::team_color(team) };
+                let color = if from.is_empty() {
+                    crate::ui::MUTED
+                } else if from == "Адмін" {
+                    crate::ui::ACCENT
+                } else {
+                    crate::models::team_color(team)
+                };
                 self.push_chat(line, color);
             }
             S2C::Center { text, secs } => self.center_msg(text, secs as f64, crate::ui::TEXT),
             S2C::StreakReady(k) => {
-                self.center_msg(format!("{} готовий! Натисни 5", k.name()), 3.0, crate::ui::ACCENT);
+                self.center_msg(
+                    format!("{} готовий! Натисни 5", k.name()),
+                    3.0,
+                    crate::ui::ACCENT,
+                );
                 self.streak_hint = Some(k);
                 if let Some(a) = audio {
                     a.play(Sfx::Streak, 0.7);
@@ -577,10 +662,19 @@ impl GameClient {
                 } else {
                     format!("Ворожий {}!", streak.name().to_lowercase())
                 };
-                self.center_msg(text, 2.5, if friendly { crate::ui::GOOD } else { crate::ui::BAD });
+                self.center_msg(
+                    text,
+                    2.5,
+                    if friendly {
+                        crate::ui::GOOD
+                    } else {
+                        crate::ui::BAD
+                    },
+                );
             }
             S2C::Airstrike { from, to } => {
-                self.airstrikes.push((Vec3::from_array(from), Vec3::from_array(to), now));
+                self.airstrikes
+                    .push((Vec3::from_array(from), Vec3::from_array(to), now));
                 if let Some(a) = audio {
                     a.play(Sfx::Jet, 0.9);
                 }
@@ -612,7 +706,10 @@ impl GameClient {
                 t.finalize();
                 if self.tuning.movement != t.movement || self.tuning.weapons != t.weapons {
                     if self.have_clock {
-                        self.push_chat("Сервер оновив налаштування руху/зброї".into(), crate::ui::MUTED);
+                        self.push_chat(
+                            "Сервер оновив налаштування руху/зброї".into(),
+                            crate::ui::MUTED,
+                        );
                     }
                 }
                 self.tuning = *t;
@@ -694,7 +791,9 @@ impl GameClient {
             self.death_time = now;
             self.death_pos = self.eye();
         }
-        let quiet = now - self.last_fire > 0.5 && self.reload_until.is_none() && now > self.switch_until + 0.3;
+        let quiet = now - self.last_fire > 0.5
+            && self.reload_until.is_none()
+            && now > self.switch_until + 0.3;
         if quiet && self.alive {
             for i in 0..2 {
                 self.weapons[i].1 = me.ammo[i].0;
@@ -721,7 +820,10 @@ impl GameClient {
             let from = if shot.id == 255 {
                 Vec3::from_array(shot.from)
             } else {
-                self.remotes.get(&shot.id).map(|r| r.muzzle).unwrap_or(Vec3::from_array(shot.from))
+                self.remotes
+                    .get(&shot.id)
+                    .map(|r| r.muzzle)
+                    .unwrap_or(Vec3::from_array(shot.from))
             };
             self.fx.tracer(from, to);
             if shot.flesh {
@@ -733,7 +835,11 @@ impl GameClient {
                 self.fx.muzzle(from);
             }
             if let Some(a) = audio {
-                let sfx = if shot.id == 255 { Sfx::Lmg } else { Sfx::for_weapon(shot.weapon) };
+                let sfx = if shot.id == 255 {
+                    Sfx::Lmg
+                } else {
+                    Sfx::for_weapon(shot.weapon)
+                };
                 a.play_at(sfx, from, eye, 0.7, 140.0);
             }
         }
@@ -754,7 +860,9 @@ impl GameClient {
         };
         let base = hip + (def.ads_spread - hip) * self.ads_t;
         let speed = vec2(self.body.vel.x, self.body.vel.z).length();
-        let mv = (speed / self.tuning.movement.walk_speed).min(1.3) * def.move_spread * (1.0 - self.ads_t * 0.8);
+        let mv = (speed / self.tuning.movement.walk_speed).min(1.3)
+            * def.move_spread
+            * (1.0 - self.ads_t * 0.8);
         let air = if self.body.on_ground { 0.0 } else { 3.0 };
         base + mv + air + self.spread_bonus
     }
@@ -794,7 +902,10 @@ impl GameClient {
         let base = if scoped { 0.007 } else { 0.0018 };
         let k = base * self.ws().sway * stance * if holding { 0.08 } else { 1.0 };
         let t = self.now as f32;
-        vec2((t * 0.9).sin() * 1.5 + (t * 2.3).sin() * 0.4, (t * 1.7).sin() * 1.1) * k
+        vec2(
+            (t * 0.9).sin() * 1.5 + (t * 2.3).sin() * 0.4,
+            (t * 1.7).sin() * 1.1,
+        ) * k
     }
 
     pub fn aim_dir(&self) -> Vec3 {
@@ -815,13 +926,23 @@ impl GameClient {
         let spread = self.current_spread().to_radians();
         let eye = self.eye();
         let base = self.aim_dir();
-        let dirs: Vec<Vec3> = (0..def.pellets.max(1)).map(|_| cone(&mut self.rng, base, spread)).collect();
-        self.net.send(C2S::Fire { weapon: w, origin: eye.to_array(), dirs: dirs.iter().map(|d| d.to_array()).collect() });
+        let dirs: Vec<Vec3> = (0..def.pellets.max(1))
+            .map(|_| cone(&mut self.rng, base, spread))
+            .collect();
+        self.net.send(C2S::Fire {
+            weapon: w,
+            origin: eye.to_array(),
+            dirs: dirs.iter().map(|d| d.to_array()).collect(),
+        });
 
         // local visuals: trace against the world and remote players
         let muzzle = self.viewmodel_muzzle_world();
         for (k, d) in dirs.iter().enumerate() {
-            let mut t = self.world.raycast(eye, *d, 300.0).map(|h| h.0).unwrap_or(300.0);
+            let mut t = self
+                .world
+                .raycast(eye, *d, 300.0)
+                .map(|h| h.0)
+                .unwrap_or(300.0);
             let mut flesh = false;
             for r in self.remotes.values() {
                 if !r.alive || r.team == self.team {
@@ -853,10 +974,13 @@ impl GameClient {
         };
         let ramp = def.recoil_scale(self.shot_streak);
         self.shot_streak += 1;
-        let kick = (def.recoil_v * 0.55 * ads_k * stance_k * ramp * self.rng.range(0.8, 1.2)).to_radians();
+        let kick =
+            (def.recoil_v * 0.55 * ads_k * stance_k * ramp * self.rng.range(0.8, 1.2)).to_radians();
         self.pitch = (self.pitch + kick).min(1.5);
         self.recoil_accum += kick;
-        self.yaw += (def.recoil_h * 0.5 * ads_k * stance_k * ramp.sqrt() * self.rng.range(-1.0, 1.0)).to_radians();
+        self.yaw +=
+            (def.recoil_h * 0.5 * ads_k * stance_k * ramp.sqrt() * self.rng.range(-1.0, 1.0))
+                .to_radians();
         self.spread_bonus = (self.spread_bonus + def.shot_spread).min(6.0);
         let heft = w.def().heft;
         self.recoil_vis = (self.recoil_vis + 0.5 + heft * 0.5).min(1.4);
@@ -881,7 +1005,11 @@ impl GameClient {
         if self.reload_until.is_some() || mag >= def.mag || res == 0 {
             return;
         }
-        let k = if self.loadout.perk2 == Perk2::SleightOfHand { 0.5 } else { 1.0 };
+        let k = if self.loadout.perk2 == Perk2::SleightOfHand {
+            0.5
+        } else {
+            1.0
+        };
         let dur = (def.reload_time * k) as f64;
         self.reload_until = Some((self.now + dur, dur));
         self.net.send(C2S::Reload);
@@ -928,7 +1056,8 @@ impl GameClient {
             }
             // heavier weapons lag behind the view more
             let inertia = 0.00025 + self.ws().weight * 0.00004;
-            self.sway = (self.sway + vec2(md.x, md.y) * inertia).clamp(Vec2::splat(-0.05), Vec2::splat(0.05));
+            self.sway = (self.sway + vec2(md.x, md.y) * inertia)
+                .clamp(Vec2::splat(-0.05), Vec2::splat(0.05));
         }
         let settle = 8.0 / (1.0 + self.ws().weight * 0.08);
         self.sway *= 1.0 - (dt * settle).min(1.0);
@@ -941,7 +1070,9 @@ impl GameClient {
         }
         self.yaw = wrap_angle(self.yaw);
 
-        if !self.team.is_playing() || (!self.alive && self.state != MatchState::PostMatch && self.team == Team::Spectator) {
+        if !self.team.is_playing()
+            || (!self.alive && self.state != MatchState::PostMatch && self.team == Team::Spectator)
+        {
             self.update_spectator(dt, playing_input);
         }
 
@@ -953,10 +1084,18 @@ impl GameClient {
         let scoped_weapon = self.weapon().def().scoped;
         if self.alive {
             if pressed(KeyCode::C) {
-                self.want_stance = if self.want_stance == Stance::Crouch { Stance::Stand } else { Stance::Crouch };
+                self.want_stance = if self.want_stance == Stance::Crouch {
+                    Stance::Stand
+                } else {
+                    Stance::Crouch
+                };
             }
             if pressed(KeyCode::LeftControl) || pressed(KeyCode::Z) {
-                self.want_stance = if self.want_stance == Stance::Prone { Stance::Stand } else { Stance::Prone };
+                self.want_stance = if self.want_stance == Stance::Prone {
+                    Stance::Stand
+                } else {
+                    Stance::Prone
+                };
             }
             let mut fwd = 0.0;
             let mut right = 0.0;
@@ -978,7 +1117,12 @@ impl GameClient {
             }
             let ads_held = can_act && is_mouse_button_down(MouseButton::Right);
             let reloading = self.reload_until.is_some();
-            let want_sprint = key(KeyCode::LeftShift) && fwd > 0.0 && self.body.stance == Stance::Stand && !ads_held && self.stamina > 0.0 && now - self.last_fire > 0.2;
+            let want_sprint = key(KeyCode::LeftShift)
+                && fwd > 0.0
+                && self.body.stance == Stance::Stand
+                && !ads_held
+                && self.stamina > 0.0
+                && now - self.last_fire > 0.2;
             // scoped snipers use Shift to hold breath instead
             let want_sprint = want_sprint && !(scoped_weapon && self.ads_t > 0.5);
             if self.sprinting && !want_sprint {
@@ -988,7 +1132,8 @@ impl GameClient {
             if self.sprinting {
                 self.stamina = (self.stamina - dt).max(0.0);
             } else {
-                self.stamina = (self.stamina + dt * self.tuning.movement.sprint_recover).min(self.sprint_max());
+                self.stamina = (self.stamina + dt * self.tuning.movement.sprint_recover)
+                    .min(self.sprint_max());
             }
             if scoped_weapon && self.ads_t > 0.5 && is_key_down(KeyCode::LeftShift) {
                 self.breath = (self.breath - dt).max(0.0);
@@ -997,9 +1142,18 @@ impl GameClient {
             }
             // after sprinting the weapon has to come back up first (longer for heavy guns)
             let raising = now - self.sprint_end < def.sprint_out_time as f64;
-            let ads_ok = ads_held && !self.sprinting && !raising && !reloading && now >= self.switch_until && now >= self.melee_until;
+            let ads_ok = ads_held
+                && !self.sprinting
+                && !raising
+                && !reloading
+                && now >= self.switch_until
+                && now >= self.melee_until;
             let speed = 1.0 / def.ads_time.max(0.05);
-            self.ads_t = if ads_ok { (self.ads_t + dt * speed).min(1.0) } else { (self.ads_t - dt * speed * 1.5).max(0.0) };
+            self.ads_t = if ads_ok {
+                (self.ads_t + dt * speed).min(1.0)
+            } else {
+                (self.ads_t - dt * speed * 1.5).max(0.0)
+            };
 
             let inp = MoveInput {
                 forward: if self.frozen() { 0.0 } else { fwd },
@@ -1030,7 +1184,9 @@ impl GameClient {
             }
             // footsteps & bob
             let hs = vec2(self.body.vel.x, self.body.vel.z).length();
-            self.walk_amount += ((hs / self.tuning.movement.walk_speed).min(1.5) - self.walk_amount) * (dt * 8.0).min(1.0);
+            self.walk_amount += ((hs / self.tuning.movement.walk_speed).min(1.5)
+                - self.walk_amount)
+                * (dt * 8.0).min(1.0);
             self.bob_phase += hs * dt * 1.8;
             if self.body.on_ground && hs > 1.5 && self.body.stance == Stance::Stand {
                 self.step_acc += hs * dt;
@@ -1076,12 +1232,19 @@ impl GameClient {
             }
             let trig_down = can_act && is_mouse_button_down(MouseButton::Left);
             // also catch very quick clicks (press + release within one frame)
-            let trig_pressed = can_act && (is_mouse_button_pressed(MouseButton::Left) || (trig_down && !self.trigger_was_down));
+            let trig_pressed = can_act
+                && (is_mouse_button_pressed(MouseButton::Left)
+                    || (trig_down && !self.trigger_was_down));
             self.trigger_was_down = trig_down;
             // spawn protection: you can't be hurt, so you can't attack either.
             // Any attack key gives the protection up instead (no shot is fired).
             if self.is_protected() {
-                if trig_pressed || pressed(KeyCode::G) || pressed(KeyCode::V) || pressed(KeyCode::Key5) || pressed(KeyCode::Key4) {
+                if trig_pressed
+                    || pressed(KeyCode::G)
+                    || pressed(KeyCode::V)
+                    || pressed(KeyCode::Key5)
+                    || pressed(KeyCode::Key4)
+                {
                     self.protection_dropped = true;
                     self.net.send(C2S::DropProtection);
                     self.next_fire = now + 0.25;
@@ -1094,7 +1257,14 @@ impl GameClient {
             let shielded = self.is_protected();
             let trigger = if def.auto { trig_down } else { trig_pressed };
             let raising = now - self.sprint_end < def.sprint_out_time as f64;
-            let busy = shielded || self.reload_until.is_some() || now < self.switch_until || now < self.melee_until || now < self.throw_until || self.sprinting || raising || self.cooking.is_some();
+            let busy = shielded
+                || self.reload_until.is_some()
+                || now < self.switch_until
+                || now < self.melee_until
+                || now < self.throw_until
+                || self.sprinting
+                || raising
+                || self.cooking.is_some();
             if trigger && !busy && now >= self.next_fire {
                 let (_, mag, res) = self.weapons[self.slot as usize];
                 if mag > 0 {
@@ -1111,25 +1281,42 @@ impl GameClient {
                 }
             }
             // auto reload on empty after the last shot
-            if self.weapons[self.slot as usize].1 == 0 && self.weapons[self.slot as usize].2 > 0 && self.reload_until.is_none() && now - self.last_fire > 0.25 && !busy {
+            if self.weapons[self.slot as usize].1 == 0
+                && self.weapons[self.slot as usize].2 > 0
+                && self.reload_until.is_none()
+                && now - self.last_fire > 0.25
+                && !busy
+            {
                 self.start_reload();
             }
             // grenade (hold G to cook)
-            if !shielded && pressed(KeyCode::G) && self.grenades > 0 && self.cooking.is_none() && now >= self.throw_until {
+            if !shielded
+                && pressed(KeyCode::G)
+                && self.grenades > 0
+                && self.cooking.is_none()
+                && now >= self.throw_until
+            {
                 self.cooking = Some(now);
                 self.reload_until = None;
             }
             if let Some(start) = self.cooking {
-                let release = !is_key_down(KeyCode::G) || !can_act || now - start > (self.tuning.grenade.fuse - 0.35) as f64;
+                let release = !is_key_down(KeyCode::G)
+                    || !can_act
+                    || now - start > (self.tuning.grenade.fuse - 0.35) as f64;
                 if release {
                     self.cooking = None;
                     if self.alive {
                         // tilt the throw upwards by the server's arc setting
                         let aim = self.aim_dir();
-                        let pitch = aim.y.clamp(-1.0, 1.0).asin() + self.tuning.grenade.throw_arc.to_radians();
+                        let pitch = aim.y.clamp(-1.0, 1.0).asin()
+                            + self.tuning.grenade.throw_arc.to_radians();
                         let flat = vec3(aim.x, 0.0, aim.z).normalize_or_zero();
                         let d = (flat * pitch.cos() + vec3(0.0, pitch.sin(), 0.0)).normalize();
-                        self.net.send(C2S::Grenade { origin: (self.eye() + d * 0.3).to_array(), dir: d.to_array(), cook: (now - start) as f32 });
+                        self.net.send(C2S::Grenade {
+                            origin: (self.eye() + d * 0.3).to_array(),
+                            dir: d.to_array(),
+                            cook: (now - start) as f32,
+                        });
                         self.grenades = self.grenades.saturating_sub(1);
                         self.last_throw = now;
                         self.throw_until = now + 0.5;
@@ -1161,7 +1348,11 @@ impl GameClient {
             self.sprinting = false;
             self.using = false;
             // click to respawn
-            if self.team.is_playing() && playing_input && is_mouse_button_pressed(MouseButton::Left) && self.me.respawn_in <= 0.0 {
+            if self.team.is_playing()
+                && playing_input
+                && is_mouse_button_pressed(MouseButton::Left)
+                && self.me.respawn_in <= 0.0
+            {
                 self.net.send(C2S::Spawn);
             }
         }
@@ -1237,7 +1428,17 @@ impl GameClient {
             }
         }
         if let Some(a) = audio {
-            let heli = self.ents.iter().filter_map(|e| if let EntSnap::Heli { pos, .. } = e { Some(Vec3::from_array(*pos).distance(self.eye())) } else { None }).reduce(f32::min);
+            let heli = self
+                .ents
+                .iter()
+                .filter_map(|e| {
+                    if let EntSnap::Heli { pos, .. } = e {
+                        Some(Vec3::from_array(*pos).distance(self.eye()))
+                    } else {
+                        None
+                    }
+                })
+                .reduce(f32::min);
             a.heli(heli);
         }
     }
@@ -1268,7 +1469,11 @@ impl GameClient {
             v.y -= 1.0;
         }
         let _ = f;
-        let speed = if is_key_down(KeyCode::LeftShift) { 25.0 } else { 10.0 };
+        let speed = if is_key_down(KeyCode::LeftShift) {
+            25.0
+        } else {
+            10.0
+        };
         self.spec_pos += v.normalize_or_zero() * speed * dt;
     }
 
@@ -1324,7 +1529,12 @@ impl GameClient {
                 let speed = moved / dt;
                 r.walk += ((speed / walk_speed).min(1.4) - r.walk) * (dt * 10.0).min(1.0);
                 r.phase += moved * 2.2;
-                if r.alive && !r.silent && r.flags & flags::ON_GROUND != 0 && r.stance == Stance::Stand && speed > 2.0 {
+                if r.alive
+                    && !r.silent
+                    && r.flags & flags::ON_GROUND != 0
+                    && r.stance == Stance::Stand
+                    && speed > 2.0
+                {
                     r.step_acc += moved;
                     if r.step_acc > 2.2 {
                         r.step_acc = 0.0;
@@ -1350,11 +1560,18 @@ impl GameClient {
             let rest = rest.trim();
             if let Some(p) = rest.strip_prefix("login") {
                 self.rcon_pass = p.trim().to_string();
-                self.push_chat("[rcon] пароль збережено — тепер: /rcon <команда>".into(), crate::ui::ACCENT);
+                self.push_chat(
+                    "[rcon] пароль збережено — тепер: /rcon <команда>".into(),
+                    crate::ui::ACCENT,
+                );
             } else if self.rcon_pass.is_empty() {
                 self.push_chat("[rcon] спершу: /rcon login <пароль>".into(), crate::ui::BAD);
             } else {
-                let cmd = if rest.is_empty() { "help".to_string() } else { rest.to_string() };
+                let cmd = if rest.is_empty() {
+                    "help".to_string()
+                } else {
+                    rest.to_string()
+                };
                 let password = self.rcon_pass.clone();
                 self.net.send(C2S::Rcon { password, cmd });
             }
@@ -1374,11 +1591,17 @@ impl GameClient {
 
     pub fn join_team(&mut self, t: Option<Team>) {
         self.net.send(C2S::JoinTeam(t));
-        self.overlay = if t == Some(Team::Spectator) { Overlay::None } else { Overlay::Class };
+        self.overlay = if t == Some(Team::Spectator) {
+            Overlay::None
+        } else {
+            Overlay::Class
+        };
     }
 
     pub fn call_airstrike(&mut self, x: f32, z: f32) {
-        self.net.send(C2S::UseKillstreak { target: Some([x, z]) });
+        self.net.send(C2S::UseKillstreak {
+            target: Some([x, z]),
+        });
         self.overlay = Overlay::None;
     }
 
@@ -1394,7 +1617,11 @@ impl GameClient {
         );
         if self.alive {
             let s = self.sway_offset();
-            return (self.eye() + self.cam_smooth, self.yaw + s.x + shake.x, self.pitch + s.y + shake.y);
+            return (
+                self.eye() + self.cam_smooth,
+                self.yaw + s.x + shake.x,
+                self.pitch + s.y + shake.y,
+            );
         }
         if !self.team.is_playing() {
             return (self.spec_pos, self.yaw, self.pitch);

@@ -73,7 +73,11 @@ impl Map {
     }
     /// Colour of the ground slab (used for the terrain outside the playable area).
     pub fn ground_color(&self) -> [u8; 3] {
-        self.boxes.iter().find(|b| b.min.y < -0.5).map(|b| b.color).unwrap_or([120, 170, 90])
+        self.boxes
+            .iter()
+            .find(|b| b.min.y < -0.5)
+            .map(|b| b.color)
+            .unwrap_or([120, 170, 90])
     }
 }
 
@@ -87,13 +91,28 @@ pub struct Opening {
 }
 
 pub fn door(at: f32) -> Opening {
-    Opening { at, w: 1.7, bottom: 0.0, top: 2.5 }
+    Opening {
+        at,
+        w: 1.7,
+        bottom: 0.0,
+        top: 2.5,
+    }
 }
 pub fn wide_door(at: f32) -> Opening {
-    Opening { at, w: 3.2, bottom: 0.0, top: 3.0 }
+    Opening {
+        at,
+        w: 3.2,
+        bottom: 0.0,
+        top: 3.0,
+    }
 }
 pub fn window(at: f32) -> Opening {
-    Opening { at, w: 1.5, bottom: 1.05, top: 2.1 }
+    Opening {
+        at,
+        w: 1.5,
+        bottom: 1.05,
+        top: 2.1,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,7 +172,13 @@ impl MapBuilder {
         if (max - min).min_element() <= 1e-4 {
             return;
         }
-        self.boxes.push(MapBox { min, max, color, solid, visible });
+        self.boxes.push(MapBox {
+            min,
+            max,
+            color,
+            solid,
+            visible,
+        });
     }
 
     /// Solid visible box from two corners.
@@ -173,18 +198,46 @@ impl MapBuilder {
 
     /// Centered box standing on `y0`.
     pub fn cbox(&mut self, cx: f32, cz: f32, w: f32, d: f32, y0: f32, h: f32, c: [u8; 3]) {
-        self.block(cx - w / 2.0, y0, cz - d / 2.0, cx + w / 2.0, y0 + h, cz + d / 2.0, c);
+        self.block(
+            cx - w / 2.0,
+            y0,
+            cz - d / 2.0,
+            cx + w / 2.0,
+            y0 + h,
+            cz + d / 2.0,
+            c,
+        );
     }
 
     /// Wall along X (from x0 to x1) centered on `z`, with openings.
-    pub fn wall_x(&mut self, x0: f32, x1: f32, z: f32, y0: f32, h: f32, t: f32, ops: &[Opening], c: [u8; 3]) {
+    pub fn wall_x(
+        &mut self,
+        x0: f32,
+        x1: f32,
+        z: f32,
+        y0: f32,
+        h: f32,
+        t: f32,
+        ops: &[Opening],
+        c: [u8; 3],
+    ) {
         for (a, b, ya, yb) in wall_segments(x0, x1, h, ops) {
             self.block(a, y0 + ya, z - t / 2.0, b, y0 + yb, z + t / 2.0, c);
         }
     }
 
     /// Wall along Z (from z0 to z1) centered on `x`, with openings.
-    pub fn wall_z(&mut self, z0: f32, z1: f32, x: f32, y0: f32, h: f32, t: f32, ops: &[Opening], c: [u8; 3]) {
+    pub fn wall_z(
+        &mut self,
+        z0: f32,
+        z1: f32,
+        x: f32,
+        y0: f32,
+        h: f32,
+        t: f32,
+        ops: &[Opening],
+        c: [u8; 3],
+    ) {
         for (a, b, ya, yb) in wall_segments(z0, z1, h, ops) {
             self.block(x - t / 2.0, y0 + ya, a, x + t / 2.0, y0 + yb, b, c);
         }
@@ -205,13 +258,26 @@ impl MapBuilder {
         roof: Option<[u8; 3]>,
     ) {
         let t = 0.3;
-        let pick = |s: Side| ops.iter().filter(|o| o.0 == s).map(|o| o.1).collect::<Vec<_>>();
+        let pick = |s: Side| {
+            ops.iter()
+                .filter(|o| o.0 == s)
+                .map(|o| o.1)
+                .collect::<Vec<_>>()
+        };
         self.wall_x(x0, x1, z0 + t / 2.0, y0, h, t, &pick(Side::MinZ), c);
         self.wall_x(x0, x1, z1 - t / 2.0, y0, h, t, &pick(Side::MaxZ), c);
         self.wall_z(z0 + t, z1 - t, x0 + t / 2.0, y0, h, t, &pick(Side::MinX), c);
         self.wall_z(z0 + t, z1 - t, x1 - t / 2.0, y0, h, t, &pick(Side::MaxX), c);
         if let Some(rc) = roof {
-            self.block(x0 - 0.25, y0 + h, z0 - 0.25, x1 + 0.25, y0 + h + 0.35, z1 + 0.25, rc);
+            self.block(
+                x0 - 0.25,
+                y0 + h,
+                z0 - 0.25,
+                x1 + 0.25,
+                y0 + h + 0.35,
+                z1 + 0.25,
+                rc,
+            );
         }
     }
 
@@ -237,7 +303,18 @@ impl MapBuilder {
 
     /// Solid staircase. `dir` is one of (±1,0)/(0,±1): direction of ascent.
     #[allow(clippy::too_many_arguments)]
-    pub fn stairs(&mut self, x: f32, z: f32, dir: (f32, f32), width: f32, steps: u32, rise: f32, run: f32, y0: f32, c: [u8; 3]) {
+    pub fn stairs(
+        &mut self,
+        x: f32,
+        z: f32,
+        dir: (f32, f32),
+        width: f32,
+        steps: u32,
+        rise: f32,
+        run: f32,
+        y0: f32,
+        c: [u8; 3],
+    ) {
         for i in 0..steps {
             let a = i as f32 * run;
             let b = a + run;
@@ -257,14 +334,30 @@ impl MapBuilder {
         let (w, d) = if along_x { (6.0, 2.45) } else { (2.45, 6.0) };
         self.cbox(cx, cz, w, d, y0, 2.6, c);
         // ribs to make it look like a container
-        let rib = [(c[0] as f32 * 0.8) as u8, (c[1] as f32 * 0.8) as u8, (c[2] as f32 * 0.8) as u8];
+        let rib = [
+            (c[0] as f32 * 0.8) as u8,
+            (c[1] as f32 * 0.8) as u8,
+            (c[2] as f32 * 0.8) as u8,
+        ];
         if along_x {
             for k in [-2.0, 0.0, 2.0] {
-                self.push(vec3(cx + k - 0.1, y0 + 0.1, cz - d / 2.0 - 0.05), vec3(cx + k + 0.1, y0 + 2.5, cz + d / 2.0 + 0.05), rib, false, true);
+                self.push(
+                    vec3(cx + k - 0.1, y0 + 0.1, cz - d / 2.0 - 0.05),
+                    vec3(cx + k + 0.1, y0 + 2.5, cz + d / 2.0 + 0.05),
+                    rib,
+                    false,
+                    true,
+                );
             }
         } else {
             for k in [-2.0, 0.0, 2.0] {
-                self.push(vec3(cx - w / 2.0 - 0.05, y0 + 0.1, cz + k - 0.1), vec3(cx + w / 2.0 + 0.05, y0 + 2.5, cz + k + 0.1), rib, false, true);
+                self.push(
+                    vec3(cx - w / 2.0 - 0.05, y0 + 0.1, cz + k - 0.1),
+                    vec3(cx + w / 2.0 + 0.05, y0 + 2.5, cz + k + 0.1),
+                    rib,
+                    false,
+                    true,
+                );
             }
         }
     }
@@ -295,8 +388,23 @@ impl MapBuilder {
     }
 
     /// Ground plane and perimeter walls.
-    pub fn ground_and_bounds(&mut self, min: Vec2, max: Vec2, ground: [u8; 3], wall: [u8; 3], wall_h: f32) {
-        self.block(min.x - 2.0, -1.0, min.y - 2.0, max.x + 2.0, 0.0, max.y + 2.0, ground);
+    pub fn ground_and_bounds(
+        &mut self,
+        min: Vec2,
+        max: Vec2,
+        ground: [u8; 3],
+        wall: [u8; 3],
+        wall_h: f32,
+    ) {
+        self.block(
+            min.x - 2.0,
+            -1.0,
+            min.y - 2.0,
+            max.x + 2.0,
+            0.0,
+            max.y + 2.0,
+            ground,
+        );
         let t = 1.0;
         self.block(min.x - t, 0.0, min.y - t, max.x + t, wall_h, min.y, wall);
         self.block(min.x - t, 0.0, max.y, max.x + t, wall_h, max.y + t, wall);

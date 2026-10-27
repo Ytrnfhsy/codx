@@ -9,8 +9,26 @@ use toon_shared::weapons::{Perk3, WeaponClass};
 use toon_shared::{look_dir, wrap_angle, yaw_basis, yaw_of, Mode, Team};
 
 pub const BOT_NAMES: [&str; 20] = [
-    "Пиріжок", "Вареник", "Борщик", "Котик", "Бублик", "Сирник", "Галушка", "Кавун", "Пончик", "Їжак",
-    "Хом'як", "Бобер", "Ковбаска", "Пельмень", "Шкварка", "Гарбуз", "Кабанчик", "Горішок", "Тарас", "Мурчик",
+    "Пиріжок",
+    "Вареник",
+    "Борщик",
+    "Котик",
+    "Бублик",
+    "Сирник",
+    "Галушка",
+    "Кавун",
+    "Пончик",
+    "Їжак",
+    "Хом'як",
+    "Бобер",
+    "Ковбаска",
+    "Пельмень",
+    "Шкварка",
+    "Гарбуз",
+    "Кабанчик",
+    "Горішок",
+    "Тарас",
+    "Мурчик",
 ];
 
 /// Everything that depends on difficulty, derived from a single skill value 0..1.
@@ -94,7 +112,12 @@ pub fn parse_skill(v: &str) -> Option<f32> {
         "normal" | "нормально" | "середній" => Some(0.4),
         "hard" | "важко" | "важкий" => Some(0.7),
         "veteran" | "ветеран" => Some(1.0),
-        n => n.replace(',', ".").parse::<f32>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 1.0)),
+        n => n
+            .replace(',', ".")
+            .parse::<f32>()
+            .ok()
+            .filter(|x| x.is_finite())
+            .map(|x| x.clamp(0.0, 1.0)),
     }
 }
 
@@ -253,12 +276,19 @@ impl Game {
                 let flat = vec3(to.x, 0.0, to.z).normalize_or_zero();
                 let facing = flat.dot(fwd);
                 let shooting = time - o.last_shot < 0.6;
-                let hit_me = bot.attacked_by.map(|a| a.0 == o.id && time - a.2 < 2.0).unwrap_or(false);
+                let hit_me = bot
+                    .attacked_by
+                    .map(|a| a.0 == o.id && time - a.2 < 2.0)
+                    .unwrap_or(false);
                 let in_view = d < sk.max_sight && (facing > sk.fov_cos || d < 2.5);
-                let los = in_view && (self.world.line_of_sight(eye, o.eye()) || self.world.line_of_sight(eye, c));
+                let los = in_view
+                    && (self.world.line_of_sight(eye, o.eye()) || self.world.line_of_sight(eye, c));
                 // sounds outside the view make the bot turn around
-                let moving = vec2(o.body.vel.x, o.body.vel.z).length() > 2.0 && o.body.stance == Stance::Stand;
-                let audible = (shooting && d < sk.hearing) || (moving && !o.has_perk3(Perk3::DeadSilence) && d < sk.footsteps) || hit_me;
+                let moving = vec2(o.body.vel.x, o.body.vel.z).length() > 2.0
+                    && o.body.stance == Stance::Stand;
+                let audible = (shooting && d < sk.hearing)
+                    || (moving && !o.has_perk3(Perk3::DeadSilence) && d < sk.footsteps)
+                    || hit_me;
                 if !los && audible && heard.map(|h| d < h.1).unwrap_or(true) {
                     heard = Some((o.body.pos, d));
                 }
@@ -295,7 +325,8 @@ impl Game {
                     best = Some((o.id, d));
                 }
             }
-            bot.awareness.retain(|e| e.1 > 0.0 || Some(e.0) == bot.target);
+            bot.awareness
+                .retain(|e| e.1 > 0.0 || Some(e.0) == bot.target);
             if let Some((p, _)) = heard {
                 bot.alert = Some((p, time));
             }
@@ -313,7 +344,11 @@ impl Game {
                 None => bot.target = None,
             }
         }
-        let target = bot.target.and_then(|t| self.p(t)).filter(|t| t.alive).map(|t| (t.id, t.chest(), t.eye(), t.body.pos, t.body.vel));
+        let target = bot
+            .target
+            .and_then(|t| self.p(t))
+            .filter(|t| t.alive)
+            .map(|t| (t.id, t.chest(), t.eye(), t.body.pos, t.body.vel));
         if target.is_none() {
             bot.target = None;
         }
@@ -326,7 +361,11 @@ impl Game {
         let w = bot.wobble_phase;
         // aiming down sights steadies the hands
         let steady = if bot.was_ads { 0.55 } else { 1.0 };
-        let wobble = vec2((w * 1.3).sin() + (w * 3.1).sin() * 0.5, (w * 1.7).cos() * 0.8 + (w * 2.6).sin() * 0.3) * sk.aim_wobble * steady;
+        let wobble = vec2(
+            (w * 1.3).sin() + (w * 3.1).sin() * 0.5,
+            (w * 1.7).cos() * 0.8 + (w * 2.6).sin() * 0.3,
+        ) * sk.aim_wobble
+            * steady;
         bot.aim_err = bot.aim_err.lerp(wobble, (sk.aim_settle * dt).min(1.0));
         let mut aim_err_angle = 10.0;
         let mut dist_to_target = 0.0;
@@ -342,12 +381,20 @@ impl Game {
             // recoil climb is pulled down only partially by weaker bots
             let pull = turn * (0.3 + 0.7 * sk.recoil_control);
             let dp = want_pitch - pitch;
-            pitch += if dp < 0.0 { dp.max(-pull) } else { dp.min(turn) };
+            pitch += if dp < 0.0 {
+                dp.max(-pull)
+            } else {
+                dp.min(turn)
+            };
             // the bot fires when it is on the point it *believes* is right; its aim error
             // then turns into honest misses instead of waiting for a lucky alignment
             aim_err_angle = wrap_angle(want_yaw - yaw).abs() + (want_pitch - pitch).abs();
         } else {
-            let look_at = bot.attacked_by.filter(|a| time - a.2 < 2.0).map(|a| a.1).or(bot.alert.filter(|a| time - a.1 < 1.5).map(|a| a.0));
+            let look_at = bot
+                .attacked_by
+                .filter(|a| time - a.2 < 2.0)
+                .map(|a| a.1)
+                .or(bot.alert.filter(|a| time - a.1 < 1.5).map(|a| a.0));
             if let Some(from) = look_at {
                 let d = from - eye;
                 let dy = wrap_angle(yaw_of(d) - yaw);
@@ -361,7 +408,8 @@ impl Game {
         if target.is_none() {
             bot.was_ads = false;
         }
-        let fighting = target.is_some() && !(use_key && self.p(id).map(|p| p.progress > 0.5).unwrap_or(false));
+        let fighting =
+            target.is_some() && !(use_key && self.p(id).map(|p| p.progress > 0.5).unwrap_or(false));
         if fighting {
             use_key = false;
         }
@@ -382,17 +430,21 @@ impl Game {
                     p.switch_end = p.switch_end.max(time + 0.2);
                 }
             }
-            if reacted && !protected_me && aim_err_angle < tol && mag > 0 && !reloading && in_range {
+            if reacted && !protected_me && aim_err_angle < tol && mag > 0 && !reloading && in_range
+            {
                 let can = if def.auto {
                     if time > bot.burst_until && time > bot.pause_until {
                         // weak bots spray long bursts, good ones tap
                         let len = lerp(1.1, 0.45, skill) * self.rng.range(0.6, 1.2);
                         bot.burst_until = time + len as f64;
-                        bot.pause_until = bot.burst_until + lerp(0.2, 0.35, skill) as f64 * self.rng.range(0.7, 1.4) as f64;
+                        bot.pause_until = bot.burst_until
+                            + lerp(0.2, 0.35, skill) as f64 * self.rng.range(0.7, 1.4) as f64;
                     }
                     time <= bot.burst_until
                 } else if time >= bot.next_semi {
-                    bot.next_semi = time + (def.fire_interval() * self.rng.range(1.15, lerp(2.6, 1.5, skill))) as f64;
+                    bot.next_semi = time
+                        + (def.fire_interval() * self.rng.range(1.15, lerp(2.6, 1.5, skill)))
+                            as f64;
                     true
                 } else {
                     false
@@ -401,9 +453,13 @@ impl Game {
                     let speed = vec2(vel.x, vel.z).length();
                     let hip = def.hip_spread;
                     let mut spread = if ads { def.ads_spread } else { hip };
-                    spread += (speed / walk_speed).min(1.3) * def.move_spread * if ads { 0.2 } else { 1.0 };
+                    spread += (speed / walk_speed).min(1.3)
+                        * def.move_spread
+                        * if ads { 0.2 } else { 1.0 };
                     let base = look_dir(yaw, pitch);
-                    let dirs = (0..def.pellets.max(1)).map(|_| cone(&mut self.rng, base, spread.to_radians())).collect();
+                    let dirs = (0..def.pellets.max(1))
+                        .map(|_| cone(&mut self.rng, base, spread.to_radians()))
+                        .collect();
                     fire_dirs = Some(dirs);
                     if time - bot.last_fire > (def.fire_interval() * 2.5 + 0.05) as f64 {
                         bot.shot_streak = 0;
@@ -413,20 +469,31 @@ impl Game {
                     let ramp = def.recoil_scale(bot.shot_streak);
                     bot.shot_streak += 1;
                     let ads_k = if ads { 0.55 } else { 1.0 };
-                    pitch += (def.recoil_v * 0.55 * ads_k * ramp * self.rng.range(0.8, 1.2)).to_radians();
+                    pitch += (def.recoil_v * 0.55 * ads_k * ramp * self.rng.range(0.8, 1.2))
+                        .to_radians();
                     yaw += (def.recoil_h * 0.5 * ads_k * self.rng.range(-1.0, 1.0)).to_radians();
                 }
             }
             // grenade
             let gt = &self.tuning.grenade;
-            let (g_speed, g_reach) = (gt.throw_speed, gt.max_range(self.tuning.movement.gravity) * 0.9);
-            if !protected_me && grenades > 0 && time > bot.nade_ready && dist_to_target > 7.0 && dist_to_target < g_reach && self.rng.chance(lerp(0.004, 0.015, skill)) {
+            let (g_speed, g_reach) = (
+                gt.throw_speed,
+                gt.max_range(self.tuning.movement.gravity) * 0.9,
+            );
+            if !protected_me
+                && grenades > 0
+                && time > bot.nade_ready
+                && dist_to_target > 7.0
+                && dist_to_target < g_reach
+                && self.rng.chance(lerp(0.004, 0.015, skill))
+            {
                 bot.nade_ready = time + 15.0;
                 if let Some((_, chest, _, _, _)) = target {
                     // low ballistic arc for the configured throw speed: R = v² sin(2θ) / g
                     let d = chest - eye;
                     let flat = vec3(d.x, 0.0, d.z);
-                    let s = (self.tuning.movement.gravity * flat.length() / (g_speed * g_speed)).min(1.0);
+                    let s = (self.tuning.movement.gravity * flat.length() / (g_speed * g_speed))
+                        .min(1.0);
                     let theta = 0.5 * s.asin();
                     let dir = flat.normalize() * theta.cos() + vec3(0.0, theta.sin(), 0.0);
                     let dir = cone(&mut self.rng, dir, lerp(0.15, 0.03, skill));
@@ -573,7 +640,13 @@ impl Game {
 
     /// Where the bot wants to go, whether to hold "use", and whether the objective is urgent
     /// enough to keep moving while under fire.
-    fn bot_goal(&mut self, id: u8, bot: &mut crate::bots::Bot, team: Team, pos: Vec3) -> (Option<Vec3>, bool, bool) {
+    fn bot_goal(
+        &mut self,
+        id: u8,
+        bot: &mut crate::bots::Bot,
+        team: Team,
+        pos: Vec3,
+    ) -> (Option<Vec3>, bool, bool) {
         let time = self.time;
         if self.mode == Mode::Sab && self.state == MatchState::Playing {
             let s = &self.sab;
@@ -622,12 +695,21 @@ impl Game {
                 return (Some(from), false, false);
             }
         }
-        let reached = bot.roam_goal.map(|g| vec3(g.x - pos.x, 0.0, g.z - pos.z).length() < 2.0).unwrap_or(true);
+        let reached = bot
+            .roam_goal
+            .map(|g| vec3(g.x - pos.x, 0.0, g.z - pos.z).length() < 2.0)
+            .unwrap_or(true);
         if reached || time > bot.roam_until {
             bot.roam_until = time + 18.0;
             let hunt = self.rng.chance(0.55);
             let enemy = if hunt {
-                let enemies: Vec<Vec3> = self.players.iter().flatten().filter(|o| o.alive && o.team == team.enemy()).map(|o| o.body.pos).collect();
+                let enemies: Vec<Vec3> = self
+                    .players
+                    .iter()
+                    .flatten()
+                    .filter(|o| o.alive && o.team == team.enemy())
+                    .map(|o| o.body.pos)
+                    .collect();
                 if enemies.is_empty() {
                     None
                 } else {
@@ -643,7 +725,11 @@ impl Game {
 
     fn guard_point(&mut self, bot: &mut crate::bots::Bot, around: Vec3, r: f32) -> Vec3 {
         let time = self.time;
-        let ok = bot.roam_goal.map(|g| g.distance(around) < r + 1.0).unwrap_or(false) && time < bot.roam_until;
+        let ok = bot
+            .roam_goal
+            .map(|g| g.distance(around) < r + 1.0)
+            .unwrap_or(false)
+            && time < bot.roam_until;
         if !ok {
             bot.roam_until = time + 6.0;
             let a = self.rng.range(0.0, std::f32::consts::TAU);

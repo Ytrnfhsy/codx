@@ -18,16 +18,25 @@ pub struct Fonts {
 
 impl Fonts {
     pub fn load() -> Fonts {
-        let mut regular = load_ttf_font_from_bytes(include_bytes!("../../../assets/fonts/DejaVuSans.ttf")).expect("font");
-        let mut bold = load_ttf_font_from_bytes(include_bytes!("../../../assets/fonts/DejaVuSans-Bold.ttf")).expect("font");
+        let mut regular =
+            load_ttf_font_from_bytes(include_bytes!("../../../assets/fonts/DejaVuSans.ttf"))
+                .expect("font");
+        let mut bold =
+            load_ttf_font_from_bytes(include_bytes!("../../../assets/fonts/DejaVuSans-Bold.ttf"))
+                .expect("font");
         regular.set_filter(FilterMode::Linear);
         bold.set_filter(FilterMode::Linear);
         let mut chars: Vec<char> = (32u8..127).map(|c| c as char).collect();
-        chars.extend("АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯабвгґдеєжзиіїйклмнопрстуфхцчшщьюя'—·«»…×°☠✦★▮▄▁".chars());
+        chars.extend(
+            "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯабвгґдеєжзиіїйклмнопрстуфхцчшщьюя'—·«»…×°☠✦★▮▄▁"
+                .chars(),
+        );
         // grow each atlas to its final size while it is still empty (growing later re-packs every glyph)
         regular.populate_font_cache(&['W'], 1100);
         bold.populate_font_cache(&['W'], 1100);
-        for size in [12u16, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 30, 34] {
+        for size in [
+            12u16, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 30, 34,
+        ] {
             regular.populate_font_cache(&chars, size);
             bold.populate_font_cache(&chars, size);
         }
@@ -50,10 +59,30 @@ pub struct Ui<'a> {
 
 impl<'a> Ui<'a> {
     pub fn text(&self, s: &str, x: f32, y: f32, size: u16, color: Color) {
-        draw_text_ex(s, x, y, TextParams { font: Some(&self.fonts.regular), font_size: size, color, ..Default::default() });
+        draw_text_ex(
+            s,
+            x,
+            y,
+            TextParams {
+                font: Some(&self.fonts.regular),
+                font_size: size,
+                color,
+                ..Default::default()
+            },
+        );
     }
     pub fn bold(&self, s: &str, x: f32, y: f32, size: u16, color: Color) {
-        draw_text_ex(s, x, y, TextParams { font: Some(&self.fonts.bold), font_size: size, color, ..Default::default() });
+        draw_text_ex(
+            s,
+            x,
+            y,
+            TextParams {
+                font: Some(&self.fonts.bold),
+                font_size: size,
+                color,
+                ..Default::default()
+            },
+        );
     }
     /// Bold text with a drop shadow (HUD style).
     pub fn shadowed(&self, s: &str, x: f32, y: f32, size: u16, color: Color) {
@@ -61,7 +90,17 @@ impl<'a> Ui<'a> {
         self.bold(s, x, y, size, color);
     }
     pub fn width(&self, s: &str, size: u16, bold: bool) -> f32 {
-        measure_text(s, Some(if bold { &self.fonts.bold } else { &self.fonts.regular }), size, 1.0).width
+        measure_text(
+            s,
+            Some(if bold {
+                &self.fonts.bold
+            } else {
+                &self.fonts.regular
+            }),
+            size,
+            1.0,
+        )
+        .width
     }
     pub fn centered(&self, s: &str, cx: f32, y: f32, size: u16, color: Color) {
         let w = self.width(s, size, true);
@@ -78,18 +117,45 @@ impl<'a> Ui<'a> {
         self.mouse.x >= x && self.mouse.x <= x + w && self.mouse.y >= y && self.mouse.y <= y + h
     }
 
-    pub fn button_colored(&mut self, label: &str, x: f32, y: f32, w: f32, h: f32, color: Color) -> bool {
+    pub fn button_colored(
+        &mut self,
+        label: &str,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        color: Color,
+    ) -> bool {
         let hover = self.inside(x, y, w, h);
         let press = hover && self.down;
         let off = if press { 3.0 } else { 0.0 };
         draw_rectangle(x + 4.0, y + 5.0, w, h, SHADOW);
-        let c = if hover { Color::new((color.r + 0.08).min(1.0), (color.g + 0.08).min(1.0), (color.b + 0.08).min(1.0), 1.0) } else { color };
+        let c = if hover {
+            Color::new(
+                (color.r + 0.08).min(1.0),
+                (color.g + 0.08).min(1.0),
+                (color.b + 0.08).min(1.0),
+                1.0,
+            )
+        } else {
+            color
+        };
         draw_rectangle(x + off, y + off, w, h, c);
         draw_rectangle_lines(x + off, y + off, w, h, 3.0, Color::new(0.0, 0.0, 0.0, 0.7));
         let size = (h * 0.42).clamp(14.0, 26.0) as u16;
         let tw = self.width(label, size, true);
         let dark = color.r + color.g + color.b > 1.8;
-        self.bold(label, x + off + (w - tw) / 2.0, y + off + h * 0.5 + size as f32 * 0.36, size, if dark { Color::new(0.12, 0.1, 0.1, 1.0) } else { TEXT });
+        self.bold(
+            label,
+            x + off + (w - tw) / 2.0,
+            y + off + h * 0.5 + size as f32 * 0.36,
+            size,
+            if dark {
+                Color::new(0.12, 0.1, 0.1, 1.0)
+            } else {
+                TEXT
+            },
+        );
         if hover {
             self.hot = true;
         }
@@ -106,7 +172,17 @@ impl<'a> Ui<'a> {
 
     /// Single-line text field. Returns true when Enter is pressed in it.
     #[allow(clippy::too_many_arguments)]
-    pub fn field(&mut self, id: u32, label: &str, value: &mut String, x: f32, y: f32, w: f32, secret: bool, max: usize) -> bool {
+    pub fn field(
+        &mut self,
+        id: u32,
+        label: &str,
+        value: &mut String,
+        x: f32,
+        y: f32,
+        w: f32,
+        secret: bool,
+        max: usize,
+    ) -> bool {
         self.text(label, x, y - 6.0, 16, MUTED);
         let h = 36.0;
         let hover = self.inside(x, y, w, h);
@@ -119,7 +195,18 @@ impl<'a> Ui<'a> {
         }
         let focused = *self.focus == Some(id);
         draw_rectangle(x, y, w, h, Color::new(0.07, 0.08, 0.13, 1.0));
-        draw_rectangle_lines(x, y, w, h, 3.0, if focused { ACCENT } else { Color::new(0.0, 0.0, 0.0, 0.7) });
+        draw_rectangle_lines(
+            x,
+            y,
+            w,
+            h,
+            3.0,
+            if focused {
+                ACCENT
+            } else {
+                Color::new(0.0, 0.0, 0.0, 0.7)
+            },
+        );
         let mut entered = false;
         if focused {
             for &c in self.chars {
@@ -134,7 +221,11 @@ impl<'a> Ui<'a> {
                 entered = true;
             }
         }
-        let shown: String = if secret { "•".repeat(value.chars().count()) } else { value.clone() };
+        let shown: String = if secret {
+            "•".repeat(value.chars().count())
+        } else {
+            value.clone()
+        };
         // keep the tail visible
         let mut s = shown.as_str();
         while self.width(s, 20, false) > w - 16.0 && !s.is_empty() {
@@ -152,14 +243,36 @@ impl<'a> Ui<'a> {
 
     /// Horizontal slider. Returns the new value.
     #[allow(clippy::too_many_arguments)]
-    pub fn slider(&mut self, label: &str, v: f32, min: f32, max: f32, x: f32, y: f32, w: f32, fmt: &str) -> f32 {
-        self.text(&format!("{label}: {}", fmt.replace("{}", &format!("{:.1}", v))), x, y - 6.0, 16, MUTED);
+    pub fn slider(
+        &mut self,
+        label: &str,
+        v: f32,
+        min: f32,
+        max: f32,
+        x: f32,
+        y: f32,
+        w: f32,
+        fmt: &str,
+    ) -> f32 {
+        self.text(
+            &format!("{label}: {}", fmt.replace("{}", &format!("{:.1}", v))),
+            x,
+            y - 6.0,
+            16,
+            MUTED,
+        );
         let h = 22.0;
         draw_rectangle(x, y + 6.0, w, 10.0, Color::new(0.07, 0.08, 0.13, 1.0));
         let k = ((v - min) / (max - min)).clamp(0.0, 1.0);
         draw_rectangle(x, y + 6.0, w * k, 10.0, ACCENT);
         draw_circle(x + w * k, y + 11.0, 11.0, TEXT);
-        draw_circle_lines(x + w * k, y + 11.0, 11.0, 2.0, Color::new(0.0, 0.0, 0.0, 0.7));
+        draw_circle_lines(
+            x + w * k,
+            y + 11.0,
+            11.0,
+            2.0,
+            Color::new(0.0, 0.0, 0.0, 0.7),
+        );
         if self.down && self.inside(x - 10.0, y - 4.0, w + 20.0, h + 8.0) {
             let k = ((self.mouse.x - x) / w).clamp(0.0, 1.0);
             return min + (max - min) * k;
@@ -191,7 +304,13 @@ impl<'a> Ui<'a> {
         if self.button2(">", x + w - 36.0, y, 36.0, 34.0) {
             r = 1;
         }
-        draw_rectangle(x + 42.0, y, w - 84.0, 34.0, Color::new(0.07, 0.08, 0.13, 1.0));
+        draw_rectangle(
+            x + 42.0,
+            y,
+            w - 84.0,
+            34.0,
+            Color::new(0.07, 0.08, 0.13, 1.0),
+        );
         let tw = self.width(value, 18, true);
         self.bold(value, x + (w - tw) / 2.0, y + 23.0, 18, TEXT);
         r

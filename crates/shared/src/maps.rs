@@ -13,12 +13,22 @@ pub fn build(id: MapId) -> Map {
 }
 
 fn spawn(x: f32, z: f32, yaw: f32) -> Spawn {
-    Spawn { pos: vec3(x, 0.0, z), yaw }
+    Spawn {
+        pos: vec3(x, 0.0, z),
+        yaw,
+    }
 }
 
 fn site_pad(b: &mut MapBuilder, p: Vec3, c: [u8; 3]) {
     b.decal(p.x - 2.6, p.z - 2.6, p.x + 2.6, p.z + 2.6, 0.0, c);
-    b.decal(p.x - 1.8, p.z - 1.8, p.x + 1.8, p.z + 1.8, 0.03, pal::WALL_WHITE);
+    b.decal(
+        p.x - 1.8,
+        p.z - 1.8,
+        p.x + 1.8,
+        p.z + 1.8,
+        0.03,
+        pal::WALL_WHITE,
+    );
     b.decal(p.x - 1.5, p.z - 1.5, p.x + 1.5, p.z + 1.5, 0.06, c);
 }
 
@@ -112,15 +122,51 @@ fn depot() -> Map {
         pal::WALL_PINK,
         Some(pal::ROOF_RED),
     );
-    b.floor_with_hole(ox0 + 0.3, oz0 + 0.3, ox1 - 0.3, oz1 - 0.3, storey, (29.0, -9.7, 31.7, -2.9), pal::WOOD);
+    b.floor_with_hole(
+        ox0 + 0.3,
+        oz0 + 0.3,
+        ox1 - 0.3,
+        oz1 - 0.3,
+        storey,
+        (29.0, -9.7, 31.7, -2.9),
+        pal::WOOD,
+    );
     // stairs climb towards -z; the top step is next to the floor on the west side of the hole
-    b.stairs(30.35, -2.9, (0.0, -1.0), 2.6, 10, storey / 10.0, 0.67, 0.0, pal::CONCRETE);
+    b.stairs(
+        30.35,
+        -2.9,
+        (0.0, -1.0),
+        2.6,
+        10,
+        storey / 10.0,
+        0.67,
+        0.0,
+        pal::CONCRETE,
+    );
     b.crate_(22.0, 4.0, 1.2, 0.0);
     b.cbox(25.0, -7.5, 3.0, 1.0, storey, 1.0, pal::WOOD);
 
     // mid-field cover walls
-    b.wall_x(-17.0, -9.0, -14.0, 0.0, 2.4, 0.5, &[window(-13.0)], pal::WALL_TAN);
-    b.wall_x(9.0, 17.0, 14.0, 0.0, 2.4, 0.5, &[window(13.0)], pal::WALL_TAN);
+    b.wall_x(
+        -17.0,
+        -9.0,
+        -14.0,
+        0.0,
+        2.4,
+        0.5,
+        &[window(-13.0)],
+        pal::WALL_TAN,
+    );
+    b.wall_x(
+        9.0,
+        17.0,
+        14.0,
+        0.0,
+        2.4,
+        0.5,
+        &[window(13.0)],
+        pal::WALL_TAN,
+    );
     b.wall_z(-14.0, -7.0, 16.0, 0.0, 2.8, 0.5, &[], pal::WALL_TAN);
     b.wall_z(7.0, 14.0, -16.0, 0.0, 2.8, 0.5, &[], pal::WALL_TAN);
 
@@ -140,7 +186,11 @@ fn depot() -> Map {
         -26.0,
         0.0,
         3.6,
-        &[(Side::MaxZ, door(-26.0)), (Side::MaxX, window(-30.5)), (Side::MinX, door(-30.5))],
+        &[
+            (Side::MaxZ, door(-26.0)),
+            (Side::MaxX, window(-30.5)),
+            (Side::MinX, door(-30.5)),
+        ],
         pal::WALL_GREEN,
         Some(pal::ROOF_RED),
     );
@@ -154,7 +204,11 @@ fn depot() -> Map {
         35.0,
         0.0,
         3.6,
-        &[(Side::MinZ, door(26.0)), (Side::MinX, window(30.5)), (Side::MaxX, door(30.5))],
+        &[
+            (Side::MinZ, door(26.0)),
+            (Side::MinX, window(30.5)),
+            (Side::MaxX, door(30.5)),
+        ],
         pal::WALL_GREEN,
         Some(pal::ROOF_RED),
     );
@@ -169,8 +223,12 @@ fn depot() -> Map {
     b.tank(18.0, -30.5);
     b.tank(10.0, -31.0);
 
-    let allies = (0..9).map(|i| spawn(-16.0 + i as f32 * 4.0, 36.5, 0.0)).collect();
-    let axis = (0..9).map(|i| spawn(-16.0 + i as f32 * 4.0, -36.5, PI)).collect();
+    let allies = (0..9)
+        .map(|i| spawn(-16.0 + i as f32 * 4.0, 36.5, 0.0))
+        .collect();
+    let axis = (0..9)
+        .map(|i| spawn(-16.0 + i as f32 * 4.0, -36.5, PI))
+        .collect();
 
     Map {
         id: MapId::Depot,
@@ -196,7 +254,13 @@ fn market() -> Map {
     b.decal(-50.0, -5.4, 50.0, -5.0, 0.0, pal::CONCRETE);
     b.decal(-50.0, 5.0, 50.0, 5.4, 0.0, pal::CONCRETE);
 
-    let colors = [pal::WALL_PINK, pal::WALL_BLUE, pal::WALL_WHITE, pal::WALL_GREEN, pal::WALL_TAN];
+    let colors = [
+        pal::WALL_PINK,
+        pal::WALL_BLUE,
+        pal::WALL_WHITE,
+        pal::WALL_GREEN,
+        pal::WALL_TAN,
+    ];
     let centers = [-32.0f32, -16.0, 0.0, 16.0, 32.0];
     for (i, &cx) in centers.iter().enumerate() {
         let (x0, x1) = (cx - 6.0, cx + 6.0);
@@ -212,7 +276,11 @@ fn market() -> Map {
                 -6.0,
                 0.0,
                 3.4,
-                &[(Side::MaxZ, door(cx - 3.0)), (Side::MinZ, door(cx + 3.0)), (Side::MaxZ, window(cx + 3.0))],
+                &[
+                    (Side::MaxZ, door(cx - 3.0)),
+                    (Side::MinZ, door(cx + 3.0)),
+                    (Side::MaxZ, window(cx + 3.0)),
+                ],
                 north_c,
                 None,
             );
@@ -233,8 +301,26 @@ fn market() -> Map {
                 north_c,
                 Some(pal::ROOF_RED),
             );
-            b.floor_with_hole(x0 + 0.3, -14.7, x1 - 0.3, -6.3, 3.4, (x0 + 0.3, -14.7, x0 + 7.3, -12.0), pal::WOOD);
-            b.stairs(x0 + 7.3, -13.35, (-1.0, 0.0), 2.6, 10, 0.34, 0.68, 0.0, pal::CONCRETE);
+            b.floor_with_hole(
+                x0 + 0.3,
+                -14.7,
+                x1 - 0.3,
+                -6.3,
+                3.4,
+                (x0 + 0.3, -14.7, x0 + 7.3, -12.0),
+                pal::WOOD,
+            );
+            b.stairs(
+                x0 + 7.3,
+                -13.35,
+                (-1.0, 0.0),
+                2.6,
+                10,
+                0.34,
+                0.68,
+                0.0,
+                pal::CONCRETE,
+            );
         } else {
             b.building(
                 x0,
@@ -251,19 +337,42 @@ fn market() -> Map {
                     (Side::MaxX, window(-10.5)),
                 ],
                 north_c,
-                Some(if i % 2 == 0 { pal::ROOF_RED } else { pal::ROOF_GREY }),
+                Some(if i % 2 == 0 {
+                    pal::ROOF_RED
+                } else {
+                    pal::ROOF_GREY
+                }),
             );
             b.crate_(cx + 3.5, -12.5, 1.2, 0.0);
         }
         if i == 2 {
             // open market hall in the middle of the south row
-            for (px, pz) in [(x0 + 0.3, 6.3), (x1 - 0.3, 6.3), (x0 + 0.3, 14.7), (x1 - 0.3, 14.7), (cx, 6.3), (cx, 14.7)] {
+            for (px, pz) in [
+                (x0 + 0.3, 6.3),
+                (x1 - 0.3, 6.3),
+                (x0 + 0.3, 14.7),
+                (x1 - 0.3, 14.7),
+                (cx, 6.3),
+                (cx, 14.7),
+            ] {
                 b.cbox(px, pz, 0.5, 0.5, 0.0, 4.0, pal::WOOD);
             }
             b.block(x0 - 0.2, 4.0, 6.0, x1 + 0.2, 4.3, 15.0, pal::AWNING_B);
             for (k, sx) in [cx - 3.5, cx + 3.5].iter().enumerate() {
                 b.cbox(*sx, 10.5, 2.4, 1.0, 0.0, 1.1, pal::WOOD);
-                b.cbox(*sx, 10.5, 2.6, 1.2, 1.1, 0.12, if k == 0 { pal::AWNING_A } else { pal::CONT_YELLOW });
+                b.cbox(
+                    *sx,
+                    10.5,
+                    2.6,
+                    1.2,
+                    1.1,
+                    0.12,
+                    if k == 0 {
+                        pal::AWNING_A
+                    } else {
+                        pal::CONT_YELLOW
+                    },
+                );
             }
         } else {
             b.building(
@@ -281,12 +390,28 @@ fn market() -> Map {
                     (Side::MaxX, window(10.5)),
                 ],
                 south_c,
-                Some(if i % 2 == 1 { pal::ROOF_RED } else { pal::ROOF_GREY }),
+                Some(if i % 2 == 1 {
+                    pal::ROOF_RED
+                } else {
+                    pal::ROOF_GREY
+                }),
             );
             b.crate_(cx - 3.5, 12.5, 1.2, 0.0);
         }
         // awnings over the street-side doors (thin, above head height)
-        b.block(cx - 4.0, 2.9, -6.0, cx - 1.0, 3.0, -4.6, if i % 2 == 0 { pal::AWNING_A } else { pal::AWNING_B });
+        b.block(
+            cx - 4.0,
+            2.9,
+            -6.0,
+            cx - 1.0,
+            3.0,
+            -4.6,
+            if i % 2 == 0 {
+                pal::AWNING_A
+            } else {
+                pal::AWNING_B
+            },
+        );
     }
 
     // cars and stalls in the street
@@ -300,7 +425,16 @@ fn market() -> Map {
     b.crate_(1.8, -3.8, 1.0, 0.0);
 
     // back alleys: crates, dumpsters, fences
-    for (x, z) in [(-24.0, -20.0), (-8.0, -21.0), (8.0, -19.5), (24.0, -21.0), (-24.0, 20.5), (-8.0, 19.5), (8.0, 21.0), (24.0, 19.5)] {
+    for (x, z) in [
+        (-24.0, -20.0),
+        (-8.0, -21.0),
+        (8.0, -19.5),
+        (24.0, -21.0),
+        (-24.0, 20.5),
+        (-8.0, 19.5),
+        (8.0, 21.0),
+        (24.0, 19.5),
+    ] {
         b.cbox(x, z, 2.2, 1.2, 0.0, 1.3, pal::CONT_GREEN);
     }
     for (x, z) in [(-16.0, -22.0), (16.0, 22.0), (0.0, -21.5), (0.0, 21.5)] {
@@ -349,7 +483,13 @@ fn cargo() -> Map {
     let mut b = MapBuilder::new();
     b.ground_and_bounds(min, max, pal::CONCRETE, pal::CONT_BLUE, 5.0);
     b.decal(-20.0, -1.0, 20.0, 1.0, 0.0, pal::CONT_YELLOW);
-    let cols = [pal::CONT_RED, pal::CONT_BLUE, pal::CONT_GREEN, pal::CONT_ORANGE, pal::CONT_YELLOW];
+    let cols = [
+        pal::CONT_RED,
+        pal::CONT_BLUE,
+        pal::CONT_GREEN,
+        pal::CONT_ORANGE,
+        pal::CONT_YELLOW,
+    ];
     let mut k = 0;
     for &x in &[-10.0f32, 0.0, 10.0] {
         for &z in &[-8.0f32, 8.0] {
@@ -361,7 +501,14 @@ fn cargo() -> Map {
     b.container(10.0, -8.0, true, 2.6, pal::CONT_GREEN);
     b.container(-15.0, 0.0, false, 0.0, pal::CONT_YELLOW);
     b.container(15.0, 0.0, false, 0.0, pal::CONT_RED);
-    for (x, z, s) in [(4.0, 2.5, 1.2), (-4.0, -2.5, 1.2), (5.5, -3.0, 1.0), (-5.5, 3.0, 1.0), (0.0, 13.5, 1.2), (0.0, -13.5, 1.2)] {
+    for (x, z, s) in [
+        (4.0, 2.5, 1.2),
+        (-4.0, -2.5, 1.2),
+        (5.5, -3.0, 1.0),
+        (-5.5, 3.0, 1.0),
+        (0.0, 13.5, 1.2),
+        (0.0, -13.5, 1.2),
+    ] {
         b.crate_(x, z, s, 0.0);
     }
 
@@ -370,8 +517,14 @@ fn cargo() -> Map {
     site_pad(&mut b, site_allies, pal::PAD_ALLIES);
     site_pad(&mut b, site_axis, pal::PAD_AXIS);
 
-    let allies = [-16.0, -10.0, -5.0, 0.0, 5.0, 10.0, 16.0].iter().map(|&x| spawn(x, 18.0, 0.0)).collect();
-    let axis = [-16.0, -10.0, -5.0, 0.0, 5.0, 10.0, 16.0].iter().map(|&x| spawn(x, -18.0, PI)).collect();
+    let allies = [-16.0, -10.0, -5.0, 0.0, 5.0, 10.0, 16.0]
+        .iter()
+        .map(|&x| spawn(x, 18.0, 0.0))
+        .collect();
+    let axis = [-16.0, -10.0, -5.0, 0.0, 5.0, 10.0, 16.0]
+        .iter()
+        .map(|&x| spawn(x, -18.0, PI))
+        .collect();
 
     Map {
         id: MapId::Cargo,

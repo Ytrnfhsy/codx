@@ -28,21 +28,41 @@ pub mod flags {
 /// Client → server.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum C2S {
-    Hello { name: String, password: String, version: u16 },
+    Hello {
+        name: String,
+        password: String,
+        version: u16,
+    },
     JoinTeam(Option<Team>),
     /// Selects a class; spawns immediately if allowed.
     SetLoadout(Loadout),
     /// Request to respawn now (when the respawn timer allows).
     Spawn,
     Input(InputState),
-    Fire { weapon: WeaponId, origin: V3, dirs: Vec<V3> },
+    Fire {
+        weapon: WeaponId,
+        origin: V3,
+        dirs: Vec<V3>,
+    },
     Reload,
     Switch(u8),
-    Grenade { origin: V3, dir: V3, cook: f32 },
+    Grenade {
+        origin: V3,
+        dir: V3,
+        cook: f32,
+    },
     Melee,
-    UseKillstreak { target: Option<[f32; 2]> },
-    Chat { text: String, team_only: bool },
-    Rcon { password: String, cmd: String },
+    UseKillstreak {
+        target: Option<[f32; 2]>,
+    },
+    Chat {
+        text: String,
+        team_only: bool,
+    },
+    Rcon {
+        password: String,
+        cmd: String,
+    },
     Pong(u32),
     /// Give up spawn protection early (so you can fight).
     DropProtection,
@@ -111,9 +131,21 @@ pub struct MeSnap {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EntSnap {
-    Grenade { id: u16, pos: V3 },
-    Heli { id: u16, pos: V3, yaw: f32, team: Team },
-    Plane { id: u16, pos: V3, yaw: f32 },
+    Grenade {
+        id: u16,
+        pos: V3,
+    },
+    Heli {
+        id: u16,
+        pos: V3,
+        yaw: f32,
+        team: Team,
+    },
+    Plane {
+        id: u16,
+        pos: V3,
+        yaw: f32,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -179,29 +211,95 @@ pub struct GameSettings {
 /// Server → client.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum S2C {
-    Welcome { id: u8, server_name: String, motd: String, map: MapId, mode: Mode, settings: GameSettings },
+    Welcome {
+        id: u8,
+        server_name: String,
+        motd: String,
+        map: MapId,
+        mode: Mode,
+        settings: GameSettings,
+    },
     Reject(String),
     /// Map/mode change: the client rebuilds the level.
-    MapChange { map: MapId, mode: Mode, settings: GameSettings },
+    MapChange {
+        map: MapId,
+        mode: Mode,
+        settings: GameSettings,
+    },
     Snapshot(Box<Snapshot>),
     Scoreboard(Vec<ScoreRow>),
-    Spawned { pos: V3, yaw: f32, life: u16, loadout: Loadout },
+    Spawned {
+        pos: V3,
+        yaw: f32,
+        life: u16,
+        loadout: Loadout,
+    },
     TeamSet(Team),
-    Correction { pos: V3, life: u16 },
-    Kill { killer: Option<u8>, victim: u8, cause: Cause, headshot: bool, killer_name: String, victim_name: String, killer_team: Team, victim_team: Team },
-    HitConfirm { kill: bool, headshot: bool },
-    Damaged { from: V3, amount: f32 },
-    Explosion { pos: V3, radius: f32, big: bool },
-    Melee { id: u8 },
-    ScorePopup { points: i32, text: String },
-    Chat { from: String, team: Team, text: String, team_only: bool },
-    Center { text: String, secs: f32 },
+    Correction {
+        pos: V3,
+        life: u16,
+    },
+    Kill {
+        killer: Option<u8>,
+        victim: u8,
+        cause: Cause,
+        headshot: bool,
+        killer_name: String,
+        victim_name: String,
+        killer_team: Team,
+        victim_team: Team,
+    },
+    HitConfirm {
+        kill: bool,
+        headshot: bool,
+    },
+    Damaged {
+        from: V3,
+        amount: f32,
+    },
+    Explosion {
+        pos: V3,
+        radius: f32,
+        big: bool,
+    },
+    Melee {
+        id: u8,
+    },
+    ScorePopup {
+        points: i32,
+        text: String,
+    },
+    Chat {
+        from: String,
+        team: Team,
+        text: String,
+        team_only: bool,
+    },
+    Center {
+        text: String,
+        secs: f32,
+    },
     StreakReady(Killstreak),
-    StreakUsed { by: String, team: Team, streak: Killstreak },
-    Airstrike { from: V3, to: V3 },
-    MatchEnd { winner: Option<Team>, text: String },
-    RoundEnd { winner: Option<Team>, text: String },
-    BombEvent { text: String },
+    StreakUsed {
+        by: String,
+        team: Team,
+        streak: Killstreak,
+    },
+    Airstrike {
+        from: V3,
+        to: V3,
+    },
+    MatchEnd {
+        winner: Option<Team>,
+        text: String,
+    },
+    RoundEnd {
+        winner: Option<Team>,
+        text: String,
+    },
+    BombEvent {
+        text: String,
+    },
     RconReply(String),
     /// Server gameplay tuning (sent after `Welcome` and whenever an admin changes it).
     Tuning(Box<crate::tuning::Tuning>),

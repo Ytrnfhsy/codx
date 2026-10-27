@@ -52,10 +52,14 @@ impl Game {
             return;
         }
         let time = self.time;
-        let Some(cur) = self.p(id).map(|p| p.weapon().id) else { return };
+        let Some(cur) = self.p(id).map(|p| p.weapon().id) else {
+            return;
+        };
         let cur_mag = self.tuning.weapon(cur).mag;
         let def = self.tuning.weapon(weapon).clone();
-        let Some(p) = self.players[id as usize].as_mut() else { return };
+        let Some(p) = self.players[id as usize].as_mut() else {
+            return;
+        };
         // The client finishes reloads/switches by its own clock, which runs ahead of ours by
         // roughly the one-way latency; accept shots that arrive slightly "early".
         let slack = (p.ping * 0.5 + 0.12).min(0.35) as f64;
@@ -70,7 +74,8 @@ impl Game {
                 return;
             }
         }
-        if !p.alive || p.weapon().id != weapon || p.weapon().mag == 0 || time < p.switch_end - slack {
+        if !p.alive || p.weapon().id != weapon || p.weapon().mag == 0 || time < p.switch_end - slack
+        {
             return;
         }
         if p.shot_budget < 0.8 {
@@ -89,8 +94,13 @@ impl Game {
         p.last_shot = time;
         let eye = p.eye();
         let look = look_dir(p.yaw, p.pitch);
-        let origin = if origin.is_finite() && origin.distance(eye) < 1.2 { origin } else { eye };
-        let max_angle = (def.hip_spread.max(def.ads_spread) * 2.0 + def.move_spread + 12.0).to_radians();
+        let origin = if origin.is_finite() && origin.distance(eye) < 1.2 {
+            origin
+        } else {
+            eye
+        };
+        let max_angle =
+            (def.hip_spread.max(def.ads_spread) * 2.0 + def.move_spread + 12.0).to_radians();
         let rewind = (p.ping * 0.5 + INTERP_DELAY).clamp(0.0, MAX_REWIND) as f64;
         let stopping = p.has_perk2(Perk2::StoppingPower);
         let team = p.team;
@@ -127,7 +137,13 @@ impl Game {
                 Hit::None => {}
             }
             if k < 3 {
-                self.shots.push(ShotFx { id, weapon, from: origin.to_array(), to: (origin + d * dist).to_array(), flesh });
+                self.shots.push(ShotFx {
+                    id,
+                    weapon,
+                    from: origin.to_array(),
+                    to: (origin + d * dist).to_array(),
+                    flesh,
+                });
             }
         }
         if let Some(p) = self.pm(id) {
@@ -143,14 +159,29 @@ impl Game {
             if let Some(h) = self.helis.get_mut(i) {
                 if h.team != team || self.cfg.friendly_fire {
                     h.hp -= dmg;
-                    self.outbox.push((Dest::One(id), S2C::HitConfirm { kill: false, headshot: false }, true));
+                    self.outbox.push((
+                        Dest::One(id),
+                        S2C::HitConfirm {
+                            kill: false,
+                            headshot: false,
+                        },
+                        true,
+                    ));
                 }
             }
         }
     }
 
     /// Applies damage. `from` is where the damage came from (for the indicator).
-    pub fn damage(&mut self, victim: u8, attacker: Option<u8>, amount: f32, cause: Cause, headshot: bool, from: Vec3) {
+    pub fn damage(
+        &mut self,
+        victim: u8,
+        attacker: Option<u8>,
+        amount: f32,
+        cause: Cause,
+        headshot: bool,
+        from: Vec3,
+    ) {
         let ff = self.cfg.friendly_fire;
         let time = self.time;
         let att_team = attacker.and_then(|a| self.p(a)).map(|a| a.team);
@@ -185,10 +216,22 @@ impl Game {
                 b.on_damaged(a, from);
             }
         }
-        self.send(victim, S2C::Damaged { from: from.to_array(), amount });
+        self.send(
+            victim,
+            S2C::Damaged {
+                from: from.to_array(),
+                amount,
+            },
+        );
         if let Some(a) = attacker {
             if a != victim {
-                self.send(a, S2C::HitConfirm { kill: dead, headshot });
+                self.send(
+                    a,
+                    S2C::HitConfirm {
+                        kill: dead,
+                        headshot,
+                    },
+                );
             }
         }
         if dead {
@@ -214,12 +257,23 @@ impl Game {
         let vteam = v.team;
         let vname = v.name.clone();
         let martyr = v.has_perk3(Perk3::Martyrdom);
-        let assist_list: Vec<u8> = v.attackers.iter().filter(|e| time - e.1 < 10.0 && Some(e.0) != attacker).map(|e| e.0).collect();
+        let assist_list: Vec<u8> = v
+            .attackers
+            .iter()
+            .filter(|e| time - e.1 < 10.0 && Some(e.0) != attacker)
+            .map(|e| e.0)
+            .collect();
         v.attackers.clear();
         self.drop_bomb_if_carrier(victim);
         if martyr && !matches!(cause, Cause::Bomb | Cause::Fall) {
             let id = self.new_ent_id();
-            self.grenades.push(Grenade { id, owner: victim, pos: vpos + vec3(0.0, 0.4, 0.0), vel: vec3(0.0, 1.0, 0.0), explode_at: time + 2.5 });
+            self.grenades.push(Grenade {
+                id,
+                owner: victim,
+                pos: vpos + vec3(0.0, 0.4, 0.0),
+                vel: vec3(0.0, 1.0, 0.0),
+                explode_at: time + 2.5,
+            });
         }
 
         let mut killer_name = String::new();
@@ -237,7 +291,14 @@ impl Game {
                         k.streak += 1;
                         let pts = SCORE_KILL + if headshot { SCORE_HEADSHOT_BONUS } else { 0 };
                         k.score += pts;
-                        popup = Some((pts, if headshot { "Хедшот!".to_string() } else { "Вбивство".to_string() }));
+                        popup = Some((
+                            pts,
+                            if headshot {
+                                "Хедшот!".to_string()
+                            } else {
+                                "Вбивство".to_string()
+                            },
+                        ));
                         reward = match k.streak {
                             UAV_KILLS => Some(Killstreak::Uav),
                             AIRSTRIKE_KILLS => Some(Killstreak::Airstrike),
@@ -269,7 +330,13 @@ impl Game {
                 if p.team != vteam {
                     p.assists += 1;
                     p.score += SCORE_ASSIST;
-                    self.send(aid, S2C::ScorePopup { points: SCORE_ASSIST, text: "Допомога".into() });
+                    self.send(
+                        aid,
+                        S2C::ScorePopup {
+                            points: SCORE_ASSIST,
+                            text: "Допомога".into(),
+                        },
+                    );
                 }
             }
         }
@@ -305,24 +372,36 @@ impl Game {
 
     pub fn start_reload(&mut self, id: u8) {
         let time = self.time;
-        let Some(cur) = self.p(id).map(|p| p.weapon().id) else { return };
+        let Some(cur) = self.p(id).map(|p| p.weapon().id) else {
+            return;
+        };
         let def = self.tuning.weapon(cur).clone();
-        let Some(p) = self.players[id as usize].as_mut() else { return };
+        let Some(p) = self.players[id as usize].as_mut() else {
+            return;
+        };
         if !p.alive || p.reload_end.is_some() {
             return;
         }
         if p.weapon().mag >= def.mag || p.weapon().reserve == 0 {
             return;
         }
-        let k = if p.has_perk2(Perk2::SleightOfHand) { 0.5 } else { 1.0 };
+        let k = if p.has_perk2(Perk2::SleightOfHand) {
+            0.5
+        } else {
+            1.0
+        };
         p.reload_end = Some(time + (def.reload_time * k) as f64 - 0.05);
     }
 
     pub fn switch_weapon(&mut self, id: u8, slot: u8) {
         let time = self.time;
-        let Some(next) = self.p(id).map(|p| p.weapons[slot as usize & 1].id) else { return };
+        let Some(next) = self.p(id).map(|p| p.weapons[slot as usize & 1].id) else {
+            return;
+        };
         let swap = self.tuning.weapon(next).swap_time;
-        let Some(p) = self.players[id as usize].as_mut() else { return };
+        let Some(p) = self.players[id as usize].as_mut() else {
+            return;
+        };
         if !p.alive || slot > 1 || slot == p.slot {
             return;
         }
@@ -337,19 +416,36 @@ impl Game {
             return;
         }
         let time = self.time;
-        let Some(p) = self.players[id as usize].as_mut() else { return };
-        if !p.alive || p.grenades == 0 || !dir.is_finite() || dir.length_squared() < 0.1 || time < p.protected_until {
+        let Some(p) = self.players[id as usize].as_mut() else {
+            return;
+        };
+        if !p.alive
+            || p.grenades == 0
+            || !dir.is_finite()
+            || dir.length_squared() < 0.1
+            || time < p.protected_until
+        {
             return;
         }
         p.grenades -= 1;
         let eye = p.eye();
-        let origin = if origin.is_finite() && origin.distance(eye) < 1.2 { origin } else { eye };
+        let origin = if origin.is_finite() && origin.distance(eye) < 1.2 {
+            origin
+        } else {
+            eye
+        };
         let gt = &self.tuning.grenade;
         let vel = dir.normalize() * gt.throw_speed + p.body.vel * gt.inherit_velocity;
         let fuse = gt.fuse;
         let cook = cook.clamp(0.0, (fuse - 0.3).max(0.0));
         let gid = self.new_ent_id();
-        self.grenades.push(Grenade { id: gid, owner: id, pos: origin, vel, explode_at: time + (fuse - cook) as f64 });
+        self.grenades.push(Grenade {
+            id: gid,
+            owner: id,
+            pos: origin,
+            vel,
+            explode_at: time + (fuse - cook) as f64,
+        });
     }
 
     pub fn update_grenades(&mut self, dt: f32) {
@@ -381,14 +477,23 @@ impl Game {
         self.grenades.retain(|g| now < g.explode_at);
         for (pos, owner) in boom {
             let (r, dmg) = (self.tuning.grenade.radius, self.tuning.grenade.damage);
-            self.explode(pos + vec3(0.0, 0.2, 0.0), r, dmg, Some(owner), Cause::Grenade, false);
+            self.explode(
+                pos + vec3(0.0, 0.2, 0.0),
+                r,
+                dmg,
+                Some(owner),
+                Cause::Grenade,
+                false,
+            );
         }
     }
 
     pub fn update_blasts(&mut self) {
         let now = self.time;
         let due: Vec<PendingBlast> = {
-            let (due, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut self.blasts).into_iter().partition(|b| b.at <= now);
+            let (due, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut self.blasts)
+                .into_iter()
+                .partition(|b| b.at <= now);
             self.blasts = keep;
             due
         };
@@ -398,8 +503,20 @@ impl Game {
     }
 
     /// Radius damage with line-of-sight check.
-    pub fn explode(&mut self, pos: Vec3, radius: f32, max_dmg: f32, owner: Option<u8>, cause: Cause, big: bool) {
-        self.broadcast(S2C::Explosion { pos: pos.to_array(), radius, big });
+    pub fn explode(
+        &mut self,
+        pos: Vec3,
+        radius: f32,
+        max_dmg: f32,
+        owner: Option<u8>,
+        cause: Cause,
+        big: bool,
+    ) {
+        self.broadcast(S2C::Explosion {
+            pos: pos.to_array(),
+            radius,
+            big,
+        });
         let victims: Vec<(u8, f32)> = self
             .players
             .iter()
@@ -412,7 +529,8 @@ impl Game {
                     return None;
                 }
                 let probe = pos + vec3(0.0, 0.25, 0.0);
-                if !self.world.line_of_sight(probe, c) && !self.world.line_of_sight(probe, p.eye()) {
+                if !self.world.line_of_sight(probe, c) && !self.world.line_of_sight(probe, p.eye())
+                {
                     return None;
                 }
                 let k = 1.0 - d / radius;
@@ -455,7 +573,10 @@ impl Game {
                 let c = o.chest();
                 let to = c - eye;
                 let d = to.length();
-                if d > MELEE_RANGE + 0.5 || to.normalize().dot(fwd) < 0.55 || !self.world.line_of_sight(eye, c) {
+                if d > MELEE_RANGE + 0.5
+                    || to.normalize().dot(fwd) < 0.55
+                    || !self.world.line_of_sight(eye, c)
+                {
                     return None;
                 }
                 Some((o.id, d))
@@ -488,7 +609,10 @@ impl Game {
                 let tx = tx.clamp(self.map.min.x, self.map.max.x);
                 let tz = tz.clamp(self.map.min.y, self.map.max.y);
                 // planes come from our side of the map
-                let home = self.map.spawns[team.index()].iter().fold(Vec3::ZERO, |a, s| a + s.pos) / self.map.spawns[team.index()].len().max(1) as f32;
+                let home = self.map.spawns[team.index()]
+                    .iter()
+                    .fold(Vec3::ZERO, |a, s| a + s.pos)
+                    / self.map.spawns[team.index()].len().max(1) as f32;
                 let tgt = vec3(tx, 0.0, tz);
                 let mut dir = vec3(tgt.x - home.x, 0.0, tgt.z - home.z);
                 if dir.length_squared() < 1.0 {
@@ -499,16 +623,36 @@ impl Game {
                     let off = (i as f32 - 4.0) * 2.8 + self.rng.range(-0.6, 0.6);
                     let side = vec3(-dir.z, 0.0, dir.x) * self.rng.range(-2.0, 2.0);
                     let mut p = tgt + dir * off + side;
-                    p.y = self.world.floor_below(vec3(p.x, 30.0, p.z), 40.0).unwrap_or(0.0) + 0.3;
-                    self.blasts.push(PendingBlast { at: time + 2.6 + i as f64 * 0.1, pos: p, radius: 7.0, damage: 190.0, owner: Some(id), cause: Cause::Airstrike });
+                    p.y = self
+                        .world
+                        .floor_below(vec3(p.x, 30.0, p.z), 40.0)
+                        .unwrap_or(0.0)
+                        + 0.3;
+                    self.blasts.push(PendingBlast {
+                        at: time + 2.6 + i as f64 * 0.1,
+                        pos: p,
+                        radius: 7.0,
+                        damage: 190.0,
+                        owner: Some(id),
+                        cause: Cause::Airstrike,
+                    });
                 }
                 let from = tgt - dir * 120.0 + vec3(0.0, 35.0, 0.0);
                 let to = tgt + dir * 120.0 + vec3(0.0, 35.0, 0.0);
-                self.broadcast(S2C::Airstrike { from: from.to_array(), to: to.to_array() });
+                self.broadcast(S2C::Airstrike {
+                    from: from.to_array(),
+                    to: to.to_array(),
+                });
             }
             Killstreak::Helicopter => {
                 if self.helis.iter().any(|h| h.team == team) {
-                    self.send(id, S2C::Center { text: "Гелікоптер вже в повітрі".into(), secs: 2.0 });
+                    self.send(
+                        id,
+                        S2C::Center {
+                            text: "Гелікоптер вже в повітрі".into(),
+                            secs: 2.0,
+                        },
+                    );
                     return;
                 }
                 let hid = self.new_ent_id();
@@ -532,7 +676,11 @@ impl Game {
             p.rewards.pop();
         }
         self.logf(format!("{name}: {}", k.name()));
-        self.broadcast(S2C::StreakUsed { by: name, team, streak: k });
+        self.broadcast(S2C::StreakUsed {
+            by: name,
+            team,
+            streak: k,
+        });
     }
 
     pub fn update_helis(&mut self, dt: f32) {
@@ -543,7 +691,11 @@ impl Game {
         let mut downed = Vec::new();
         for (i, h) in self.helis.iter_mut().enumerate() {
             h.angle += 7.0 / radius * dt;
-            let goal = vec3(c.x + h.angle.cos() * radius, HELI_HEIGHT, c.y + h.angle.sin() * radius);
+            let goal = vec3(
+                c.x + h.angle.cos() * radius,
+                HELI_HEIGHT,
+                c.y + h.angle.sin() * radius,
+            );
             h.pos = h.pos.lerp(goal, (dt * 1.5).min(1.0));
             if h.hp <= 0.0 {
                 downed.push(i);
@@ -558,10 +710,20 @@ impl Game {
                     .flatten()
                     .filter(|p| p.alive && p.team != h.team && p.team.is_playing())
                     .filter(|p| self.world.line_of_sight(eye, p.chest()))
-                    .min_by(|a, b| a.body.pos.distance(h.pos).partial_cmp(&b.body.pos.distance(h.pos)).unwrap())
+                    .min_by(|a, b| {
+                        a.body
+                            .pos
+                            .distance(h.pos)
+                            .partial_cmp(&b.body.pos.distance(h.pos))
+                            .unwrap()
+                    })
                     .map(|p| p.id);
             }
-            let tpos = h.target.and_then(|t| self.players[t as usize].as_ref()).filter(|p| p.alive).map(|p| p.chest());
+            let tpos = h
+                .target
+                .and_then(|t| self.players[t as usize].as_ref())
+                .filter(|p| p.alive)
+                .map(|p| p.chest());
             match tpos {
                 Some(tp) => {
                     let d = tp - h.pos;
@@ -578,14 +740,23 @@ impl Game {
         }
         for i in downed.into_iter().rev() {
             let h = self.helis.remove(i);
-            self.broadcast(S2C::Explosion { pos: h.pos.to_array(), radius: 6.0, big: true });
+            self.broadcast(S2C::Explosion {
+                pos: h.pos.to_array(),
+                radius: 6.0,
+                big: true,
+            });
             self.center_all("Гелікоптер збито!", 2.5);
         }
         self.helis.retain(|h| time < h.until);
         for (owner, from, to) in shots {
             let spread = 0.045;
             let d = (to - from).normalize();
-            let d = (d + vec3(self.rng.range(-spread, spread), self.rng.range(-spread, spread), self.rng.range(-spread, spread))).normalize();
+            let d = (d + vec3(
+                self.rng.range(-spread, spread),
+                self.rng.range(-spread, spread),
+                self.rng.range(-spread, spread),
+            ))
+            .normalize();
             let (dist, hit) = self.trace(None, from, d, 120.0, time);
             let mut flesh = false;
             if let Hit::Player(v, _, _) = hit {
@@ -593,10 +764,23 @@ impl Game {
                 if !same {
                     flesh = true;
                     let owner_present = self.p(owner).is_some();
-                    self.damage(v, if owner_present { Some(owner) } else { None }, 22.0, Cause::Helicopter, false, from);
+                    self.damage(
+                        v,
+                        if owner_present { Some(owner) } else { None },
+                        22.0,
+                        Cause::Helicopter,
+                        false,
+                        from,
+                    );
                 }
             }
-            self.shots.push(ShotFx { id: 255, weapon: WeaponId::M249, from: from.to_array(), to: (from + d * dist).to_array(), flesh });
+            self.shots.push(ShotFx {
+                id: 255,
+                weapon: WeaponId::M249,
+                from: from.to_array(),
+                to: (from + d * dist).to_array(),
+                flesh,
+            });
         }
     }
 }

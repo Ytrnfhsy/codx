@@ -25,8 +25,14 @@ pub struct Bans {
 impl Bans {
     pub fn load(dir: &str) -> Bans {
         let path = PathBuf::from(dir).join("bans.json");
-        let list = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-        Bans { list, path: Some(path) }
+        let list = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        Bans {
+            list,
+            path: Some(path),
+        }
     }
     pub fn save(&self) {
         if let Some(p) = &self.path {
@@ -78,9 +84,18 @@ fn find_player(g: &Game, who: &str) -> Option<u8> {
         }
     }
     let low = who.to_lowercase();
-    g.players.iter().flatten().find(|p| p.name.to_lowercase() == low).map(|p| p.id).or_else(|| {
-        g.players.iter().flatten().find(|p| p.name.to_lowercase().contains(&low)).map(|p| p.id)
-    })
+    g.players
+        .iter()
+        .flatten()
+        .find(|p| p.name.to_lowercase() == low)
+        .map(|p| p.id)
+        .or_else(|| {
+            g.players
+                .iter()
+                .flatten()
+                .find(|p| p.name.to_lowercase().contains(&low))
+                .map(|p| p.id)
+        })
 }
 
 fn parse_bool(v: &str) -> Option<bool> {
@@ -114,7 +129,11 @@ pub fn status(g: &Game) -> String {
             p.kills,
             p.deaths,
             p.assists,
-            if p.is_bot() { "-".to_string() } else { format!("{}", (p.ping * 1000.0) as u32) },
+            if p.is_bot() {
+                "-".to_string()
+            } else {
+                format!("{}", (p.ping * 1000.0) as u32)
+            },
             p.ip
         ));
     }
@@ -137,15 +156,28 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             if rest.is_empty() {
                 return "Використання: say <текст>".into();
             }
-            g.broadcast(S2C::Chat { from: "Адмін".into(), team: Team::Spectator, text: rest.into(), team_only: false });
+            g.broadcast(S2C::Chat {
+                from: "Адмін".into(),
+                team: Team::Spectator,
+                text: rest.into(),
+                team_only: false,
+            });
             g.logf(format!("Адмін: {rest}"));
             "Надіслано".into()
         }
         "kick" | "ban" => {
-            let Some(who) = args.next() else { return format!("Використання: {cmd} <id|ім'я> [причина]") };
+            let Some(who) = args.next() else {
+                return format!("Використання: {cmd} <id|ім'я> [причина]");
+            };
             let reason: String = args.collect::<Vec<_>>().join(" ");
-            let reason = if reason.is_empty() { "без причини".to_string() } else { reason };
-            let Some(id) = find_player(g, who) else { return format!("Гравця «{who}» не знайдено") };
+            let reason = if reason.is_empty() {
+                "без причини".to_string()
+            } else {
+                reason
+            };
+            let Some(id) = find_player(g, who) else {
+                return format!("Гравця «{who}» не знайдено");
+            };
             let (name, ip, bot) = {
                 let p = g.p(id).unwrap();
                 (p.name.clone(), p.ip.clone(), p.is_bot())
@@ -154,22 +186,50 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 if bot {
                     return "Ботів не можна банити — використай kick або bots".into();
                 }
-                g.bans.list.push(crate::admin::Ban { ip: ip.clone(), name: name.clone(), reason: reason.clone() });
+                g.bans.list.push(crate::admin::Ban {
+                    ip: ip.clone(),
+                    name: name.clone(),
+                    reason: reason.clone(),
+                });
                 g.bans.save();
             }
             if bot {
                 g.cfg.bots = g.cfg.bots.saturating_sub(1);
                 g.remove_player(id, None);
             } else {
-                g.kicked.push((id, format!("{} адміністратором: {reason}", if cmd == "ban" { "Заблоковано" } else { "Вигнано" })));
+                g.kicked.push((
+                    id,
+                    format!(
+                        "{} адміністратором: {reason}",
+                        if cmd == "ban" {
+                            "Заблоковано"
+                        } else {
+                            "Вигнано"
+                        }
+                    ),
+                ));
             }
-            let msg = format!("{name} {} ({reason})", if cmd == "ban" { "заблоковано" } else { "вигнано" });
-            g.broadcast(S2C::Chat { from: String::new(), team: Team::Spectator, text: msg.clone(), team_only: false });
+            let msg = format!(
+                "{name} {} ({reason})",
+                if cmd == "ban" {
+                    "заблоковано"
+                } else {
+                    "вигнано"
+                }
+            );
+            g.broadcast(S2C::Chat {
+                from: String::new(),
+                team: Team::Spectator,
+                text: msg.clone(),
+                team_only: false,
+            });
             g.logf(msg.clone());
             msg
         }
         "unban" => {
-            let Some(ip) = args.next() else { return "Використання: unban <ip>".into() };
+            let Some(ip) = args.next() else {
+                return "Використання: unban <ip>".into();
+            };
             let before = g.bans.list.len();
             g.bans.list.retain(|b| b.ip != ip);
             g.bans.save();
@@ -183,7 +243,12 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             if g.bans.list.is_empty() {
                 "Список банів порожній".into()
             } else {
-                g.bans.list.iter().map(|b| format!("{}  {}  ({})", b.ip, b.name, b.reason)).collect::<Vec<_>>().join("\n")
+                g.bans
+                    .list
+                    .iter()
+                    .map(|b| format!("{}  {}  ({})", b.ip, b.name, b.reason))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             }
         }
         "map" => {
@@ -195,7 +260,9 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             format!("Карта змінена: {} ({})", g.map.name, mode.name())
         }
         "mode" => {
-            let Some(mode) = args.next().and_then(Mode::parse) else { return "Використання: mode <tdm|sab>".into() };
+            let Some(mode) = args.next().and_then(Mode::parse) else {
+                return "Використання: mode <tdm|sab>".into();
+            };
             let m = g.map.id;
             g.change_map(m, mode);
             format!("Режим змінено: {}", mode.name())
@@ -209,7 +276,15 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             .rotation
             .iter()
             .enumerate()
-            .map(|(i, r)| format!("{}{} {} {}", if i == g.rotation_idx { "> " } else { "  " }, i + 1, r.map, r.mode))
+            .map(|(i, r)| {
+                format!(
+                    "{}{} {} {}",
+                    if i == g.rotation_idx { "> " } else { "  " },
+                    i + 1,
+                    r.map,
+                    r.mode
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n"),
         "restart" => {
@@ -238,23 +313,40 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 "spec" | "spectator" | "0" => Team::Spectator,
                 _ => return "Команда: allies | axis | spec".into(),
             };
-            let Some(id) = find_player(g, who) else { return format!("Гравця «{who}» не знайдено") };
+            let Some(id) = find_player(g, who) else {
+                return format!("Гравця «{who}» не знайдено");
+            };
             g.set_team(id, team, true);
             "Готово".into()
         }
         "kill" => {
-            let Some(who) = args.next() else { return "Використання: kill <id|ім'я>".into() };
-            let Some(id) = find_player(g, who) else { return format!("Гравця «{who}» не знайдено") };
+            let Some(who) = args.next() else {
+                return "Використання: kill <id|ім'я>".into();
+            };
+            let Some(id) = find_player(g, who) else {
+                return format!("Гравця «{who}» не знайдено");
+            };
             g.kill(id, None, toon_shared::weapons::Cause::World, false);
             "Готово".into()
         }
         "bots" | "addbot" | "kickbots" => {
             let n = match cmd.as_str() {
-                "addbot" => g.cfg.bots + args.next().and_then(|v| v.parse::<usize>().ok()).unwrap_or(1),
+                "addbot" => {
+                    g.cfg.bots
+                        + args
+                            .next()
+                            .and_then(|v| v.parse::<usize>().ok())
+                            .unwrap_or(1)
+                }
                 "kickbots" => 0,
                 _ => match args.next().and_then(|v| v.parse::<usize>().ok()) {
                     Some(n) => n,
-                    None => return format!("Ботів: заповнення до {} гравців. Використання: bots <n>", g.cfg.bots),
+                    None => {
+                        return format!(
+                            "Ботів: заповнення до {} гравців. Використання: bots <n>",
+                            g.cfg.bots
+                        )
+                    }
                 },
             };
             g.cfg.bots = n.min(g.cfg.max_players);
@@ -277,7 +369,9 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 "heli" | "helicopter" => toon_shared::weapons::Killstreak::Helicopter,
                 _ => return "Кілстрік: uav | airstrike | heli".into(),
             };
-            let Some(id) = find_player(g, who) else { return format!("Гравця «{who}» не знайдено") };
+            let Some(id) = find_player(g, who) else {
+                return format!("Гравця «{who}» не знайдено");
+            };
             if let Some(p) = g.pm(id) {
                 p.rewards.retain(|r| *r != streak);
                 p.rewards.push(streak);
@@ -290,7 +384,10 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             let (Some(key), Some(_)) = (args.next(), rest.split_once(char::is_whitespace)) else {
                 return "Використання: set <ключ> <значення>".into();
             };
-            let value = rest.split_once(char::is_whitespace).map(|x| x.1.trim()).unwrap_or("");
+            let value = rest
+                .split_once(char::is_whitespace)
+                .map(|x| x.1.trim())
+                .unwrap_or("");
             set_var(g, &key.to_lowercase(), value)
         }
         "save" => match &g.cfg_path {
@@ -345,7 +442,9 @@ fn set_var(g: &mut Game, key: &str, v: &str) -> String {
             _ => return bad(),
         },
         "maxplayers" => match num {
-            Ok(n) if n >= 2.0 => g.cfg.max_players = (n as usize).min(toon_shared::consts::MAX_PLAYERS),
+            Ok(n) if n >= 2.0 => {
+                g.cfg.max_players = (n as usize).min(toon_shared::consts::MAX_PLAYERS)
+            }
             _ => return bad(),
         },
         "ff" | "friendlyfire" => match parse_bool(v) {
@@ -385,7 +484,9 @@ fn list_fields(obj: &serde_json::Value, fields: &[FieldInfo], prefix: &str) -> S
     let mut out = String::new();
     for (k, label, lo, hi) in fields {
         let v = obj.get(*k).map(fmt_val).unwrap_or_default();
-        out.push_str(&format!("  {prefix}{k:<18} = {v:<8} {label}  [{lo}..{hi}]\n"));
+        out.push_str(&format!(
+            "  {prefix}{k:<18} = {v:<8} {label}  [{lo}..{hi}]\n"
+        ));
     }
     out
 }
@@ -451,7 +552,14 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
     };
     let field = path.last().unwrap().clone();
     let Some(info) = fields.iter().find(|x| x.0 == field) else {
-        return format!("Невідомий параметр «{field}». Список: tune {}", if path[0] == "weapons" { &path[1] } else { &path[0] });
+        return format!(
+            "Невідомий параметр «{field}». Список: tune {}",
+            if path[0] == "weapons" {
+                &path[1]
+            } else {
+                &path[0]
+            }
+        );
     };
     let mut json = json;
     let slot = path.iter().fold(&mut json, |v, k| &mut v[k.as_str()]);
@@ -484,7 +592,11 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
         (Some(a), Ok(v)) => (a - v).abs() > 1e-3 * v.abs().max(1.0),
         _ => false,
     };
-    let note = if clamped { format!(" (обмежено діапазоном {}..{})", info.2, info.3) } else { String::new() };
+    let note = if clamped {
+        format!(" (обмежено діапазоном {}..{})", info.2, info.3)
+    } else {
+        String::new()
+    };
     let msg = format!("{} = {}{note}", path.join("."), fmt_val(applied));
     g.logf(format!("Тюнінг: {msg}"));
     msg

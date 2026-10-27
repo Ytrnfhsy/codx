@@ -15,13 +15,23 @@ fn game(skill: f32, bots: usize, seed: u64, protection: f32) -> (Game, u8) {
         bots,
         bot_skill: skill,
         spawn_protection: protection,
-        data_dir: std::env::temp_dir().join("tw-skill").to_string_lossy().into(),
+        data_dir: std::env::temp_dir()
+            .join("tw-skill")
+            .to_string_lossy()
+            .into(),
         ..Default::default()
     };
     let mut g = Game::new(cfg);
     g.rng = Rng::new(seed);
     g.change_map(MapId::Depot, Mode::Tdm);
-    let id = g.connect("127.0.0.1:5000".parse().unwrap(), "Ціль", "", toon_shared::consts::PROTOCOL_VERSION).unwrap();
+    let id = g
+        .connect(
+            "127.0.0.1:5000".parse().unwrap(),
+            "Ціль",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
     g.handle(id, C2S::JoinTeam(Some(Team::Allies)));
     g.handle(id, C2S::SetLoadout(DEFAULT_CLASSES[0].1));
     (g, id)
@@ -75,7 +85,9 @@ fn duel_accuracy(skill: f32, seed: u64, dist: f32) -> (u32, u32) {
 }
 
 fn accuracy(skill: f32, dist: f32) -> f32 {
-    let (f, h) = (0..10).map(|s| duel_accuracy(skill, 40 + s, dist)).fold((0, 0), |a, x| (a.0 + x.0, a.1 + x.1));
+    let (f, h) = (0..10)
+        .map(|s| duel_accuracy(skill, 40 + s, dist))
+        .fold((0, 0), |a, x| (a.0 + x.0, a.1 + x.1));
     assert!(f > 20, "bot barely shot ({f}) at skill {skill}");
     h as f32 / f as f32
 }
@@ -88,7 +100,10 @@ fn accuracy_scales_with_skill() {
         let hard = accuracy(0.7, dist);
         let veteran = accuracy(1.0, dist);
         println!("{dist} m: easy={easy:.2} normal={normal:.2} hard={hard:.2} veteran={veteran:.2}");
-        assert!(easy < normal && normal < hard && hard < veteran + 0.08, "{dist} m: {easy} {normal} {hard} {veteran}");
+        assert!(
+            easy < normal && normal < hard && hard < veteran + 0.08,
+            "{dist} m: {easy} {normal} {hard} {veteran}"
+        );
         assert!(easy < 0.2, "easy bots hit {easy} at {dist} m");
         assert!(veteran > 0.4, "veteran bots hit only {veteran} at {dist} m");
     }
@@ -117,11 +132,17 @@ fn engage_time(skill: f32, seed: u64, dist: f32) -> (f32, f32) {
         g.tick(TICK_DT);
         g.shots.clear();
         for (d, m, _) in g.outbox.drain(..) {
-            if matches!((d, m), (Dest::One(t), S2C::Damaged { .. }) if t == human) && hurt.is_none() {
+            if matches!((d, m), (Dest::One(t), S2C::Damaged { .. }) if t == human) && hurt.is_none()
+            {
                 hurt = Some((g.time - start) as f32);
             }
         }
-        if noticed.is_none() && g.p(bot).and_then(|b| b.bot.as_ref()).and_then(|b| b.target()) == Some(human) {
+        if noticed.is_none()
+            && g.p(bot)
+                .and_then(|b| b.bot.as_ref())
+                .and_then(|b| b.target())
+                == Some(human)
+        {
             noticed = Some((g.time - start) as f32);
         }
         if hurt.is_some() {
@@ -135,7 +156,10 @@ fn engage_time(skill: f32, seed: u64, dist: f32) -> (f32, f32) {
 fn harder_bots_notice_and_shoot_sooner() {
     let avg = |skill: f32| {
         let v: Vec<(f32, f32)> = (0..6).map(|s| engage_time(skill, 100 + s, 20.0)).collect();
-        (v.iter().map(|x| x.0).sum::<f32>() / 6.0, v.iter().map(|x| x.1).sum::<f32>() / 6.0)
+        (
+            v.iter().map(|x| x.0).sum::<f32>() / 6.0,
+            v.iter().map(|x| x.1).sum::<f32>() / 6.0,
+        )
     };
     let (easy_n, easy_h) = avg(0.0);
     let (hard_n, hard_h) = avg(1.0);
@@ -163,7 +187,11 @@ fn bots_do_not_see_behind_them() {
             g.tick(TICK_DT);
             g.outbox.clear();
             g.shots.clear();
-            assert_ne!(g.p(bot).unwrap().bot.as_ref().unwrap().target(), Some(human), "skill {skill}: saw an enemy behind its back");
+            assert_ne!(
+                g.p(bot).unwrap().bot.as_ref().unwrap().target(),
+                Some(human),
+                "skill {skill}: saw an enemy behind its back"
+            );
         }
     }
 }
@@ -183,7 +211,14 @@ fn spawn_protection_rules() {
     assert!(g.p(human).unwrap().alive);
     let pos = g.p(human).unwrap().body.pos;
     // invulnerable
-    g.damage(human, None, 500.0, toon_shared::weapons::Cause::Grenade, false, pos);
+    g.damage(
+        human,
+        None,
+        500.0,
+        toon_shared::weapons::Cause::Grenade,
+        false,
+        pos,
+    );
     assert!(g.p(human).unwrap().alive, "protected player died");
     assert!(g.snapshot_for(human).me.protected > 2.0);
     // ...but cannot attack while protected
@@ -205,9 +240,22 @@ fn spawn_protection_rules() {
     let bot = g.players.iter().flatten().find(|p| p.is_bot()).unwrap().id;
     let enemy_view = g.snapshot_for(bot);
     let me_seen = enemy_view.players.iter().find(|p| p.id == human).unwrap();
-    assert_eq!(me_seen.stance & PROTECTED, 0, "enemies must not see the shield");
+    assert_eq!(
+        me_seen.stance & PROTECTED,
+        0,
+        "enemies must not see the shield"
+    );
     let own_view = g.snapshot_for(human);
-    assert_ne!(own_view.players.iter().find(|p| p.id == human).unwrap().stance & PROTECTED, 0);
+    assert_ne!(
+        own_view
+            .players
+            .iter()
+            .find(|p| p.id == human)
+            .unwrap()
+            .stance
+            & PROTECTED,
+        0
+    );
     // giving the protection up makes us vulnerable and able to shoot
     g.handle(human, C2S::DropProtection);
     for _ in 0..10 {
@@ -216,6 +264,13 @@ fn spawn_protection_rules() {
     let eye = g.p(human).unwrap().eye();
     g.fire(human, w, eye, &[glam::Vec3::NEG_Z]);
     assert_eq!(g.p(human).unwrap().weapon().mag, mag - 1);
-    g.damage(human, None, 500.0, toon_shared::weapons::Cause::Grenade, false, pos);
+    g.damage(
+        human,
+        None,
+        500.0,
+        toon_shared::weapons::Cause::Grenade,
+        false,
+        pos,
+    );
     assert!(!g.p(human).unwrap().alive, "protection should be gone");
 }

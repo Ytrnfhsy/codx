@@ -9,13 +9,27 @@ use toon_shared::weapons::DEFAULT_CLASSES;
 use toon_shared::{Mode, Team};
 
 fn setup(map: MapId, mode: Mode) -> (Game, u8) {
-    let cfg = ServerConfig { bots: 8, data_dir: std::env::temp_dir().join("tw-test").to_string_lossy().into(), ..Default::default() };
+    let cfg = ServerConfig {
+        bots: 8,
+        data_dir: std::env::temp_dir()
+            .join("tw-test")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
     let mut g = Game::new(cfg);
     // deterministic bots (names, skill, decisions) so the simulation is reproducible
     g.rng = toon_shared::rng::Rng::new(1234);
     g.change_map(map, mode);
     // a passive human spectator-ish player on a team so the match starts
-    let id = g.connect("127.0.0.1:5000".parse().unwrap(), "Тестер", "", toon_shared::consts::PROTOCOL_VERSION).unwrap();
+    let id = g
+        .connect(
+            "127.0.0.1:5000".parse().unwrap(),
+            "Тестер",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
     g.handle(id, C2S::JoinTeam(Some(Team::Allies)));
     g.handle(id, C2S::SetLoadout(DEFAULT_CLASSES[0].1));
     (g, id)
@@ -29,7 +43,12 @@ struct Stats {
 }
 
 fn run(g: &mut Game, secs: f32) -> Stats {
-    let mut st = Stats { kills: 0, plants: 0, round_ends: 0, match_end: false };
+    let mut st = Stats {
+        kills: 0,
+        plants: 0,
+        round_ends: 0,
+        match_end: false,
+    };
     let ticks = (secs / TICK_DT) as usize;
     for _ in 0..ticks {
         g.tick(TICK_DT);
@@ -53,7 +72,10 @@ fn run(g: &mut Game, secs: f32) -> Stats {
 fn tdm_bots_fight() {
     let (mut g, _) = setup(MapId::Depot, Mode::Tdm);
     let st = run(&mut g, 150.0);
-    assert!(g.players.iter().flatten().filter(|p| p.is_bot()).count() >= 7, "bots should fill the server");
+    assert!(
+        g.players.iter().flatten().filter(|p| p.is_bot()).count() >= 7,
+        "bots should fill the server"
+    );
     assert_ne!(g.state, MatchState::Warmup, "match should have started");
     assert!(st.kills >= 8, "only {} kills in 150s", st.kills);
     // bots that joined mid-match must spawn too
@@ -67,7 +89,10 @@ fn tdm_bots_fight() {
 fn sab_bots_play_objective() {
     let (mut g, _) = setup(MapId::Depot, Mode::Sab);
     let st = run(&mut g, 900.0);
-    println!("kills={} plants={} rounds={} end={} scores={:?}", st.kills, st.plants, st.round_ends, st.match_end, g.scores);
+    println!(
+        "kills={} plants={} rounds={} end={} scores={:?}",
+        st.kills, st.plants, st.round_ends, st.match_end, g.scores
+    );
     assert!(st.plants >= 1, "bots never planted the bomb");
     assert!(st.round_ends + st.match_end as usize >= 1);
 }
@@ -102,8 +127,14 @@ fn admin_tuning_applies_live_and_reaches_clients() {
     g.outbox.clear();
     let out = toon_server::admin::exec(&mut g, "tune m249.rpm 900");
     assert_eq!(out, "weapons.m249.rpm = 900", "{out}");
-    assert_eq!(g.tuning.weapon(toon_shared::weapons::WeaponId::M249).rpm, 900.0);
-    assert!(g.outbox.iter().any(|(_, m, _)| matches!(m, S2C::Tuning(t) if t.weapons["m249"].rpm == 900.0)));
+    assert_eq!(
+        g.tuning.weapon(toon_shared::weapons::WeaponId::M249).rpm,
+        900.0
+    );
+    assert!(g
+        .outbox
+        .iter()
+        .any(|(_, m, _)| matches!(m, S2C::Tuning(t) if t.weapons["m249"].rpm == 900.0)));
     let out = toon_server::admin::exec(&mut g, "tune movement.sprint_speed 999");
     assert!(out.contains("обмежено"), "{out}");
     assert_eq!(g.tuning.movement.sprint_speed, 25.0);
@@ -114,7 +145,10 @@ fn admin_tuning_applies_live_and_reaches_clients() {
     assert!(toon_server::admin::exec(&mut g, "tune m249").contains("Вага"));
     assert!(toon_server::admin::exec(&mut g, "tune m249.nope 1").contains("Невідомий"));
     toon_server::admin::exec(&mut g, "tune reset all");
-    assert_eq!(g.tuning.weapon(toon_shared::weapons::WeaponId::M249).rpm, 750.0);
+    assert_eq!(
+        g.tuning.weapon(toon_shared::weapons::WeaponId::M249).rpm,
+        750.0
+    );
     // persisted into the config section that `save` writes
     assert_eq!(g.cfg.tuning["weapons"]["m249"]["rpm"], 750.0);
 }

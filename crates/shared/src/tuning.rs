@@ -161,14 +161,37 @@ impl WeaponStats {
     /// Factory defaults: the base table plus class-specific handling ("heavy LMG", "snappy pistol").
     pub fn from_def(d: &WeaponDef) -> WeaponStats {
         // (weight kg, sprint mult, sprint-out s, swap s, ramp, max ramp, recover, first shot, sway, crouch, prone, spread recover)
-        let (weight, sprint, sprint_out, swap, ramp, max_ramp, recover, first, sway, crouch, prone, srec) = match d.class {
-            WeaponClass::Rifle => (3.6, 0.96, 0.25, 0.55, 0.03, 1.5, 3.0, 1.0, 1.0, 0.8, 0.6, 8.0),
-            WeaponClass::Smg => (2.7, 1.0, 0.15, 0.45, 0.02, 1.4, 4.0, 1.0, 0.8, 0.85, 0.7, 10.0),
+        let (
+            weight,
+            sprint,
+            sprint_out,
+            swap,
+            ramp,
+            max_ramp,
+            recover,
+            first,
+            sway,
+            crouch,
+            prone,
+            srec,
+        ) = match d.class {
+            WeaponClass::Rifle => (
+                3.6, 0.96, 0.25, 0.55, 0.03, 1.5, 3.0, 1.0, 1.0, 0.8, 0.6, 8.0,
+            ),
+            WeaponClass::Smg => (
+                2.7, 1.0, 0.15, 0.45, 0.02, 1.4, 4.0, 1.0, 0.8, 0.85, 0.7, 10.0,
+            ),
             // heavy: slow to move and aim, recoil builds over a long burst, steady on a bipod
-            WeaponClass::Lmg => (8.0, 0.84, 0.5, 0.95, 0.04, 1.8, 1.5, 0.7, 1.5, 0.65, 0.35, 5.0),
-            WeaponClass::Shotgun => (3.6, 0.96, 0.3, 0.6, 0.0, 1.0, 5.0, 1.0, 1.0, 0.85, 0.7, 12.0),
+            WeaponClass::Lmg => (
+                8.0, 0.84, 0.5, 0.95, 0.04, 1.8, 1.5, 0.7, 1.5, 0.65, 0.35, 5.0,
+            ),
+            WeaponClass::Shotgun => (
+                3.6, 0.96, 0.3, 0.6, 0.0, 1.0, 5.0, 1.0, 1.0, 0.85, 0.7, 12.0,
+            ),
             WeaponClass::Sniper => (6.0, 0.9, 0.5, 0.8, 0.0, 1.0, 2.0, 1.0, 1.6, 0.75, 0.5, 6.0),
-            WeaponClass::Pistol => (1.0, 1.05, 0.1, 0.35, 0.05, 1.5, 6.0, 1.0, 0.7, 0.9, 0.8, 12.0),
+            WeaponClass::Pistol => (
+                1.0, 1.05, 0.1, 0.35, 0.05, 1.5, 6.0, 1.0, 0.7, 0.9, 0.8, 12.0,
+            ),
         };
         WeaponStats {
             damage_max: d.damage_max,
@@ -235,8 +258,16 @@ fn default_weapons() -> &'static Vec<WeaponStats> {
 
 impl Default for Tuning {
     fn default() -> Self {
-        let weapons = WEAPONS.iter().map(|d| (d.id.key().to_string(), WeaponStats::from_def(d))).collect();
-        let mut t = Tuning { movement: MoveTuning::default(), grenade: GrenadeTuning::default(), weapons, cache: Vec::new() };
+        let weapons = WEAPONS
+            .iter()
+            .map(|d| (d.id.key().to_string(), WeaponStats::from_def(d)))
+            .collect();
+        let mut t = Tuning {
+            movement: MoveTuning::default(),
+            grenade: GrenadeTuning::default(),
+            weapons,
+            cache: Vec::new(),
+        };
         t.finalize();
         t
     }
@@ -250,7 +281,9 @@ impl Tuning {
         self.grenade.clamp_all();
         self.weapons.retain(|k, _| WeaponId::from_key(k).is_some());
         for d in WEAPONS.iter() {
-            self.weapons.entry(d.id.key().to_string()).or_insert_with(|| WeaponStats::from_def(d));
+            self.weapons
+                .entry(d.id.key().to_string())
+                .or_insert_with(|| WeaponStats::from_def(d));
         }
         for w in self.weapons.values_mut() {
             w.clamp_all();
@@ -258,7 +291,9 @@ impl Tuning {
                 w.range_far = w.range_near;
             }
         }
-        self.cache = WeaponId::all().map(|id| self.weapons[id.key()].clone()).collect();
+        self.cache = WeaponId::all()
+            .map(|id| self.weapons[id.key()].clone())
+            .collect();
     }
 
     pub fn weapon(&self, id: WeaponId) -> &WeaponStats {
@@ -271,7 +306,11 @@ impl Tuning {
 
     /// Movement speed multiplier for a weapon (and the max sprint speed it allows).
     pub fn max_sprint_speed(&self) -> f32 {
-        let best = self.cache.iter().map(|w| w.move_mult * w.sprint_mult).fold(1.0f32, f32::max);
+        let best = self
+            .cache
+            .iter()
+            .map(|w| w.move_mult * w.sprint_mult)
+            .fold(1.0f32, f32::max);
         self.movement.sprint_speed * best
     }
 }
@@ -289,7 +328,9 @@ mod tests {
         // the LMG is heavier and slower than an SMG
         let lmg = t.weapon(WeaponId::M249);
         let smg = t.weapon(WeaponId::Mp5);
-        assert!(lmg.weight > smg.weight && lmg.move_mult < smg.move_mult && lmg.ads_time > smg.ads_time);
+        assert!(
+            lmg.weight > smg.weight && lmg.move_mult < smg.move_mult && lmg.ads_time > smg.ads_time
+        );
     }
 
     #[test]

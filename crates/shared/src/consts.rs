@@ -35,7 +35,6 @@ pub const MELEE_RANGE: f32 = 1.8;
 pub const MELEE_DAMAGE: f32 = 135.0;
 pub const MELEE_COOLDOWN: f32 = 0.9;
 
-
 pub const UAV_KILLS: u32 = 3;
 pub const AIRSTRIKE_KILLS: u32 = 5;
 pub const HELI_KILLS: u32 = 7;

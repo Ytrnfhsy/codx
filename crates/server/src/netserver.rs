@@ -120,14 +120,31 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                         if conns.len() >= 128 {
                             continue;
                         }
-                        conns.insert(addr, Conn { chan: Channel::new(), id: None, last_recv: now, closing: None });
+                        conns.insert(
+                            addr,
+                            Conn {
+                                chan: Channel::new(),
+                                id: None,
+                                last_recv: now,
+                                closing: None,
+                            },
+                        );
                     }
                     let conn = conns.get_mut(&addr).unwrap();
-                    let Some(msgs) = conn.chan.receive::<C2S>(data) else { continue };
+                    let Some(msgs) = conn.chan.receive::<C2S>(data) else {
+                        continue;
+                    };
                     conn.last_recv = now;
                     for m in msgs {
                         match (conn.id, m) {
-                            (None, C2S::Hello { name, password, version }) => {
+                            (
+                                None,
+                                C2S::Hello {
+                                    name,
+                                    password,
+                                    version,
+                                },
+                            ) => {
                                 if conn.closing.is_some() {
                                     continue;
                                 }
@@ -151,7 +168,12 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                     }
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => break,
-                Err(e) if e.kind() == ErrorKind::ConnectionReset || e.kind() == ErrorKind::Interrupted => continue,
+                Err(e)
+                    if e.kind() == ErrorKind::ConnectionReset
+                        || e.kind() == ErrorKind::Interrupted =>
+                {
+                    continue
+                }
                 Err(e) => {
                     eprintln!("[net] помилка сокета: {e}");
                     break;
@@ -174,7 +196,8 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                     let _ = reply.send(info_json(&game));
                 }
                 AdminMsg::CheckRcon(pass, reply) => {
-                    let _ = reply.send(!game.cfg.rcon_password.is_empty() && pass == game.cfg.rcon_password);
+                    let _ = reply
+                        .send(!game.cfg.rcon_password.is_empty() && pass == game.cfg.rcon_password);
                 }
             }
         }
@@ -214,7 +237,8 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
         for c in conns.values_mut() {
             if let Some(id) = c.id {
                 if game.p(id).is_some() {
-                    c.chan.send_unreliable(&S2C::Snapshot(Box::new(game.snapshot_for(id))));
+                    c.chan
+                        .send_unreliable(&S2C::Snapshot(Box::new(game.snapshot_for(id))));
                 }
             }
         }

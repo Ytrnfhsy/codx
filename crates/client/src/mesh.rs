@@ -3,7 +3,9 @@
 //! Lighting is baked into vertex colours (three flat bands), so the GPU work per pixel is
 //! trivial — this keeps the game fast on weak integrated graphics.
 
-use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Comparison, CullFace, Equation, PipelineParams};
+use macroquad::miniquad::{
+    BlendFactor, BlendState, BlendValue, Comparison, CullFace, Equation, PipelineParams,
+};
 use macroquad::models::Vertex;
 use macroquad::prelude::*;
 
@@ -45,12 +47,60 @@ pub struct MeshBuilder {
 
 const BOX_FACES: [(Vec3, [Vec3; 4]); 6] = [
     // normal, 4 corners (CCW seen from outside) in unit cube [-1,1]
-    (Vec3::X, [Vec3::new(1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, -1.0), Vec3::new(1.0, 1.0, 1.0)]),
-    (Vec3::NEG_X, [Vec3::new(-1.0, -1.0, -1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, 1.0, -1.0)]),
-    (Vec3::Y, [Vec3::new(-1.0, 1.0, 1.0), Vec3::new(1.0, 1.0, 1.0), Vec3::new(1.0, 1.0, -1.0), Vec3::new(-1.0, 1.0, -1.0)]),
-    (Vec3::NEG_Y, [Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, -1.0, -1.0), Vec3::new(1.0, -1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0)]),
-    (Vec3::Z, [Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), Vec3::new(1.0, 1.0, 1.0), Vec3::new(-1.0, 1.0, 1.0)]),
-    (Vec3::NEG_Z, [Vec3::new(1.0, -1.0, -1.0), Vec3::new(-1.0, -1.0, -1.0), Vec3::new(-1.0, 1.0, -1.0), Vec3::new(1.0, 1.0, -1.0)]),
+    (
+        Vec3::X,
+        [
+            Vec3::new(1.0, -1.0, 1.0),
+            Vec3::new(1.0, -1.0, -1.0),
+            Vec3::new(1.0, 1.0, -1.0),
+            Vec3::new(1.0, 1.0, 1.0),
+        ],
+    ),
+    (
+        Vec3::NEG_X,
+        [
+            Vec3::new(-1.0, -1.0, -1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
+            Vec3::new(-1.0, 1.0, 1.0),
+            Vec3::new(-1.0, 1.0, -1.0),
+        ],
+    ),
+    (
+        Vec3::Y,
+        [
+            Vec3::new(-1.0, 1.0, 1.0),
+            Vec3::new(1.0, 1.0, 1.0),
+            Vec3::new(1.0, 1.0, -1.0),
+            Vec3::new(-1.0, 1.0, -1.0),
+        ],
+    ),
+    (
+        Vec3::NEG_Y,
+        [
+            Vec3::new(-1.0, -1.0, -1.0),
+            Vec3::new(1.0, -1.0, -1.0),
+            Vec3::new(1.0, -1.0, 1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
+        ],
+    ),
+    (
+        Vec3::Z,
+        [
+            Vec3::new(-1.0, -1.0, 1.0),
+            Vec3::new(1.0, -1.0, 1.0),
+            Vec3::new(1.0, 1.0, 1.0),
+            Vec3::new(-1.0, 1.0, 1.0),
+        ],
+    ),
+    (
+        Vec3::NEG_Z,
+        [
+            Vec3::new(1.0, -1.0, -1.0),
+            Vec3::new(-1.0, -1.0, -1.0),
+            Vec3::new(-1.0, 1.0, -1.0),
+            Vec3::new(1.0, 1.0, -1.0),
+        ],
+    ),
 ];
 
 impl MeshBuilder {
@@ -70,7 +120,11 @@ impl MeshBuilder {
     }
 
     fn chunk_for(&mut self, n: usize) -> &mut Chunk {
-        let need_new = match self.chunks.iter().position(|c| c.verts.len() + n <= CHUNK_VERTS) {
+        let need_new = match self
+            .chunks
+            .iter()
+            .position(|c| c.verts.len() + n <= CHUNK_VERTS)
+        {
             Some(i) => return &mut self.chunks[i],
             None => true,
         };
@@ -86,18 +140,35 @@ impl MeshBuilder {
     }
 
     /// `flat_color`: skip lighting (outlines, glowing things).
-    pub fn add_box_ex(&mut self, m: &Mat4, half: Vec3, color: [u8; 3], alpha: u8, flat_color: bool) {
+    pub fn add_box_ex(
+        &mut self,
+        m: &Mat4,
+        half: Vec3,
+        color: [u8; 3],
+        alpha: u8,
+        flat_color: bool,
+    ) {
         let c = self.chunk_for(24);
         for (n, corners) in BOX_FACES.iter() {
             let wn = m.transform_vector3(*n).normalize_or_zero();
-            let mut col = if flat_color { [color[0], color[1], color[2], 255] } else { shade(color, wn) };
+            let mut col = if flat_color {
+                [color[0], color[1], color[2], 255]
+            } else {
+                shade(color, wn)
+            };
             col[3] = alpha;
             let base = c.verts.len() as u16;
             for k in corners {
                 let p = m.transform_point3(*k * half);
-                c.verts.push(Vertex { position: p, uv: Vec2::ZERO, color: col, normal: Vec4::ZERO });
+                c.verts.push(Vertex {
+                    position: p,
+                    uv: Vec2::ZERO,
+                    color: col,
+                    normal: Vec4::ZERO,
+                });
             }
-            c.idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            c.idx
+                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
     }
 
@@ -113,7 +184,16 @@ impl MeshBuilder {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn add_sphere_ex(&mut self, m: &Mat4, r: f32, color: [u8; 3], seg: u32, rings: u32, alpha: u8, flat_color: bool) {
+    pub fn add_sphere_ex(
+        &mut self,
+        m: &Mat4,
+        r: f32,
+        color: [u8; 3],
+        seg: u32,
+        rings: u32,
+        alpha: u8,
+        flat_color: bool,
+    ) {
         let n_verts = ((seg + 1) * (rings + 1)) as usize;
         let c = self.chunk_for(n_verts);
         let base = c.verts.len() as u16;
@@ -126,9 +206,18 @@ impl MeshBuilder {
                 let n = Vec3::new(phi.sin() * th.cos(), phi.cos(), phi.sin() * th.sin());
                 let p = m.transform_point3(n * r);
                 let wn = m.transform_vector3(n).normalize_or_zero();
-                let mut col = if flat_color { [color[0], color[1], color[2], 255] } else { shade(color, wn) };
+                let mut col = if flat_color {
+                    [color[0], color[1], color[2], 255]
+                } else {
+                    shade(color, wn)
+                };
                 col[3] = alpha;
-                c.verts.push(Vertex { position: p, uv: Vec2::ZERO, color: col, normal: Vec4::ZERO });
+                c.verts.push(Vertex {
+                    position: p,
+                    uv: Vec2::ZERO,
+                    color: col,
+                    normal: Vec4::ZERO,
+                });
             }
         }
         for j in 0..rings {
@@ -146,9 +235,15 @@ impl MeshBuilder {
         let c = self.chunk_for(4);
         let base = c.verts.len() as u16;
         for v in p {
-            c.verts.push(Vertex { position: v, uv: Vec2::ZERO, color, normal: Vec4::ZERO });
+            c.verts.push(Vertex {
+                position: v,
+                uv: Vec2::ZERO,
+                color,
+                normal: Vec4::ZERO,
+            });
         }
-        c.idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        c.idx
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
     /// Submits all chunks with the currently bound material.
@@ -185,13 +280,15 @@ impl ToonMesh {
     pub fn boxed(&mut self, m: &Mat4, half: Vec3, color: [u8; 3], w: f32) {
         self.fill.add_box(m, half, color);
         if w > 0.0 {
-            self.outline.add_box_ex(m, half + Vec3::splat(w), OUTLINE, 255, true);
+            self.outline
+                .add_box_ex(m, half + Vec3::splat(w), OUTLINE, 255, true);
         }
     }
     pub fn sphere(&mut self, m: &Mat4, r: f32, color: [u8; 3], w: f32) {
         self.fill.add_sphere(m, r, color, 10, 7);
         if w > 0.0 {
-            self.outline.add_sphere_ex(m, r + w, OUTLINE, 10, 7, 255, true);
+            self.outline
+                .add_sphere_ex(m, r + w, OUTLINE, 10, 7, 255, true);
         }
     }
 }
@@ -240,7 +337,10 @@ fn mat(cull: CullFace, depth_write: bool) -> Material {
         BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
     ));
     load_material(
-        ShaderSource::Glsl { vertex: VS, fragment: FS },
+        ShaderSource::Glsl {
+            vertex: VS,
+            fragment: FS,
+        },
         MaterialParams {
             pipeline_params: PipelineParams {
                 cull_face: cull,
@@ -291,5 +391,8 @@ impl Materials {
 
 /// Model matrix helper: translation * yaw * pitch * roll.
 pub fn trs(t: Vec3, yaw: f32, pitch: f32, roll: f32) -> Mat4 {
-    Mat4::from_translation(t) * Mat4::from_rotation_y(yaw) * Mat4::from_rotation_x(pitch) * Mat4::from_rotation_z(roll)
+    Mat4::from_translation(t)
+        * Mat4::from_rotation_y(yaw)
+        * Mat4::from_rotation_x(pitch)
+        * Mat4::from_rotation_z(roll)
 }

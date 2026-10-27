@@ -48,7 +48,12 @@ struct Args {
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { shot_after: 6.0, width: 1280, height: 720, ..Default::default() };
+    let mut a = Args {
+        shot_after: 6.0,
+        width: 1280,
+        height: 720,
+        ..Default::default()
+    };
     let v: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < v.len() {
@@ -139,7 +144,11 @@ fn parse_args() -> Args {
 
 enum Screen {
     Menu,
-    Connecting { net: NetClient, address: String, since: Instant },
+    Connecting {
+        net: NetClient,
+        address: String,
+        since: Instant,
+    },
     Game(Box<GameClient>),
 }
 
@@ -212,7 +221,13 @@ fn draw_backdrop(b: &Backdrop, mats: &mesh::Materials) {
     mats.set_view(pos, fog, 70.0, 260.0);
     mats.draw_toon(&b.mesh);
     set_default_camera();
-    draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.05, 0.06, 0.1, 0.35));
+    draw_rectangle(
+        0.0,
+        0.0,
+        screen_width(),
+        screen_height(),
+        Color::new(0.05, 0.06, 0.1, 0.35),
+    );
 }
 
 async fn amain(args: Args) {
@@ -228,7 +243,11 @@ async fn amain(args: Args) {
     let audio = audio::Audio::load(settings.volume, !args.no_sound).await;
     let backdrop = {
         let map = toon_shared::maps::build(MapId::Market);
-        Backdrop { mesh: game::build_map_mesh(&map), sky: game::build_sky(&map), map }
+        Backdrop {
+            mesh: game::build_map_mesh(&map),
+            sky: game::build_sky(&map),
+            map,
+        }
     };
     let mut menu = MenuState::new();
     let mut screen = Screen::Menu;
@@ -257,7 +276,8 @@ async fn amain(args: Args) {
         let map = args.map.clone().unwrap_or(hs.map.clone());
         let mode = args.mode.clone().unwrap_or(hs.mode.clone());
         cfg.rotation.retain(|r| !(r.map == map && r.mode == mode));
-        cfg.rotation.insert(0, toon_server::config::RotationEntry { map, mode });
+        cfg.rotation
+            .insert(0, toon_server::config::RotationEntry { map, mode });
         toon_server::start(cfg, None)
     };
 
@@ -266,8 +286,18 @@ async fn amain(args: Args) {
             Ok(h) => {
                 let port = h.port;
                 server = Some(h);
-                match NetClient::connect(&format!("127.0.0.1:{port}"), &settings.name, &settings.host.password) {
-                    Ok(net) => screen = Screen::Connecting { net, address: format!("127.0.0.1:{port}"), since: Instant::now() },
+                match NetClient::connect(
+                    &format!("127.0.0.1:{port}"),
+                    &settings.name,
+                    &settings.host.password,
+                ) {
+                    Ok(net) => {
+                        screen = Screen::Connecting {
+                            net,
+                            address: format!("127.0.0.1:{port}"),
+                            since: Instant::now(),
+                        }
+                    }
                     Err(e) => menu.error = Some(e),
                 }
             }
@@ -275,7 +305,13 @@ async fn amain(args: Args) {
         }
     } else if let Some(addr) = &args.connect {
         match NetClient::connect(addr, &settings.name, &settings.password) {
-            Ok(net) => screen = Screen::Connecting { net, address: addr.clone(), since: Instant::now() },
+            Ok(net) => {
+                screen = Screen::Connecting {
+                    net,
+                    address: addr.clone(),
+                    since: Instant::now(),
+                }
+            }
             Err(e) => menu.error = Some(e),
         }
     }
@@ -308,14 +344,30 @@ async fn amain(args: Args) {
                     grabbed = false;
                 }
                 draw_backdrop(&backdrop, &mats);
-                let mut ui = ui::Ui { fonts: &fonts, mouse: vec2(mx, my), clicked: is_mouse_button_pressed(MouseButton::Left), down: is_mouse_button_down(MouseButton::Left), focus: &mut focus, chars: &chars, backspace, enter, hot: false };
+                let mut ui = ui::Ui {
+                    fonts: &fonts,
+                    mouse: vec2(mx, my),
+                    clicked: is_mouse_button_pressed(MouseButton::Left),
+                    down: is_mouse_button_down(MouseButton::Left),
+                    focus: &mut focus,
+                    chars: &chars,
+                    backspace,
+                    enter,
+                    hot: false,
+                };
                 let running = server.as_ref().filter(|s| s.is_running()).map(|s| s.port);
                 match menu::draw_menu(&mut ui, &mut menu, &mut settings, running) {
                     Some(MenuAction::Connect { address }) => {
                         menu.error = None;
                         settings.save();
                         match NetClient::connect(&address, &settings.name, &settings.password) {
-                            Ok(net) => next = Some(Screen::Connecting { net, address, since: Instant::now() }),
+                            Ok(net) => {
+                                next = Some(Screen::Connecting {
+                                    net,
+                                    address,
+                                    since: Instant::now(),
+                                })
+                            }
                             Err(e) => menu.error = Some(e),
                         }
                     }
@@ -329,12 +381,26 @@ async fn amain(args: Args) {
                                 let port = h.port;
                                 menu.host_info = Some(format!(
                                     "Сервер запущено на порту {port}{}",
-                                    if h.http_port.is_some() { format!(" · адмінка: http://localhost:{port}/admin") } else { String::new() }
+                                    if h.http_port.is_some() {
+                                        format!(" · адмінка: http://localhost:{port}/admin")
+                                    } else {
+                                        String::new()
+                                    }
                                 ));
                                 server = Some(h);
                                 let addr = format!("127.0.0.1:{port}");
-                                match NetClient::connect(&addr, &settings.name, &settings.host.password) {
-                                    Ok(net) => next = Some(Screen::Connecting { net, address: addr, since: Instant::now() }),
+                                match NetClient::connect(
+                                    &addr,
+                                    &settings.name,
+                                    &settings.host.password,
+                                ) {
+                                    Ok(net) => {
+                                        next = Some(Screen::Connecting {
+                                            net,
+                                            address: addr,
+                                            since: Instant::now(),
+                                        })
+                                    }
                                     Err(e) => menu.error = Some(e),
                                 }
                             }
@@ -354,20 +420,60 @@ async fn amain(args: Args) {
                     None => {}
                 }
             }
-            Screen::Connecting { net, address, since } => {
+            Screen::Connecting {
+                net,
+                address,
+                since,
+            } => {
                 draw_backdrop(&backdrop, &mats);
-                let ui = ui::Ui { fonts: &fonts, mouse: vec2(mx, my), clicked: false, down: false, focus: &mut focus, chars: &[], backspace: false, enter: false, hot: false };
+                let ui = ui::Ui {
+                    fonts: &fonts,
+                    mouse: vec2(mx, my),
+                    clicked: false,
+                    down: false,
+                    focus: &mut focus,
+                    chars: &[],
+                    backspace: false,
+                    enter: false,
+                    hot: false,
+                };
                 let dots = ".".repeat(((get_time() * 3.0) as usize) % 4);
-                ui.centered(&format!("Під'єднання до {address}{dots}"), screen_width() / 2.0, screen_height() / 2.0, 28, ui::ACCENT);
-                ui.centered("Esc — скасувати", screen_width() / 2.0, screen_height() / 2.0 + 36.0, 16, ui::MUTED);
+                ui.centered(
+                    &format!("Під'єднання до {address}{dots}"),
+                    screen_width() / 2.0,
+                    screen_height() / 2.0,
+                    28,
+                    ui::ACCENT,
+                );
+                ui.centered(
+                    "Esc — скасувати",
+                    screen_width() / 2.0,
+                    screen_height() / 2.0 + 36.0,
+                    16,
+                    ui::MUTED,
+                );
                 net.maybe_flush(0.1);
                 let msgs = net.poll();
                 let mut welcome = None;
                 let mut rest = Vec::new();
                 for m in msgs {
                     match m {
-                        S2C::Welcome { id, server_name, motd, map, mode, settings: gs } if welcome.is_none() => {
-                            welcome = Some(Welcome { id, server_name, motd, map, mode, settings: gs });
+                        S2C::Welcome {
+                            id,
+                            server_name,
+                            motd,
+                            map,
+                            mode,
+                            settings: gs,
+                        } if welcome.is_none() => {
+                            welcome = Some(Welcome {
+                                id,
+                                server_name,
+                                motd,
+                                map,
+                                mode,
+                                settings: gs,
+                            });
                         }
                         S2C::Reject(r) => {
                             menu.error = Some(r);
@@ -379,7 +485,10 @@ async fn amain(args: Args) {
                 if let Some(w) = welcome {
                     settings.remember_server(address);
                     settings.save();
-                    let net = std::mem::replace(net, NetClient::connect("127.0.0.1:1", "", "").expect("dummy socket"));
+                    let net = std::mem::replace(
+                        net,
+                        NetClient::connect("127.0.0.1:1", "", "").expect("dummy socket"),
+                    );
                     let mut g = GameClient::new(net, w, &settings, rest);
                     if let Some((y, p)) = args.look {
                         g.yaw = y;
@@ -390,7 +499,9 @@ async fn amain(args: Args) {
                     }
                     next = Some(Screen::Game(Box::new(g)));
                 } else if since.elapsed().as_secs_f32() > 8.0 {
-                    menu.error = Some(format!("Сервер {address} не відповідає. Перевір адресу і чи відкрито UDP-порт."));
+                    menu.error = Some(format!(
+                        "Сервер {address} не відповідає. Перевір адресу і чи відкрито UDP-порт."
+                    ));
                     next = Some(Screen::Menu);
                 } else if is_key_pressed(KeyCode::Escape) {
                     next = Some(Screen::Menu);
@@ -431,7 +542,9 @@ async fn amain(args: Args) {
                         g.overlay = match g.overlay {
                             Overlay::Edit(_) => Overlay::Class,
                             Overlay::Settings => Overlay::Pause,
-                            Overlay::Team if g.team == Team::Spectator && !g.has_class => Overlay::Team,
+                            Overlay::Team if g.team == Team::Spectator && !g.has_class => {
+                                Overlay::Team
+                            }
                             Overlay::Class if !g.has_class => Overlay::Team,
                             _ => Overlay::None,
                         };
@@ -447,7 +560,11 @@ async fn amain(args: Args) {
                 }
                 let md = mouse_delta_position();
                 let pixel = vec2(-md.x * screen_width() * 0.5, -md.y * screen_height() * 0.5);
-                g.mouse_delta = if grabbed { pixel.clamp(Vec2::splat(-400.0), Vec2::splat(400.0)) } else { Vec2::ZERO };
+                g.mouse_delta = if grabbed {
+                    pixel.clamp(Vec2::splat(-400.0), Vec2::splat(400.0))
+                } else {
+                    Vec2::ZERO
+                };
 
                 // ---- test automation (screenshots / smoke tests)
                 if args.auto && !auto_done && get_time() - start > 1.0 {
@@ -470,9 +587,25 @@ async fn amain(args: Args) {
                 // optional low-resolution 3D for weak GPUs
                 let scale = settings.render_scale.clamp(0.4, 1.0);
                 let target = if scale < 0.99 {
-                    let (tw, th) = ((screen_width() * scale).max(64.0) as u32, (screen_height() * scale).max(64.0) as u32);
-                    if low_res.as_ref().map(|t: &RenderTarget| (t.texture.width() as u32, t.texture.height() as u32) != (tw, th)).unwrap_or(true) {
-                        let rt = render_target_ex(tw, th, RenderTargetParams { sample_count: 1, depth: true });
+                    let (tw, th) = (
+                        (screen_width() * scale).max(64.0) as u32,
+                        (screen_height() * scale).max(64.0) as u32,
+                    );
+                    if low_res
+                        .as_ref()
+                        .map(|t: &RenderTarget| {
+                            (t.texture.width() as u32, t.texture.height() as u32) != (tw, th)
+                        })
+                        .unwrap_or(true)
+                    {
+                        let rt = render_target_ex(
+                            tw,
+                            th,
+                            RenderTargetParams {
+                                sample_count: 1,
+                                depth: true,
+                            },
+                        );
                         rt.texture.set_filter(FilterMode::Linear);
                         low_res = Some(rt);
                     }
@@ -487,10 +620,32 @@ async fn amain(args: Args) {
                 set_default_camera();
                 if let Some(rt) = &target {
                     clear_background(BLACK);
-                    draw_texture_ex(&rt.texture, 0.0, 0.0, WHITE, DrawTextureParams { dest_size: Some(vec2(screen_width(), screen_height())), flip_y: true, ..Default::default() });
+                    draw_texture_ex(
+                        &rt.texture,
+                        0.0,
+                        0.0,
+                        WHITE,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(screen_width(), screen_height())),
+                            flip_y: true,
+                            ..Default::default()
+                        },
+                    );
                 }
-                let mut ui = ui::Ui { fonts: &fonts, mouse: vec2(mx, my), clicked: is_mouse_button_pressed(MouseButton::Left), down: is_mouse_button_down(MouseButton::Left), focus: &mut focus, chars: &chars_for_ui, backspace, enter, hot: false };
-                if let Some(hud::HudAction::Leave) = g.draw_hud(&mut ui, &view, &tags, &mut settings, fps) {
+                let mut ui = ui::Ui {
+                    fonts: &fonts,
+                    mouse: vec2(mx, my),
+                    clicked: is_mouse_button_pressed(MouseButton::Left),
+                    down: is_mouse_button_down(MouseButton::Left),
+                    focus: &mut focus,
+                    chars: &chars_for_ui,
+                    backspace,
+                    enter,
+                    hot: false,
+                };
+                if let Some(hud::HudAction::Leave) =
+                    g.draw_hud(&mut ui, &view, &tags, &mut settings, fps)
+                {
                     g.disconnect();
                     next = Some(Screen::Menu);
                 }
@@ -537,7 +692,10 @@ async fn amain(args: Args) {
         if args.log_fps {
             fps_window.1 += 1;
             if fps_window.0.elapsed().as_secs_f32() >= 1.0 {
-                println!("fps {:.0}", fps_window.1 as f32 / fps_window.0.elapsed().as_secs_f32());
+                println!(
+                    "fps {:.0}",
+                    fps_window.1 as f32 / fps_window.0.elapsed().as_secs_f32()
+                );
                 fps_window = (std::time::Instant::now(), 0);
             }
         }

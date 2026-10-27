@@ -1,6 +1,8 @@
 //! Procedurally synthesized sound effects (no asset files needed).
 
-use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, stop_sound, PlaySoundParams, Sound};
+use macroquad::audio::{
+    load_sound_from_bytes, play_sound, set_sound_volume, stop_sound, PlaySoundParams, Sound,
+};
 use macroquad::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -89,7 +91,8 @@ impl Synth {
             let env = (-t * decay).exp();
             lp += (self.noise() - lp) * a;
             let crack = if t < 0.004 { self.noise() } else { 0.0 };
-            let th = (t * thump * std::f32::consts::TAU * (1.0 - t * 2.0).max(0.3)).sin() * (-t * decay * 0.6).exp();
+            let th = (t * thump * std::f32::consts::TAU * (1.0 - t * 2.0).max(0.3)).sin()
+                * (-t * decay * 0.6).exp();
             *s = (lp * 1.6 * env + crack * 0.6 + th * 0.8) * gain;
         }
         b
@@ -99,7 +102,11 @@ impl Synth {
         let (mut lp, mut lp2) = (0.0f32, 0.0f32);
         for (i, s) in b.iter_mut().enumerate() {
             let t = i as f32 / RATE as f32;
-            let env = if t < 0.02 { t / 0.02 } else { (-(t - 0.02) * 2.6).exp() };
+            let env = if t < 0.02 {
+                t / 0.02
+            } else {
+                (-(t - 0.02) * 2.6).exp()
+            };
             lp += (self.noise() - lp) * 0.08;
             lp2 += (lp - lp2) * 0.2;
             let rumble = (t * std::f32::consts::TAU * (55.0 - t * 20.0)).sin() * (-t * 2.0).exp();
@@ -157,7 +164,10 @@ impl Synth {
         let mut lp = 0.0;
         for (i, s) in b.iter_mut().enumerate() {
             let t = i as f32 / RATE as f32;
-            let blade = ((t * 10.0).fract() * std::f32::consts::TAU).cos().max(0.0).powi(6);
+            let blade = ((t * 10.0).fract() * std::f32::consts::TAU)
+                .cos()
+                .max(0.0)
+                .powi(6);
             lp += (self.noise() - lp) * 0.06;
             *s = lp * (0.25 + blade * 1.5) + (t * 70.0 * std::f32::consts::TAU).sin() * 0.15;
         }
@@ -196,14 +206,29 @@ impl Audio {
                 (Sfx::Heli, s.heli()),
             ];
             let mut kill = s.tone(0.12, 1320.0, 1320.0, 20.0, false);
-            Synth::mix(&mut kill, &s.tone(0.18, 1760.0, 1760.0, 14.0, false), 0.07, 1.0);
+            Synth::mix(
+                &mut kill,
+                &s.tone(0.18, 1760.0, 1760.0, 14.0, false),
+                0.07,
+                1.0,
+            );
             list.push((Sfx::Kill, kill));
             let mut reload = s.tone(0.05, 600.0, 400.0, 60.0, true);
-            Synth::mix(&mut reload, &s.tone(0.06, 900.0, 700.0, 60.0, true), 0.22, 1.0);
+            Synth::mix(
+                &mut reload,
+                &s.tone(0.06, 900.0, 700.0, 60.0, true),
+                0.22,
+                1.0,
+            );
             list.push((Sfx::Reload, reload));
             let mut streak = Vec::new();
             for (k, f) in [523.0f32, 659.0, 784.0, 1046.0].iter().enumerate() {
-                Synth::mix(&mut streak, &s.tone(0.25, *f, *f, 8.0, true), k as f32 * 0.09, 0.6);
+                Synth::mix(
+                    &mut streak,
+                    &s.tone(0.25, *f, *f, 8.0, true),
+                    k as f32 * 0.09,
+                    0.6,
+                );
             }
             list.push((Sfx::Streak, streak));
             let mut bomb = s.tone(0.3, 330.0, 330.0, 6.0, true);
@@ -215,7 +240,12 @@ impl Audio {
                 }
             }
         }
-        Audio { sounds, volume, last: RefCell::new(HashMap::new()), heli_on: RefCell::new(false) }
+        Audio {
+            sounds,
+            volume,
+            last: RefCell::new(HashMap::new()),
+            heli_on: RefCell::new(false),
+        }
     }
 
     pub fn play(&self, s: Sfx, vol: f32) {
@@ -232,7 +262,13 @@ impl Audio {
             *l = now;
         }
         if let Some(snd) = self.sounds.get(&s) {
-            play_sound(snd, PlaySoundParams { looped: false, volume: (vol * self.volume).min(1.0) });
+            play_sound(
+                snd,
+                PlaySoundParams {
+                    looped: false,
+                    volume: (vol * self.volume).min(1.0),
+                },
+            );
         }
     }
 
@@ -245,13 +281,21 @@ impl Audio {
 
     /// Helicopter rotor loop with distance-based volume (None = stop).
     pub fn heli(&self, dist: Option<f32>) {
-        let Some(snd) = self.sounds.get(&Sfx::Heli) else { return };
+        let Some(snd) = self.sounds.get(&Sfx::Heli) else {
+            return;
+        };
         let mut on = self.heli_on.borrow_mut();
         match dist {
             Some(d) => {
                 let v = ((1.0 - d / 90.0).clamp(0.05, 1.0) * self.volume * 0.7).min(1.0);
                 if !*on {
-                    play_sound(snd, PlaySoundParams { looped: true, volume: v });
+                    play_sound(
+                        snd,
+                        PlaySoundParams {
+                            looped: true,
+                            volume: v,
+                        },
+                    );
                     *on = true;
                 } else {
                     set_sound_volume(snd, v);

@@ -37,28 +37,69 @@ pub fn lan_ip() -> Option<String> {
 
 impl MenuState {
     pub fn new() -> MenuState {
-        MenuState { page: Page::Main, browser: Browser::new(), error: None, host_info: None, lan_ip: lan_ip() }
+        MenuState {
+            page: Page::Main,
+            browser: Browser::new(),
+            error: None,
+            host_info: None,
+            lan_ip: lan_ip(),
+        }
     }
 }
 
 /// Settings controls shared by the main menu and the in-game pause menu.
 pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
     s.sensitivity = ui.slider("Чутливість миші", s.sensitivity, 0.2, 8.0, x, y, w, "{}");
-    s.fov = ui.slider("Поле зору (FOV)", s.fov, 65.0, 110.0, x, y + 56.0, w, "{}°").round();
+    s.fov = ui
+        .slider("Поле зору (FOV)", s.fov, 65.0, 110.0, x, y + 56.0, w, "{}°")
+        .round();
     s.volume = ui.slider("Гучність", s.volume, 0.0, 1.0, x, y + 112.0, w, "{}");
     ui.toggle("Інвертувати Y", &mut s.invert_y, x, y + 150.0);
     ui.toggle("Показувати FPS і пінг", &mut s.show_fps, x, y + 186.0);
-    ui.toggle("Мультяшні контури (вимкни на дуже слабких ПК)", &mut s.outlines, x, y + 222.0);
-    s.render_scale = (ui.slider("Масштаб рендеру (менше = швидше)", s.render_scale * 100.0, 40.0, 100.0, x, y + 280.0, w, "{}%") / 5.0).round() * 5.0 / 100.0;
+    ui.toggle(
+        "Мультяшні контури (вимкни на дуже слабких ПК)",
+        &mut s.outlines,
+        x,
+        y + 222.0,
+    );
+    s.render_scale = (ui.slider(
+        "Масштаб рендеру (менше = швидше)",
+        s.render_scale * 100.0,
+        40.0,
+        100.0,
+        x,
+        y + 280.0,
+        w,
+        "{}%",
+    ) / 5.0)
+        .round()
+        * 5.0
+        / 100.0;
     let was = s.vsync;
-    ui.toggle("Вертикальна синхронізація (FPS = частота монітора)", &mut s.vsync, x, y + 318.0);
-    if s.vsync != was || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed) {
-        ui.text("Зміниться після перезапуску гри", x + 36.0, y + 362.0, 14, ACCENT);
+    ui.toggle(
+        "Вертикальна синхронізація (FPS = частота монітора)",
+        &mut s.vsync,
+        x,
+        y + 318.0,
+    );
+    if s.vsync != was || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        ui.text(
+            "Зміниться після перезапуску гри",
+            x + 36.0,
+            y + 362.0,
+            14,
+            ACCENT,
+        );
     }
     if !s.vsync {
         const LIMITS: [u32; 6] = [60, 120, 144, 165, 240, 0];
         let i = LIMITS.iter().position(|l| *l == s.fps_limit).unwrap_or(2);
-        let label = if s.fps_limit == 0 { "без обмеження".to_string() } else { format!("{} FPS", s.fps_limit) };
+        let label = if s.fps_limit == 0 {
+            "без обмеження".to_string()
+        } else {
+            format!("{} FPS", s.fps_limit)
+        };
         let d = ui.stepper("Обмеження FPS", &label, x + w - 260.0, y + 390.0, 260.0);
         if d != 0 {
             s.fps_limit = LIMITS[((i as i32 + d).rem_euclid(LIMITS.len() as i32)) as usize];
@@ -66,12 +107,23 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
     }
 }
 
-pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_running: Option<u16>) -> Option<MenuAction> {
+pub fn draw_menu(
+    ui: &mut Ui,
+    st: &mut MenuState,
+    s: &mut Settings,
+    server_running: Option<u16>,
+) -> Option<MenuAction> {
     let (w, h) = (screen_width(), screen_height());
     // title
     let title = "TOON WARFARE";
     let tw = ui.width(title, 64, true);
-    ui.bold(title, (w - tw) / 2.0 + 5.0, 98.0, 64, Color::new(0.0, 0.0, 0.0, 0.6));
+    ui.bold(
+        title,
+        (w - tw) / 2.0 + 5.0,
+        98.0,
+        64,
+        Color::new(0.0, 0.0, 0.0, 0.6),
+    );
     ui.bold(title, (w - tw) / 2.0, 92.0, 64, ACCENT);
     ui.centered("мультяшний мультиплеєрний шутер", w / 2.0, 124.0, 20, TEXT);
 
@@ -82,11 +134,40 @@ pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_runni
     match st.page {
         Page::Main => {
             ui.panel(x, y, pw, 470.0);
-            ui.field(1, "Твоє ім'я", &mut s.name, x + 24.0, y + 40.0, pw - 48.0, false, 20);
-            let enter = ui.field(2, "Адреса сервера (IP:порт)", &mut s.address, x + 24.0, y + 110.0, pw - 48.0, false, 64);
-            ui.field(3, "Пароль сервера (якщо є)", &mut s.password, x + 24.0, y + 180.0, pw - 48.0, true, 32);
+            ui.field(
+                1,
+                "Твоє ім'я",
+                &mut s.name,
+                x + 24.0,
+                y + 40.0,
+                pw - 48.0,
+                false,
+                20,
+            );
+            let enter = ui.field(
+                2,
+                "Адреса сервера (IP:порт)",
+                &mut s.address,
+                x + 24.0,
+                y + 110.0,
+                pw - 48.0,
+                false,
+                64,
+            );
+            ui.field(
+                3,
+                "Пароль сервера (якщо є)",
+                &mut s.password,
+                x + 24.0,
+                y + 180.0,
+                pw - 48.0,
+                true,
+                32,
+            );
             if ui.button("ПІД'ЄДНАТИСЯ", x + 24.0, y + 232.0, pw - 48.0, 54.0) || enter {
-                action = Some(MenuAction::Connect { address: s.address.clone() });
+                action = Some(MenuAction::Connect {
+                    address: s.address.clone(),
+                });
             }
             let bw = (pw - 60.0) / 2.0;
             if ui.button2("Створити сервер", x + 24.0, y + 300.0, bw, 46.0) {
@@ -105,30 +186,73 @@ pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_runni
             }
             if let Some(port) = server_running {
                 let ip = st.lan_ip.clone().unwrap_or_else(|| "твій-IP".into());
-                ui.text(&format!("Твій сервер працює: {ip}:{port}"), x + 24.0, y + 428.0, 16, GOOD);
-                if ui.button_colored("Зупинити", x + pw - 130.0, y + 410.0, 106.0, 30.0, BAD) {
+                ui.text(
+                    &format!("Твій сервер працює: {ip}:{port}"),
+                    x + 24.0,
+                    y + 428.0,
+                    16,
+                    GOOD,
+                );
+                if ui.button_colored("Зупинити", x + pw - 130.0, y + 410.0, 106.0, 30.0, BAD)
+                {
                     action = Some(MenuAction::StopServer);
                 }
-                if ui.button2("Грати на ньому", x + pw - 290.0, y + 410.0, 150.0, 30.0) {
-                    action = Some(MenuAction::Connect { address: format!("127.0.0.1:{port}") });
+                if ui.button2("Грати на ньому", x + pw - 290.0, y + 410.0, 150.0, 30.0)
+                {
+                    action = Some(MenuAction::Connect {
+                        address: format!("127.0.0.1:{port}"),
+                    });
                 }
             } else {
-                ui.text("Порада: створи сервер — друзі під'єднаються за твоїм IP.", x + 24.0, y + 440.0, 15, MUTED);
+                ui.text(
+                    "Порада: створи сервер — друзі під'єднаються за твоїм IP.",
+                    x + 24.0,
+                    y + 440.0,
+                    15,
+                    MUTED,
+                );
             }
         }
         Page::Host => {
             ui.panel(x, y, pw, 560.0);
             ui.bold("Створити сервер", x + 24.0, y + 40.0, 26, ACCENT);
             let hs = &mut s.host;
-            ui.field(10, "Назва сервера", &mut hs.name, x + 24.0, y + 86.0, pw - 48.0, false, 40);
+            ui.field(
+                10,
+                "Назва сервера",
+                &mut hs.name,
+                x + 24.0,
+                y + 86.0,
+                pw - 48.0,
+                false,
+                40,
+            );
             let mut port = hs.port.to_string();
-            ui.field(11, "Порт (UDP для гри, TCP для веб-адмінки)", &mut port, x + 24.0, y + 150.0, 200.0, false, 5);
+            ui.field(
+                11,
+                "Порт (UDP для гри, TCP для веб-адмінки)",
+                &mut port,
+                x + 24.0,
+                y + 150.0,
+                200.0,
+                false,
+                5,
+            );
             if let Ok(p) = port.parse::<u16>() {
                 hs.port = p;
             } else if port.is_empty() {
                 hs.port = 0;
             }
-            ui.field(12, "RCON-пароль (адмінка)", &mut hs.rcon, x + 250.0, y + 150.0, pw - 274.0, true, 32);
+            ui.field(
+                12,
+                "RCON-пароль (адмінка)",
+                &mut hs.rcon,
+                x + 250.0,
+                y + 150.0,
+                pw - 274.0,
+                true,
+                32,
+            );
             let modes = ["tdm", "sab"];
             let mi = modes.iter().position(|m| *m == hs.mode).unwrap_or(0);
             let mode_name = toon_shared::Mode::parse(modes[mi]).unwrap().name();
@@ -139,15 +263,66 @@ pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_runni
             let maps = MapId::ALL;
             let cur = MapId::parse(&hs.map).unwrap_or(MapId::Depot);
             let ci = maps.iter().position(|m| *m == cur).unwrap_or(0);
-            let d = ui.stepper("Карта", toon_shared::maps::build(cur).name, x + 36.0 + (pw - 60.0) / 2.0, y + 214.0, (pw - 60.0) / 2.0);
+            let d = ui.stepper(
+                "Карта",
+                toon_shared::maps::build(cur).name,
+                x + 36.0 + (pw - 60.0) / 2.0,
+                y + 214.0,
+                (pw - 60.0) / 2.0,
+            );
             if d != 0 {
-                hs.map = maps[((ci as i32 + d).rem_euclid(maps.len() as i32)) as usize].short().into();
+                hs.map = maps[((ci as i32 + d).rem_euclid(maps.len() as i32)) as usize]
+                    .short()
+                    .into();
             }
-            hs.bots = ui.slider("Боти (заповнення до)", hs.bots as f32, 0.0, 16.0, x + 24.0, y + 280.0, pw - 48.0, "{}").round() as usize;
-            let skill_label = format!("Складність ботів ({})", toon_server::bots::skill_name(hs.bot_skill));
-            hs.bot_skill = ui.slider(&skill_label, hs.bot_skill, 0.0, 1.0, x + 24.0, y + 330.0, pw - 48.0, "{}");
-            hs.max_players = ui.slider("Макс. гравців", hs.max_players as f32, 2.0, 24.0, x + 24.0, y + 380.0, pw - 48.0, "{}").round() as usize;
-            ui.field(13, "Пароль для входу (порожньо = відкритий)", &mut hs.password, x + 24.0, y + 430.0, pw - 48.0, true, 32);
+            hs.bots = ui
+                .slider(
+                    "Боти (заповнення до)",
+                    hs.bots as f32,
+                    0.0,
+                    16.0,
+                    x + 24.0,
+                    y + 280.0,
+                    pw - 48.0,
+                    "{}",
+                )
+                .round() as usize;
+            let skill_label = format!(
+                "Складність ботів ({})",
+                toon_server::bots::skill_name(hs.bot_skill)
+            );
+            hs.bot_skill = ui.slider(
+                &skill_label,
+                hs.bot_skill,
+                0.0,
+                1.0,
+                x + 24.0,
+                y + 330.0,
+                pw - 48.0,
+                "{}",
+            );
+            hs.max_players = ui
+                .slider(
+                    "Макс. гравців",
+                    hs.max_players as f32,
+                    2.0,
+                    24.0,
+                    x + 24.0,
+                    y + 380.0,
+                    pw - 48.0,
+                    "{}",
+                )
+                .round() as usize;
+            ui.field(
+                13,
+                "Пароль для входу (порожньо = відкритий)",
+                &mut hs.password,
+                x + 24.0,
+                y + 430.0,
+                pw - 48.0,
+                true,
+                32,
+            );
             if ui.button("ЗАПУСТИТИ", x + pw - 220.0, y + 490.0, 196.0, 50.0) {
                 action = Some(MenuAction::Host);
             }
@@ -160,11 +335,23 @@ pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_runni
             let x = x - 100.0;
             let pw = pw + 200.0;
             ui.bold("Сервери", x + 24.0, y + 40.0, 26, ACCENT);
-            ui.text("Локальна мережа + нещодавні", x + 150.0, y + 40.0, 15, MUTED);
+            ui.text(
+                "Локальна мережа + нещодавні",
+                x + 150.0,
+                y + 40.0,
+                15,
+                MUTED,
+            );
             st.browser.poll();
             let results: Vec<ServerInfo> = st.browser.results.clone();
             if results.is_empty() {
-                ui.text("Шукаю… (переконайся, що сервер запущено і порт відкрито)", x + 24.0, y + 90.0, 16, MUTED);
+                ui.text(
+                    "Шукаю… (переконайся, що сервер запущено і порт відкрито)",
+                    x + 24.0,
+                    y + 90.0,
+                    16,
+                    MUTED,
+                );
             }
             for (i, r) in results.iter().take(7).enumerate() {
                 let ry = y + 64.0 + i as f32 * 48.0;
@@ -204,12 +391,28 @@ pub fn draw_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, server_runni
     }
     if let Some(e) = &st.error {
         let ew = ui.width(e, 18, true) + 40.0;
-        draw_rectangle((w - ew) / 2.0, h - 70.0, ew, 40.0, Color::new(0.5, 0.08, 0.08, 0.9));
+        draw_rectangle(
+            (w - ew) / 2.0,
+            h - 70.0,
+            ew,
+            40.0,
+            Color::new(0.5, 0.08, 0.08, 0.9),
+        );
         ui.centered(e, w / 2.0, h - 43.0, 18, TEXT);
     }
     if let Some(i) = &st.host_info {
         ui.centered(i, w / 2.0, h - 90.0, 16, GOOD);
     }
-    ui.text(&format!("v{}  ·  протокол {}", env!("CARGO_PKG_VERSION"), toon_shared::consts::PROTOCOL_VERSION), 10.0, h - 10.0, 14, MUTED);
+    ui.text(
+        &format!(
+            "v{}  ·  протокол {}",
+            env!("CARGO_PKG_VERSION"),
+            toon_shared::consts::PROTOCOL_VERSION
+        ),
+        10.0,
+        h - 10.0,
+        14,
+        MUTED,
+    );
     action
 }

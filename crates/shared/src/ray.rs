@@ -54,25 +54,60 @@ impl HitZone {
 pub fn hitboxes(stance: Stance) -> [(HitZone, Vec3, Vec3); 3] {
     match stance {
         Stance::Stand => [
-            (HitZone::Head, vec3(-0.29, 1.34, -0.29), vec3(0.29, 1.92, 0.29)),
-            (HitZone::Torso, vec3(-0.32, 0.8, -0.22), vec3(0.32, 1.36, 0.22)),
-            (HitZone::Legs, vec3(-0.26, 0.0, -0.16), vec3(0.26, 0.8, 0.16)),
+            (
+                HitZone::Head,
+                vec3(-0.29, 1.34, -0.29),
+                vec3(0.29, 1.92, 0.29),
+            ),
+            (
+                HitZone::Torso,
+                vec3(-0.32, 0.8, -0.22),
+                vec3(0.32, 1.36, 0.22),
+            ),
+            (
+                HitZone::Legs,
+                vec3(-0.26, 0.0, -0.16),
+                vec3(0.26, 0.8, 0.16),
+            ),
         ],
         Stance::Crouch => [
-            (HitZone::Head, vec3(-0.29, 0.76, -0.33), vec3(0.29, 1.33, 0.25)),
-            (HitZone::Torso, vec3(-0.32, 0.4, -0.25), vec3(0.32, 0.86, 0.25)),
+            (
+                HitZone::Head,
+                vec3(-0.29, 0.76, -0.33),
+                vec3(0.29, 1.33, 0.25),
+            ),
+            (
+                HitZone::Torso,
+                vec3(-0.32, 0.4, -0.25),
+                vec3(0.32, 0.86, 0.25),
+            ),
             (HitZone::Legs, vec3(-0.3, 0.0, -0.35), vec3(0.3, 0.45, 0.25)),
         ],
         Stance::Prone => [
-            (HitZone::Head, vec3(-0.29, 0.0, -1.05), vec3(0.29, 0.6, -0.47)),
-            (HitZone::Torso, vec3(-0.32, 0.0, -0.5), vec3(0.32, 0.42, 0.2)),
+            (
+                HitZone::Head,
+                vec3(-0.29, 0.0, -1.05),
+                vec3(0.29, 0.6, -0.47),
+            ),
+            (
+                HitZone::Torso,
+                vec3(-0.32, 0.0, -0.5),
+                vec3(0.32, 0.42, 0.2),
+            ),
             (HitZone::Legs, vec3(-0.28, 0.0, 0.2), vec3(0.28, 0.3, 1.0)),
         ],
     }
 }
 
 /// Ray vs a player's hitboxes. Returns the closest (distance, zone).
-pub fn ray_player(o: Vec3, d: Vec3, pos: Vec3, yaw: f32, stance: Stance, max_dist: f32) -> Option<(f32, HitZone)> {
+pub fn ray_player(
+    o: Vec3,
+    d: Vec3,
+    pos: Vec3,
+    yaw: f32,
+    stance: Stance,
+    max_dist: f32,
+) -> Option<(f32, HitZone)> {
     let inv_rot = Quat::from_rotation_y(-yaw);
     let lo = inv_rot * (o - pos);
     let ld = inv_rot * d;
@@ -126,23 +161,67 @@ mod tests {
     fn aabb_hit() {
         let d = vec3(1.0, 0.0, 0.0);
         let inv = vec3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z);
-        let (t, n) = ray_aabb(vec3(0.0, 0.5, 0.5), inv, vec3(2.0, 0.0, 0.0), vec3(3.0, 1.0, 1.0)).unwrap();
+        let (t, n) = ray_aabb(
+            vec3(0.0, 0.5, 0.5),
+            inv,
+            vec3(2.0, 0.0, 0.0),
+            vec3(3.0, 1.0, 1.0),
+        )
+        .unwrap();
         assert!((t - 2.0).abs() < 1e-5);
         assert_eq!(n, vec3(-1.0, 0.0, 0.0));
-        assert!(ray_aabb(vec3(0.0, 2.0, 0.5), inv, vec3(2.0, 0.0, 0.0), vec3(3.0, 1.0, 1.0)).is_none());
+        assert!(ray_aabb(
+            vec3(0.0, 2.0, 0.5),
+            inv,
+            vec3(2.0, 0.0, 0.0),
+            vec3(3.0, 1.0, 1.0)
+        )
+        .is_none());
     }
 
     #[test]
     fn headshot_and_body() {
         let pos = vec3(0.0, 0.0, -10.0);
-        let (_, z) = ray_player(vec3(0.0, 1.62, 0.0), vec3(0.0, 0.0, -1.0), pos, 0.0, Stance::Stand, 100.0).unwrap();
+        let (_, z) = ray_player(
+            vec3(0.0, 1.62, 0.0),
+            vec3(0.0, 0.0, -1.0),
+            pos,
+            0.0,
+            Stance::Stand,
+            100.0,
+        )
+        .unwrap();
         assert_eq!(z, HitZone::Head);
-        let (t, z) = ray_player(vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, -1.0), pos, 1.3, Stance::Stand, 100.0).unwrap();
+        let (t, z) = ray_player(
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 0.0, -1.0),
+            pos,
+            1.3,
+            Stance::Stand,
+            100.0,
+        )
+        .unwrap();
         assert_eq!(z, HitZone::Torso);
         assert!(t > 9.0 && t < 10.0);
-        assert!(ray_player(vec3(2.0, 1.0, 0.0), vec3(0.0, 0.0, -1.0), pos, 0.0, Stance::Stand, 100.0).is_none());
+        assert!(ray_player(
+            vec3(2.0, 1.0, 0.0),
+            vec3(0.0, 0.0, -1.0),
+            pos,
+            0.0,
+            Stance::Stand,
+            100.0
+        )
+        .is_none());
         // prone target: head is in front of the body along its facing direction
-        let (_, z) = ray_player(vec3(0.0, 5.0, -10.8), vec3(0.0, -1.0, 0.0), pos, 0.0, Stance::Prone, 100.0).unwrap();
+        let (_, z) = ray_player(
+            vec3(0.0, 5.0, -10.8),
+            vec3(0.0, -1.0, 0.0),
+            pos,
+            0.0,
+            Stance::Prone,
+            100.0,
+        )
+        .unwrap();
         assert_eq!(z, HitZone::Head);
     }
 }

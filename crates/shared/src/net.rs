@@ -44,12 +44,17 @@ impl Channel {
 
     pub fn send_reliable<T: Serialize>(&mut self, msg: &T) {
         let data = bincode::serialize(msg).expect("serialize");
-        self.out.push_back(Pending { id: self.next_id, data, last_sent: f64::NEG_INFINITY });
+        self.out.push_back(Pending {
+            id: self.next_id,
+            data,
+            last_sent: f64::NEG_INFINITY,
+        });
         self.next_id = self.next_id.wrapping_add(1);
     }
 
     pub fn send_unreliable<T: Serialize>(&mut self, msg: &T) {
-        self.unrel_out.push(bincode::serialize(msg).expect("serialize"));
+        self.unrel_out
+            .push(bincode::serialize(msg).expect("serialize"));
     }
 
     /// Number of reliable messages waiting for an ack (backlog indicator).
@@ -59,7 +64,10 @@ impl Channel {
 
     /// Builds the next datagram. Always returns a packet (acks must flow even when idle).
     pub fn build_packet(&mut self, now: f64) -> Vec<u8> {
-        let mut p = Packet { ack: self.expected, ..Default::default() };
+        let mut p = Packet {
+            ack: self.expected,
+            ..Default::default()
+        };
         let mut budget = RELIABLE_BUDGET;
         for m in self.out.iter_mut() {
             if now - m.last_sent < RESEND_AFTER {

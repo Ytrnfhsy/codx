@@ -16,7 +16,10 @@ pub struct RotationEntry {
 
 impl Default for RotationEntry {
     fn default() -> Self {
-        RotationEntry { map: "depot".into(), mode: "tdm".into() }
+        RotationEntry {
+            map: "depot".into(),
+            mode: "tdm".into(),
+        }
     }
 }
 
@@ -41,7 +44,11 @@ pub struct TdmConfig {
 
 impl Default for TdmConfig {
     fn default() -> Self {
-        TdmConfig { score_limit: 75, time_limit: 10.0, respawn_delay: 3.0 }
+        TdmConfig {
+            score_limit: 75,
+            time_limit: 10.0,
+            respawn_delay: 3.0,
+        }
     }
 }
 
@@ -118,11 +125,26 @@ impl Default for ServerConfig {
             rcon_password: String::new(),
             motd: "Ласкаво просимо! Грай чесно :)".into(),
             rotation: vec![
-                RotationEntry { map: "depot".into(), mode: "tdm".into() },
-                RotationEntry { map: "market".into(), mode: "sab".into() },
-                RotationEntry { map: "cargo".into(), mode: "tdm".into() },
-                RotationEntry { map: "depot".into(), mode: "sab".into() },
-                RotationEntry { map: "market".into(), mode: "tdm".into() },
+                RotationEntry {
+                    map: "depot".into(),
+                    mode: "tdm".into(),
+                },
+                RotationEntry {
+                    map: "market".into(),
+                    mode: "sab".into(),
+                },
+                RotationEntry {
+                    map: "cargo".into(),
+                    mode: "tdm".into(),
+                },
+                RotationEntry {
+                    map: "depot".into(),
+                    mode: "sab".into(),
+                },
+                RotationEntry {
+                    map: "market".into(),
+                    mode: "tdm".into(),
+                },
             ],
             tdm: TdmConfig::default(),
             sab: SabConfig::default(),
@@ -143,8 +165,10 @@ impl ServerConfig {
     /// Loads the config, creating a default file if it does not exist.
     pub fn load_or_create(path: &Path) -> Result<ServerConfig, String> {
         if path.exists() {
-            let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let cfg: ServerConfig = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            let text =
+                std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let cfg: ServerConfig =
+                serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
             Ok(cfg.sanitized())
         } else {
             let cfg = ServerConfig::default();

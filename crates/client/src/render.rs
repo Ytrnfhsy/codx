@@ -25,7 +25,10 @@ impl View {
             return None;
         }
         let ndc = c.truncate() / c.w;
-        Some(vec2((ndc.x + 1.0) * 0.5 * screen_width(), (1.0 - ndc.y) * 0.5 * screen_height()))
+        Some(vec2(
+            (ndc.x + 1.0) * 0.5 * screen_width(),
+            (1.0 - ndc.y) * 0.5 * screen_height(),
+        ))
     }
 }
 
@@ -71,7 +74,11 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
     let hfov = settings.fov.clamp(60.0, 120.0).to_radians();
     let mut fovy = 2.0 * ((hfov * 0.5).tan() / aspect).atan();
     let zoom = 1.0 + (g.ws().ads_zoom - 1.0) * g.ads_t;
-    let zoom = if g.weapon().def().scoped && !g.scoped() { 1.0 + (zoom - 1.0) * 0.25 } else { zoom };
+    let zoom = if g.weapon().def().scoped && !g.scoped() {
+        1.0 + (zoom - 1.0) * 0.25
+    } else {
+        zoom
+    };
     if g.alive {
         fovy = 2.0 * ((fovy * 0.5).tan() / zoom).atan();
     }
@@ -89,11 +96,21 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         z_far: 600.0,
     };
     let matrix = cam.matrix();
-    View { cam, fovy, pos, matrix }
+    View {
+        cam,
+        fovy,
+        pos,
+        matrix,
+    }
 }
 
 /// Renders the world. Returns name tags for the HUD.
-pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, view: &View) -> Vec<NameTag> {
+pub fn render_world(
+    g: &mut GameClient,
+    mats: &Materials,
+    settings: &Settings,
+    view: &View,
+) -> Vec<NameTag> {
     let fog = fog_color(g);
     set_camera(&view.cam);
     clear_background(fog);
@@ -121,7 +138,15 @@ pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, v
         let mut far = crate::mesh::MeshBuilder::new();
         let s = 600.0;
         let y = -0.02;
-        far.add_quad([vec3(-s, y, -s), vec3(-s, y, s), vec3(s, y, s), vec3(s, y, -s)], [c[0], c[1], c[2], 255]);
+        far.add_quad(
+            [
+                vec3(-s, y, -s),
+                vec3(-s, y, s),
+                vec3(s, y, s),
+                vec3(s, y, -s),
+            ],
+            [c[0], c[1], c[2], 255],
+        );
         gl_use_material(&mats.world);
         far.draw();
         gl_use_default_material();
@@ -159,10 +184,14 @@ pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, v
             dead,
             has_bomb,
             blink: ((now * 0.37 + id as f64 * 0.31).fract()) < 0.035,
-            melee: ((now - r.melee_t) as f32 / 0.4).clamp(0.0, 1.0) * if now - r.melee_t < 0.4 { 1.0 } else { 0.0 },
+            melee: ((now - r.melee_t) as f32 / 0.4).clamp(0.0, 1.0)
+                * if now - r.melee_t < 0.4 { 1.0 } else { 0.0 },
         };
         let muzzle = models::add_soldier(&mut m, &pose);
-        let floor = g.world.floor_below(r.pos + vec3(0.0, 0.3, 0.0), 3.0).unwrap_or(r.pos.y);
+        let floor = g
+            .world
+            .floor_below(r.pos + vec3(0.0, 0.3, 0.0), 3.0)
+            .unwrap_or(r.pos.y);
         blob_shadow(&mut shadows, vec3(r.pos.x, floor + 0.03, r.pos.z), 0.5);
         if r.protected && r.team == my_team {
             // spawn protection: a soft pulsing bubble in team colour
@@ -170,13 +199,26 @@ pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, v
             let pulse = 0.5 + 0.5 * ((now * 5.0) as f32).sin();
             let centre = r.pos + vec3(0.0, r.stance.height() * 0.5, 0.0);
             let m = Mat4::from_translation(centre) * Mat4::from_scale(vec3(1.0, 1.25, 1.0));
-            shadows.add_sphere_ex(&m, 0.95 + pulse * 0.05, c, 14, 9, (45.0 + pulse * 35.0) as u8, true);
+            shadows.add_sphere_ex(
+                &m,
+                0.95 + pulse * 0.05,
+                c,
+                14,
+                9,
+                (45.0 + pulse * 35.0) as u8,
+                true,
+            );
         }
         if r.alive {
             let head = r.pos + vec3(0.0, r.stance.height() + 0.45, 0.0);
             let friendly = r.team == my_team;
             let name = g.name_of(id).unwrap_or("?").to_string();
-            tags.push(NameTag { pos: head, name, friendly, bomb: has_bomb });
+            tags.push(NameTag {
+                pos: head,
+                name,
+                friendly,
+                bomb: has_bomb,
+            });
         }
         if let Some(rr) = g.remotes.get_mut(&id) {
             rr.muzzle = muzzle;
@@ -185,9 +227,15 @@ pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, v
     // entities
     for e in &g.ents {
         match e {
-            EntSnap::Grenade { id, pos } => models::add_grenade(&mut m, Vec3::from_array(*pos), now as f32 + *id as f32),
-            EntSnap::Heli { pos, yaw, team, .. } => models::add_heli(&mut m, Vec3::from_array(*pos), *yaw, *team, now as f32),
-            EntSnap::Plane { pos, yaw, .. } => models::add_jet(&mut m, Vec3::from_array(*pos), look_dir(*yaw, 0.0)),
+            EntSnap::Grenade { id, pos } => {
+                models::add_grenade(&mut m, Vec3::from_array(*pos), now as f32 + *id as f32)
+            }
+            EntSnap::Heli { pos, yaw, team, .. } => {
+                models::add_heli(&mut m, Vec3::from_array(*pos), *yaw, *team, now as f32)
+            }
+            EntSnap::Plane { pos, yaw, .. } => {
+                models::add_jet(&mut m, Vec3::from_array(*pos), look_dir(*yaw, 0.0))
+            }
         }
     }
     // airstrike jets (purely visual)
@@ -197,7 +245,8 @@ pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, v
             let dir = (*to - *from).normalize();
             let side = vec3(-dir.z, 0.0, dir.x);
             for (i, off) in [-1.0f32, 0.0, 1.0].iter().enumerate() {
-                let p = from.lerp(*to, k) + side * (*off * 9.0) - dir * (i as f32 * 4.0) + vec3(0.0, *off * 2.0, 0.0);
+                let p = from.lerp(*to, k) + side * (*off * 9.0) - dir * (i as f32 * 4.0)
+                    + vec3(0.0, *off * 2.0, 0.0);
                 models::add_jet(&mut m, p, dir);
             }
         }
@@ -205,7 +254,12 @@ pub fn render_world(g: &mut GameClient, mats: &Materials, settings: &Settings, v
     // bomb
     if let Some(b) = &g.bomb {
         if b.carrier.is_none() && g.state != MatchState::Warmup {
-            models::add_bomb(&mut m, Vec3::from_array(b.pos), now as f32, b.planted_at.is_some());
+            models::add_bomb(
+                &mut m,
+                Vec3::from_array(b.pos),
+                now as f32,
+                b.planted_at.is_some(),
+            );
         }
     }
     if !settings.outlines {
@@ -231,14 +285,24 @@ fn blob_shadow(m: &mut crate::mesh::MeshBuilder, c: Vec3, r: f32) {
         let a0 = i as f32 / n as f32 * std::f32::consts::TAU;
         let a1 = (i + 1) as f32 / n as f32 * std::f32::consts::TAU;
         m.add_quad(
-            [c, c + vec3(a0.cos() * r, 0.0, a0.sin() * r), c + vec3(a1.cos() * r, 0.0, a1.sin() * r), c],
+            [
+                c,
+                c + vec3(a0.cos() * r, 0.0, a0.sin() * r),
+                c + vec3(a1.cos() * r, 0.0, a1.sin() * r),
+                c,
+            ],
             [0, 0, 0, 80],
         );
     }
 }
 
 /// First-person weapon and hands, drawn after clearing depth so it never clips into walls.
-pub fn render_viewmodel(g: &mut GameClient, mats: &Materials, settings: &Settings, target: Option<RenderTarget>) {
+pub fn render_viewmodel(
+    g: &mut GameClient,
+    mats: &Materials,
+    settings: &Settings,
+    target: Option<RenderTarget>,
+) {
     if !g.alive || g.scoped() {
         return;
     }
@@ -269,7 +333,11 @@ pub fn render_viewmodel(g: &mut GameClient, mats: &Materials, settings: &Setting
     let mut roll = 0.0f32;
     // bob & sway
     let bob_k = g.walk_amount * (1.0 - ads * 0.85) * g.tuning.movement.view_bob;
-    pos += vec3(g.bob_phase.sin() * 0.012, -(g.bob_phase.cos().abs()) * 0.016, 0.0) * bob_k;
+    pos += vec3(
+        g.bob_phase.sin() * 0.012,
+        -(g.bob_phase.cos().abs()) * 0.016,
+        0.0,
+    ) * bob_k;
     pos += vec3(-g.sway.x, g.sway.y, 0.0) * (1.0 - ads * 0.7);
     // recoil
     pos.z += g.recoil_vis * 0.035;
@@ -311,28 +379,60 @@ pub fn render_viewmodel(g: &mut GameClient, mats: &Materials, settings: &Setting
     // arms
     let sleeve = models::team_look(g.team).shirt;
     let grip = base.transform_point3(vec3(0.0, -0.03, 0.02));
-    let fore = base.transform_point3(if def.class == WeaponClass::Pistol { vec3(-0.02, -0.03, 0.03) } else { vec3(0.0, 0.02, -0.36) });
-    for (hand, shoulder) in [(grip, vec3(0.38, -0.55, -0.1)), (fore, vec3(-0.3, -0.6, -0.2))] {
+    let fore = base.transform_point3(if def.class == WeaponClass::Pistol {
+        vec3(-0.02, -0.03, 0.03)
+    } else {
+        vec3(0.0, 0.02, -0.36)
+    });
+    for (hand, shoulder) in [
+        (grip, vec3(0.38, -0.55, -0.1)),
+        (fore, vec3(-0.3, -0.6, -0.2)),
+    ] {
         let mid = (hand + shoulder) * 0.5;
         let d = hand - shoulder;
         let rot = Quat::from_rotation_arc(Vec3::NEG_Z, d.normalize());
-        m.boxed(&Mat4::from_rotation_translation(rot, mid), vec3(0.036, 0.036, d.length() * 0.5), sleeve, ow);
+        m.boxed(
+            &Mat4::from_rotation_translation(rot, mid),
+            vec3(0.036, 0.036, d.length() * 0.5),
+            sleeve,
+            ow,
+        );
         m.sphere(&Mat4::from_translation(hand), 0.04, [240, 236, 228], ow);
     }
     // knife swing
     if knife {
         let t = 1.0 - ((g.melee_until - now) / 0.45) as f32;
         let k = (t * std::f32::consts::PI).sin();
-        let kb = trs(vec3(0.12 - k * 0.1, -0.12, -0.25 - k * 0.25), -0.3 + k * 0.4, 0.0, 0.0);
+        let kb = trs(
+            vec3(0.12 - k * 0.1, -0.12, -0.25 - k * 0.25),
+            -0.3 + k * 0.4,
+            0.0,
+            0.0,
+        );
         m.boxed(&kb, vec3(0.012, 0.025, 0.12), [220, 225, 235], ow);
-        m.boxed(&(kb * Mat4::from_translation(vec3(0.0, 0.0, 0.14))), vec3(0.018, 0.03, 0.05), [60, 50, 40], ow);
-        m.sphere(&(kb * Mat4::from_translation(vec3(0.0, 0.0, 0.16))), 0.045, [240, 236, 228], ow);
+        m.boxed(
+            &(kb * Mat4::from_translation(vec3(0.0, 0.0, 0.14))),
+            vec3(0.018, 0.03, 0.05),
+            [60, 50, 40],
+            ow,
+        );
+        m.sphere(
+            &(kb * Mat4::from_translation(vec3(0.0, 0.0, 0.16))),
+            0.045,
+            [240, 236, 228],
+            ow,
+        );
     }
     // grenade in hand
     if throwing {
         let gpos = vec3(0.16, -0.15, -0.3);
         m.sphere(&Mat4::from_translation(gpos), 0.05, [70, 110, 60], ow);
-        m.sphere(&Mat4::from_translation(gpos + vec3(0.02, -0.03, 0.03)), 0.045, [240, 236, 228], ow);
+        m.sphere(
+            &Mat4::from_translation(gpos + vec3(0.02, -0.03, 0.03)),
+            0.045,
+            [240, 236, 228],
+            ow,
+        );
     }
     mats.draw_toon(&m);
     // muzzle flash
@@ -340,10 +440,31 @@ pub fn render_viewmodel(g: &mut GameClient, mats: &Materials, settings: &Setting
         let mp = base.transform_point3(models::muzzle(w));
         let mut f = crate::mesh::MeshBuilder::new();
         let s = 0.06 + def.heft * 0.05;
-        for (a, b) in [(Vec3::X, Vec3::Y), (Vec3::Y, Vec3::NEG_X), (Vec3::NEG_X, Vec3::NEG_Y), (Vec3::NEG_Y, Vec3::X)] {
-            f.add_quad([mp, mp + (a + b) * s * 0.4, mp + a * s * 1.8, mp + (a - b) * s * 0.4], [255, 220, 110, 230]);
+        for (a, b) in [
+            (Vec3::X, Vec3::Y),
+            (Vec3::Y, Vec3::NEG_X),
+            (Vec3::NEG_X, Vec3::NEG_Y),
+            (Vec3::NEG_Y, Vec3::X),
+        ] {
+            f.add_quad(
+                [
+                    mp,
+                    mp + (a + b) * s * 0.4,
+                    mp + a * s * 1.8,
+                    mp + (a - b) * s * 0.4,
+                ],
+                [255, 220, 110, 230],
+            );
         }
-        f.add_sphere_ex(&Mat4::from_translation(mp), s * 0.6, [255, 250, 200], 6, 4, 220, true);
+        f.add_sphere_ex(
+            &Mat4::from_translation(mp),
+            s * 0.6,
+            [255, 250, 200],
+            6,
+            4,
+            220,
+            true,
+        );
         gl_use_material(&mats.fx);
         f.draw();
         gl_use_default_material();

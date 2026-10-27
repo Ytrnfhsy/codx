@@ -45,7 +45,11 @@ fn ask<T>(ctx: &Ctx, make: impl FnOnce(Sender<T>) -> AdminMsg) -> Option<T> {
 }
 
 fn token_ok(ctx: &mut Ctx, req: &Request) -> bool {
-    let tok = req.headers().iter().find(|h| h.field.equiv("X-Token")).map(|h| h.value.as_str().to_string());
+    let tok = req
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("X-Token"))
+        .map(|h| h.value.as_str().to_string());
     let now = Instant::now();
     ctx.tokens.retain(|_, t| now.duration_since(*t) < TOKEN_TTL);
     tok.map(|t| ctx.tokens.contains_key(&t)).unwrap_or(false)
@@ -59,10 +63,15 @@ fn body_json(req: &mut Request) -> Value {
 
 fn handle(ctx: &mut Ctx, mut req: Request) {
     let url = req.url().split('?').next().unwrap_or("/").to_string();
-    let ip = req.remote_addr().map(|a| a.ip().to_string()).unwrap_or_default();
+    let ip = req
+        .remote_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_default();
     match (req.method().clone(), url.as_str()) {
         (Method::Get, "/") => respond(req, 200, "text/html; charset=utf-8", INDEX_HTML.to_string()),
-        (Method::Get, "/admin") | (Method::Get, "/admin/") => respond(req, 200, "text/html; charset=utf-8", ADMIN_HTML.to_string()),
+        (Method::Get, "/admin") | (Method::Get, "/admin/") => {
+            respond(req, 200, "text/html; charset=utf-8", ADMIN_HTML.to_string())
+        }
         (Method::Get, "/api/info") => match ask(ctx, AdminMsg::Info) {
             Some(v) => json_resp(req, 200, v),
             None => json_resp(req, 503, json!({"error": "server busy"})),
@@ -71,11 +80,19 @@ fn handle(ctx: &mut Ctx, mut req: Request) {
             let now = Instant::now();
             if let Some((n, t)) = ctx.fails.get(&ip) {
                 if *n >= 5 && now.duration_since(*t) < Duration::from_secs(60) {
-                    return json_resp(req, 429, json!({"error": "Забагато спроб. Зачекай хвилину."}));
+                    return json_resp(
+                        req,
+                        429,
+                        json!({"error": "Забагато спроб. Зачекай хвилину."}),
+                    );
                 }
             }
             let body = body_json(&mut req);
-            let pass = body.get("password").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let pass = body
+                .get("password")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let ok = ask(ctx, |tx| AdminMsg::CheckRcon(pass, tx)).unwrap_or(false);
             if ok {
                 ctx.fails.remove(&ip);
@@ -91,11 +108,20 @@ fn handle(ctx: &mut Ctx, mut req: Request) {
                 e.0 += 1;
                 e.1 = now;
                 std::thread::sleep(Duration::from_millis(400));
-                json_resp(req, 401, json!({"error": "Невірний пароль (або rcon_password не задано в конфігурації)"}))
+                json_resp(
+                    req,
+                    401,
+                    json!({"error": "Невірний пароль (або rcon_password не задано в конфігурації)"}),
+                )
             }
         }
         (Method::Post, "/api/logout") => {
-            if let Some(t) = req.headers().iter().find(|h| h.field.equiv("X-Token")).map(|h| h.value.as_str().to_string()) {
+            if let Some(t) = req
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("X-Token"))
+                .map(|h| h.value.as_str().to_string())
+            {
                 ctx.tokens.remove(&t);
             }
             json_resp(req, 200, json!({"ok": true}))
@@ -114,7 +140,11 @@ fn handle(ctx: &mut Ctx, mut req: Request) {
                 return json_resp(req, 401, json!({"error": "unauthorized"}));
             }
             let body = body_json(&mut req);
-            let cmd = body.get("cmd").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let cmd = body
+                .get("cmd")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             match ask(ctx, |tx| AdminMsg::Cmd(cmd, tx)) {
                 Some(out) => json_resp(req, 200, json!({ "output": out })),
                 None => json_resp(req, 503, json!({"error": "server busy"})),
@@ -129,7 +159,12 @@ pub fn spawn(bind: &str, port: u16, admin: Sender<AdminMsg>) -> Result<JoinHandl
     Ok(std::thread::Builder::new()
         .name("http".into())
         .spawn(move || {
-            let mut ctx = Ctx { admin, tokens: HashMap::new(), fails: HashMap::new(), rng: Rng::from_time() };
+            let mut ctx = Ctx {
+                admin,
+                tokens: HashMap::new(),
+                fails: HashMap::new(),
+                rng: Rng::from_time(),
+            };
             for req in server.incoming_requests() {
                 handle(&mut ctx, req);
             }

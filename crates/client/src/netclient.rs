@@ -17,7 +17,11 @@ pub struct NetClient {
 
 pub fn resolve(addr: &str) -> Result<SocketAddr, String> {
     let a = addr.trim();
-    let with_port = if a.contains(':') && !a.ends_with(']') { a.to_string() } else { format!("{a}:{DEFAULT_PORT}") };
+    let with_port = if a.contains(':') && !a.ends_with(']') {
+        a.to_string()
+    } else {
+        format!("{a}:{DEFAULT_PORT}")
+    };
     with_port
         .to_socket_addrs()
         .map_err(|e| format!("Невірна адреса «{a}»: {e}"))?
@@ -29,7 +33,11 @@ pub fn resolve(addr: &str) -> Result<SocketAddr, String> {
 impl NetClient {
     pub fn connect(addr: &str, name: &str, password: &str) -> Result<NetClient, String> {
         let server = resolve(addr)?;
-        let bind = if server.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
+        let bind = if server.is_ipv4() {
+            "0.0.0.0:0"
+        } else {
+            "[::]:0"
+        };
         let sock = UdpSocket::bind(bind).map_err(|e| e.to_string())?;
         sock.set_nonblocking(true).map_err(|e| e.to_string())?;
         let mut c = NetClient {
@@ -40,7 +48,11 @@ impl NetClient {
             last_send: Instant::now(),
             started: Instant::now(),
         };
-        c.chan.send_reliable(&C2S::Hello { name: name.to_string(), password: password.to_string(), version: PROTOCOL_VERSION });
+        c.chan.send_reliable(&C2S::Hello {
+            name: name.to_string(),
+            password: password.to_string(),
+            version: PROTOCOL_VERSION,
+        });
         c.flush();
         Ok(c)
     }
@@ -124,7 +136,11 @@ impl Browser {
             let _ = s.set_nonblocking(true);
             let _ = s.set_broadcast(true);
         }
-        Browser { sock, sent: Instant::now(), results: Vec::new() }
+        Browser {
+            sock,
+            sent: Instant::now(),
+            results: Vec::new(),
+        }
     }
 
     /// Queries the given addresses and broadcasts on the LAN.
@@ -147,7 +163,9 @@ impl Browser {
             if n < 4 || &buf[..4] != QUERY_REPLY_MAGIC {
                 continue;
             }
-            let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf[4..n]) else { continue };
+            let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf[4..n]) else {
+                continue;
+            };
             let port = v["port"].as_u64().unwrap_or(from.port() as u64);
             let addr = format!("{}:{}", from.ip(), port);
             if self.results.iter().any(|r| r.addr == addr) {
