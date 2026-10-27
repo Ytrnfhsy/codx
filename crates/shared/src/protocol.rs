@@ -66,6 +66,8 @@ pub enum C2S {
     Pong(u32),
     /// Give up spawn protection early (so you can fight).
     DropProtection,
+    /// Swap the current weapon for a dropped one (entity id).
+    PickUp(u16),
     Disconnect,
 }
 
@@ -115,6 +117,8 @@ pub struct MeSnap {
     pub hp: f32,
     pub slot: u8,
     pub ammo: [(u16, u16); 2],
+    /// Weapons in both slots (they change when you pick one up).
+    pub weapons: [WeaponId; 2],
     pub grenades: u8,
     pub streak: u16,
     pub rewards: Vec<Killstreak>,
@@ -143,6 +147,13 @@ pub enum EntSnap {
     },
     Plane {
         id: u16,
+        pos: V3,
+        yaw: f32,
+    },
+    /// A dropped weapon lying on the ground.
+    Weapon {
+        id: u16,
+        weapon: WeaponId,
         pos: V3,
         yaw: f32,
     },

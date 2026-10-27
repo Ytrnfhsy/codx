@@ -200,6 +200,14 @@ pub struct GameClient {
     reload_cue: usize,
     was_on_ground: bool,
     fall_speed: f32,
+    /// When each dropped weapon was first seen (for the falling animation).
+    pub pickup_seen: HashMap<u16, f64>,
+    /// Sun shadow map of the current level (rendered on the first frame after a map loads).
+    pub shadow: Option<crate::mesh::ShadowMap>,
+    /// Dropped weapon we can pick up right now.
+    pub pickup_target: Option<(u16, WeaponId)>,
+    next_pickup: f64,
+    spawn_time: f64,
 }
 
 /// Server time the client currently sees (clock offset applied).
@@ -226,7 +234,7 @@ pub fn build_map_mesh(map: &Map) -> ToonMesh {
             decal_layer += 1;
             let y = b.max.y + decal_layer as f32 * 0.004;
             let col = crate::mesh::shade(c, Vec3::Y);
-            m.decals.add_quad(
+            m.decals.add_quad_ex(
                 [
                     vec3(b.min.x, y, b.min.z),
                     vec3(b.min.x, y, b.max.z),
@@ -234,10 +242,13 @@ pub fn build_map_mesh(map: &Map) -> ToonMesh {
                     vec3(b.max.x, y, b.min.z),
                 ],
                 col,
+                Vec3::Y,
+                crate::textures::material_for(b.color),
             );
             continue;
         }
-        m.fill.add_aabb(b.min, b.max, c);
+        m.fill
+            .add_aabb(b.min, b.max, c, crate::textures::material_for(b.color));
         let is_ground = b.min.y < -0.5;
         if b.solid && !is_ground && size.min_element() > 0.15 {
             let w = Vec3::splat(0.045);
@@ -429,6 +440,11 @@ impl GameClient {
             reload_cue: 0,
             was_on_ground: true,
             fall_speed: 0.0,
+            pickup_seen: HashMap::new(),
+            shadow: None,
+            pickup_target: None,
+            next_pickup: 0.0,
+            spawn_time: -10.0,
         };
         if !w.motd.is_empty() {
             g.push_chat(format!("[{}] {}", g.server_name, w.motd), crate::ui::ACCENT);
@@ -506,6 +522,7 @@ impl GameClient {
         self.killcam = None;
         self.pending_killcam = None;
         self.ragdolls.clear();
+        self.shadow = None;
         self.spec_pos = vec3(self.map.center().x, 15.0, self.map.max.y);
         self.body.pos = self.spec_pos;
     }
@@ -578,6 +595,7 @@ impl GameClient {
                 }
                 self.pending_killcam = None;
                 self.reload_cue = 0;
+                self.spawn_time = now;
                 if matches!(self.overlay, Overlay::Class | Overlay::Team) {
                     self.overlay = Overlay::None;
                 }
@@ -918,6 +936,25 @@ impl GameClient {
         let quiet = now - self.last_fire > 0.5
             && self.reload_until.is_none()
             && now > self.switch_until + 0.3;
+        // weapons picked up from the ground (the server is the authority)
+        if me.alive && self.alive && now - self.spawn_time > 0.6 {
+            for i in 0..2 {
+                if me.weapons[i] != self.weapons[i].0 {
+                    self.weapons[i] = (me.weapons[i], me.ammo[i].0, me.ammo[i].1);
+                    if i == self.slot as usize {
+                        let swap = self.tuning.weapon(me.weapons[i]).swap_time;
+                        self.reload_until = None;
+                        self.switch_until = now + swap as f64;
+                        self.switch_dur = swap;
+                        self.ads_t = 0.0;
+                        self.shot_streak = 0;
+                        if let Some(a) = audio {
+                            a.play(Sfx::Raise, 0.5);
+                        }
+                    }
+                }
+            }
+        }
         if quiet && self.alive {
             for i in 0..2 {
                 self.weapons[i].1 = me.ammo[i].0;
@@ -933,6 +970,14 @@ impl GameClient {
         self.me = me;
         self.bomb = s.bomb;
         self.ents = s.ents;
+        let mut present = Vec::new();
+        for e in &self.ents {
+            if let EntSnap::Weapon { id, .. } = e {
+                self.pickup_seen.entry(*id).or_insert(now);
+                present.push(*id);
+            }
+        }
+        self.pickup_seen.retain(|id, _| present.contains(id));
 
         // effects for other players' shots
         let eye = self.eye();
@@ -1056,6 +1101,47 @@ impl GameClient {
             return;
         };
         self.killcam = Killcam::new(&self.recorder, info, t_kill, final_cam);
+    }
+
+    /// The closest dropped weapon in reach that we don't already carry.
+    fn find_pickup(&self) -> Option<(u16, WeaponId)> {
+        let me = self.body.pos;
+        self.ents
+            .iter()
+            .filter_map(|e| match e {
+                EntSnap::Weapon {
+                    id, weapon, pos, ..
+                } => {
+                    let p = Vec3::from_array(*pos);
+                    let d = vec2(p.x - me.x, p.z - me.z).length();
+                    let ok = d < 1.6
+                        && (p.y - me.y).abs() < 1.8
+                        && self.weapons.iter().all(|w| w.0 != *weapon);
+                    ok.then_some((d, *id, *weapon))
+                }
+                _ => None,
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, id, w)| (id, w))
+    }
+
+    /// Standing where F plants, defuses or picks up the bomb.
+    pub fn near_objective(&self) -> bool {
+        if self.mode != Mode::Sab {
+            return false;
+        }
+        let me = self.body.pos;
+        let flat = |p: Vec3| vec2(p.x - me.x, p.z - me.z).length();
+        let bomb = self
+            .bomb
+            .as_ref()
+            .map(|b| flat(Vec3::from_array(b.pos)) < 2.4);
+        bomb.unwrap_or(false)
+            || self
+                .map
+                .sites
+                .iter()
+                .any(|s| flat(*s) < SAB_SITE_RADIUS + 0.4)
     }
 
     /// Living remote players, interpolated for this frame.
@@ -1651,6 +1737,14 @@ impl GameClient {
                 }
             }
             self.using = key(KeyCode::F);
+            // dropped weapons: F swaps (unless F is needed for the bomb right here)
+            self.pickup_target = self.find_pickup();
+            if let Some((ent, _)) = self.pickup_target {
+                if pressed(KeyCode::F) && now >= self.next_pickup && !self.near_objective() {
+                    self.net.send(C2S::PickUp(ent));
+                    self.next_pickup = now + 0.6;
+                }
+            }
             if !shielded && (pressed(KeyCode::Key5) || pressed(KeyCode::Key4)) {
                 match self.me.rewards.last() {
                     Some(Killstreak::Airstrike) => self.overlay = Overlay::Airstrike,

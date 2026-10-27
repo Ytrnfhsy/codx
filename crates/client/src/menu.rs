@@ -55,7 +55,9 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         .round();
     s.volume = ui.slider("Гучність", s.volume, 0.0, 1.0, x, y + 112.0, w, "{}");
     ui.toggle("Інвертувати Y", &mut s.invert_y, x, y + 150.0);
+    ui.toggle("Тіні", &mut s.shadows, x + w * 0.5, y + 150.0);
     ui.toggle("Показувати FPS і пінг", &mut s.show_fps, x, y + 186.0);
+    ui.toggle("Текстури", &mut s.textures, x + w * 0.5, y + 186.0);
     ui.toggle(
         "Мультяшні контури (вимкни на дуже слабких ПК)",
         &mut s.outlines,

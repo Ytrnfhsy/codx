@@ -272,6 +272,7 @@ pub struct Game {
     pub rng: Rng,
     pub grenades: Vec<Grenade>,
     pub helis: Vec<Heli>,
+    pub pickups: Vec<crate::pickups::Pickup>,
     pub blasts: Vec<PendingBlast>,
     pub next_ent: u16,
     pub uav_until: [f64; 2],
@@ -327,6 +328,7 @@ impl Game {
             rng: Rng::from_time(),
             grenades: Vec::new(),
             helis: Vec::new(),
+            pickups: Vec::new(),
             blasts: Vec::new(),
             next_ent: 1,
             uav_until: [0.0; 2],
@@ -850,6 +852,7 @@ impl Game {
                 self.throw_grenade(id, Vec3::from_array(origin), Vec3::from_array(dir), cook)
             }
             C2S::Melee => self.melee(id),
+            C2S::PickUp(ent) => self.pick_up(id, ent),
             C2S::UseKillstreak { target } => self.use_killstreak(id, target),
             C2S::Chat { text, team_only } => self.on_chat(id, text, team_only),
             C2S::Rcon { password, cmd } => self.on_rcon(id, &password, &cmd),
@@ -1065,6 +1068,7 @@ impl Game {
         self.overtime = false;
         self.grenades.clear();
         self.helis.clear();
+        self.pickups.clear();
         self.blasts.clear();
         self.uav_until = [0.0; 2];
         self.reset_bomb();
@@ -1147,6 +1151,7 @@ impl Game {
         self.overtime = false;
         self.grenades.clear();
         self.helis.clear();
+        self.pickups.clear();
         self.blasts.clear();
         self.reset_bomb();
         for p in self.players.iter_mut().flatten() {
@@ -1262,6 +1267,7 @@ impl Game {
         self.time += dt as f64;
         self.tick = self.tick.wrapping_add(1);
         self.update_state(dt);
+        self.update_pickups();
 
         // bots
         for id in self.ids() {
@@ -1414,6 +1420,7 @@ impl Game {
                     (p.weapons[0].mag, p.weapons[0].reserve),
                     (p.weapons[1].mag, p.weapons[1].reserve),
                 ],
+                weapons: [p.weapons[0].id, p.weapons[1].id],
                 grenades: p.grenades,
                 streak: p.streak as u16,
                 rewards: p.rewards.clone(),
@@ -1431,6 +1438,9 @@ impl Game {
                 id: g.id,
                 pos: g.pos.to_array(),
             });
+        }
+        for pk in &self.pickups {
+            ents.push(pk.snap());
         }
         for h in &self.helis {
             ents.push(EntSnap::Heli {

@@ -13,6 +13,7 @@ mod netclient;
 mod ragdoll;
 mod render;
 mod settings;
+mod textures;
 mod ui;
 
 use game::{GameClient, Overlay, Welcome};

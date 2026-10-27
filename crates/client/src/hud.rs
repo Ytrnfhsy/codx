@@ -136,6 +136,18 @@ impl GameClient {
             self.draw_weapon_panel(ui);
         }
 
+        // dropped weapon prompt
+        if self.alive && self.overlay == Overlay::None {
+            if let Some((_, w)) = self.pickup_target {
+                let text = if self.near_objective() {
+                    format!("{} — відійди від бомби, щоб підібрати", w.def().name)
+                } else {
+                    format!("F — підібрати {}", w.def().name)
+                };
+                ui.centered(&text, cx, cy + 90.0, 20, TEXT);
+            }
+        }
+
         // score popups
         for (i, (text, t)) in self.popups.iter().enumerate() {
             let k = ((now - t) as f32 / 1.6).clamp(0.0, 1.0);

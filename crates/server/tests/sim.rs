@@ -199,3 +199,63 @@ fn grenade_throw_range_is_tunable() {
     assert!(near < normal && normal < far, "{near} {normal} {far}");
     assert!(toon_server::admin::exec(&mut g, "tune grenade").contains("дальність"));
 }
+
+#[test]
+fn dropped_weapons_can_be_picked_up_and_scavenged() {
+    use toon_shared::weapons::{Cause, WeaponId};
+    let (mut g, me) = setup(MapId::Depot, Mode::Tdm);
+    toon_server::admin::exec(&mut g, "bots 0");
+    let other = g
+        .connect(
+            "127.0.0.1:5001".parse().unwrap(),
+            "Другий",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(other, C2S::JoinTeam(Some(Team::Axis)));
+    g.handle(other, C2S::SetLoadout(DEFAULT_CLASSES[0].1));
+    run(&mut g, 1.0);
+    let spot = glam::vec3(-18.0, 0.0, 0.0);
+    for (id, x) in [(me, 0.0), (other, 5.0)] {
+        let p = g.pm(id).unwrap();
+        p.alive = true;
+        p.body.pos = spot + glam::vec3(x, 0.0, 0.0);
+    }
+    // the other player carries an LMG and dies: it lands on the floor
+    g.pm(other).unwrap().weapons[0].id = WeaponId::M249;
+    g.pm(other).unwrap().slot = 0;
+    g.kill(other, Some(me), Cause::Weapon(WeaponId::M4), false);
+    assert_eq!(g.pickups.len(), 1);
+    let pk = g.pickups[0];
+    assert_eq!(pk.w.id, WeaponId::M249);
+    assert!(g.snapshot_for(me).ents.iter().any(|e| matches!(
+        e,
+        toon_shared::protocol::EntSnap::Weapon {
+            weapon: WeaponId::M249,
+            ..
+        }
+    )));
+
+    // too far away: nothing happens
+    let mine = g.p(me).unwrap().weapon().id;
+    g.handle(me, C2S::PickUp(pk.id));
+    assert_eq!(g.p(me).unwrap().weapon().id, mine);
+
+    // next to it: swap, and our old gun is dropped in its place
+    g.pm(me).unwrap().body.pos = pk.pos + glam::vec3(0.8, 0.0, 0.0);
+    g.handle(me, C2S::PickUp(pk.id));
+    assert_eq!(g.p(me).unwrap().weapon().id, WeaponId::M249);
+    assert_eq!(g.snapshot_for(me).me.weapons[0], WeaponId::M249);
+    assert_eq!(g.pickups.len(), 1);
+    assert_eq!(g.pickups[0].w.id, mine);
+
+    // walking over a gun we already carry takes its ammo
+    g.pm(me).unwrap().weapons[0].reserve = 0;
+    let ammo = g.pickups[0].w.mag + g.pickups[0].w.reserve;
+    g.pickups[0].w.id = WeaponId::M249;
+    g.pm(me).unwrap().body.pos = g.pickups[0].pos;
+    g.tick(TICK_DT);
+    assert_eq!(g.p(me).unwrap().weapons[0].reserve, ammo);
+    assert!(g.pickups.is_empty(), "an emptied gun disappears");
+}

@@ -148,6 +148,20 @@ impl MeshBuilder {
         alpha: u8,
         flat_color: bool,
     ) {
+        self.add_box_full(m, half, color, alpha, flat_color, (0, 1.0));
+    }
+
+    /// Box with a detail texture `(tile, metres per repeat)` (see `textures.rs`).
+    pub fn add_box_full(
+        &mut self,
+        m: &Mat4,
+        half: Vec3,
+        color: [u8; 3],
+        alpha: u8,
+        flat_color: bool,
+        detail: (u8, f32),
+    ) {
+        let uv = vec2(detail.0 as f32, detail.1);
         let c = self.chunk_for(24);
         for (n, corners) in BOX_FACES.iter() {
             let wn = m.transform_vector3(*n).normalize_or_zero();
@@ -158,13 +172,19 @@ impl MeshBuilder {
             };
             col[3] = alpha;
             let base = c.verts.len() as u16;
+            // flat-coloured things (outlines, glows) never receive sun shadows
+            let normal = if flat_color {
+                Vec4::ZERO
+            } else {
+                wn.extend(0.0)
+            };
             for k in corners {
                 let p = m.transform_point3(*k * half);
                 c.verts.push(Vertex {
                     position: p,
-                    uv: Vec2::ZERO,
+                    uv,
                     color: col,
-                    normal: Vec4::ZERO,
+                    normal,
                 });
             }
             c.idx
@@ -173,9 +193,9 @@ impl MeshBuilder {
     }
 
     /// Axis-aligned box from min/max (static level geometry).
-    pub fn add_aabb(&mut self, min: Vec3, max: Vec3, color: [u8; 3]) {
+    pub fn add_aabb(&mut self, min: Vec3, max: Vec3, color: [u8; 3], detail: (u8, f32)) {
         let m = Mat4::from_translation((min + max) * 0.5);
-        self.add_box(&m, (max - min) * 0.5, color);
+        self.add_box_full(&m, (max - min) * 0.5, color, 255, false, detail);
     }
 
     /// Low-poly UV sphere (ellipsoid via `m`).
@@ -216,7 +236,11 @@ impl MeshBuilder {
                     position: p,
                     uv: Vec2::ZERO,
                     color: col,
-                    normal: Vec4::ZERO,
+                    normal: if flat_color {
+                        Vec4::ZERO
+                    } else {
+                        wn.extend(0.0)
+                    },
                 });
             }
         }
@@ -230,16 +254,21 @@ impl MeshBuilder {
         }
     }
 
-    /// Flat quad (decals, shadows, sprites). Corners in order.
+    /// Flat quad (decals, shadows, sprites). Corners in order. Unlit and unshadowed.
     pub fn add_quad(&mut self, p: [Vec3; 4], color: [u8; 4]) {
+        self.add_quad_ex(p, color, Vec3::ZERO, (0, 1.0));
+    }
+
+    /// Quad with a normal (receives sun shadows) and a detail texture.
+    pub fn add_quad_ex(&mut self, p: [Vec3; 4], color: [u8; 4], n: Vec3, detail: (u8, f32)) {
         let c = self.chunk_for(4);
         let base = c.verts.len() as u16;
         for v in p {
             c.verts.push(Vertex {
                 position: v,
-                uv: Vec2::ZERO,
+                uv: vec2(detail.0 as f32, detail.1),
                 color,
-                normal: Vec4::ZERO,
+                normal: n.extend(0.0),
             });
         }
         c.idx
@@ -248,8 +277,13 @@ impl MeshBuilder {
 
     /// Submits all chunks with the currently bound material.
     pub fn draw(&self) {
+        self.draw_tex(None);
+    }
+
+    /// Submits all chunks with `tex` bound as the shader's `Texture` (detail atlas).
+    pub fn draw_tex(&self, tex: Option<&Texture2D>) {
         let gl = unsafe { get_internal_gl() }.quad_gl;
-        gl.texture(None);
+        gl.texture(tex);
         gl.draw_mode(DrawMode::Triangles);
         for c in &self.chunks {
             if !c.verts.is_empty() {
@@ -304,6 +338,11 @@ pub struct Materials {
     /// depth *test* off together with depth writes, so this must keep depth writes on —
     /// otherwise muzzle flashes and tracers would be visible through walls.
     pub fx: Material,
+    /// Writes packed depth for the sun's shadow map.
+    pub depth: Material,
+    /// Detail texture atlas (see `textures.rs`).
+    pub atlas: Texture2D,
+    white: Texture2D,
 }
 
 const VS: &str = r#"#version 100
@@ -313,26 +352,115 @@ attribute vec4 color0;
 attribute vec4 normal;
 varying lowp vec4 color;
 varying highp float fogd;
+varying highp vec3 vWorld;
+varying mediump vec3 vN;
+varying mediump vec2 vTile;
+varying highp vec3 vShadow;
 uniform mat4 Model;
 uniform mat4 Projection;
 uniform vec3 CamPos;
+uniform mat4 SunMatrix;
+uniform vec4 Params;
 void main() {
     vec4 wp = Model * vec4(position, 1.0);
     gl_Position = Projection * wp;
     color = color0 / 255.0;
     fogd = length(wp.xyz - CamPos);
+    vWorld = wp.xyz;
+    vN = normal.xyz;
+    vTile = texcoord;
+    // offset along the normal so surfaces don't shadow themselves
+    vec4 sp = SunMatrix * vec4(wp.xyz + normal.xyz * 0.08, 1.0);
+    vShadow = sp.xyz * 0.5 + 0.5;
 }
 "#;
 
 const FS: &str = r#"#version 100
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
+#endif
 varying lowp vec4 color;
 varying highp float fogd;
+varying highp vec3 vWorld;
+varying mediump vec3 vN;
+varying mediump vec2 vTile;
+varying highp vec3 vShadow;
+uniform sampler2D Texture;
+uniform sampler2D ShadowMap;
 uniform vec4 FogColor;
 uniform vec2 FogRange;
+uniform vec3 SunDir;
+// x: shadows on, y: textures on, z: shadow texel size, w: depth bias
+uniform vec4 Params;
+uniform vec3 Tint;
+
+float occluder(vec2 uv) {
+    vec4 c = texture2D(ShadowMap, uv);
+    return c.r + c.g / 255.0;
+}
+
 void main() {
+    vec3 col = color.rgb;
+    if (vTile.x > 0.5 && Params.y > 0.5) {
+        // triplanar detail texture from the 4x4 atlas, faded out with distance
+        vec3 an = abs(vN);
+        vec2 p = an.y > an.x && an.y > an.z ? vWorld.xz : (an.x > an.z ? vWorld.zy : vWorld.xy);
+        p = p / vTile.y;
+        float t = floor(vTile.x + 0.5) - 1.0;
+        vec2 cell = vec2(mod(t, 4.0), floor(t / 4.0));
+        vec2 uv = (cell + 0.02 + fract(p) * 0.96) * 0.25;
+        float d = texture2D(Texture, uv).r;
+        float fade = 1.0 - clamp((fogd - 25.0) / 50.0, 0.0, 1.0);
+        col *= mix(1.0, 0.55 + d * 0.9, fade);
+    }
+    float ndl = dot(vN, SunDir);
+    if (Params.x > 0.5 && ndl > 0.08) {
+        float lit = 1.0;
+        if (vShadow.x > 0.0 && vShadow.x < 1.0 && vShadow.y > 0.0 && vShadow.y < 1.0) {
+            float z = vShadow.z - Params.w;
+            float s = Params.z;
+            lit = step(z, occluder(vShadow.xy));
+            lit += step(z, occluder(vShadow.xy + vec2(s, 0.0)));
+            lit += step(z, occluder(vShadow.xy - vec2(s, 0.0)));
+            lit += step(z, occluder(vShadow.xy + vec2(0.0, s)));
+            lit += step(z, occluder(vShadow.xy - vec2(0.0, s)));
+            lit *= 0.2;
+        }
+        // cool, bluish toon shade (sun-facing faces drop more, like the baked bands)
+        vec3 shade = ndl > 0.55 ? vec3(0.66, 0.69, 0.84) : vec3(0.8, 0.82, 0.93);
+        col *= mix(shade, vec3(1.0), lit);
+    }
+    col *= Tint;
     float f = clamp((fogd - FogRange.x) / (FogRange.y - FogRange.x), 0.0, 1.0);
-    gl_FragColor = vec4(mix(color.rgb, FogColor.rgb, f), color.a);
+    gl_FragColor = vec4(mix(col, FogColor.rgb, f), color.a);
+}
+"#;
+
+const DEPTH_VS: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+attribute vec4 normal;
+uniform mat4 Model;
+uniform mat4 Projection;
+void main() {
+    gl_Position = Projection * Model * vec4(position, 1.0);
+}
+"#;
+
+const DEPTH_FS: &str = r#"#version 100
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+void main() {
+    // 16-bit depth packed into red (high) and green (low)
+    float d = gl_FragCoord.z;
+    float hi = floor(d * 255.0) / 255.0;
+    gl_FragColor = vec4(hi, (d - hi) * 255.0, 0.0, 1.0);
 }
 "#;
 
@@ -359,20 +487,135 @@ fn mat(cull: CullFace, depth_write: bool) -> Material {
                 UniformDesc::new("CamPos", UniformType::Float3),
                 UniformDesc::new("FogColor", UniformType::Float4),
                 UniformDesc::new("FogRange", UniformType::Float2),
+                UniformDesc::new("SunMatrix", UniformType::Mat4),
+                UniformDesc::new("SunDir", UniformType::Float3),
+                UniformDesc::new("Params", UniformType::Float4),
+                UniformDesc::new("Tint", UniformType::Float3),
             ],
-            textures: vec![],
+            textures: vec!["ShadowMap".to_string()],
         },
     )
     .expect("toon material")
 }
 
+/// The sun's view of a level, rendered once per map into a depth texture.
+pub struct ShadowMap {
+    pub target: RenderTarget,
+    pub matrix: Mat4,
+    /// Depth units per metre along the sun direction.
+    pub depth_per_m: f32,
+    pub res: u32,
+}
+
+struct SunCamera<'a> {
+    matrix: Mat4,
+    target: &'a RenderTarget,
+}
+
+impl macroquad::camera::Camera for SunCamera<'_> {
+    fn matrix(&self) -> Mat4 {
+        self.matrix
+    }
+    fn depth_enabled(&self) -> bool {
+        true
+    }
+    fn render_pass(&self) -> Option<macroquad::texture::RenderPass> {
+        Some(self.target.render_pass.clone())
+    }
+    fn viewport(&self) -> Option<(i32, i32, i32, i32)> {
+        None
+    }
+}
+
+impl ShadowMap {
+    /// Renders the static level from the sun. `bounds` is the level's AABB.
+    pub fn render(mats: &Materials, level: &ToonMesh, min: Vec3, max: Vec3, res: u32) -> ShadowMap {
+        let l = LIGHT_DIR.normalize();
+        let centre = (min + max) * 0.5;
+        let view = Mat4::look_at_rh(centre + l * 200.0, centre, Vec3::Y);
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for i in 0..8 {
+            let c = vec3(
+                if i & 1 == 0 { min.x } else { max.x },
+                if i & 2 == 0 { min.y } else { max.y },
+                if i & 4 == 0 { min.z } else { max.z },
+            );
+            let v = view.transform_point3(c);
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        let (near, far) = (-hi.z - 2.0, -lo.z + 2.0);
+        let proj = Mat4::orthographic_rh_gl(lo.x, hi.x, lo.y, hi.y, near, far);
+        let matrix = proj * view;
+        let target = render_target_ex(
+            res,
+            res,
+            RenderTargetParams {
+                sample_count: 1,
+                depth: true,
+            },
+        );
+        target.texture.set_filter(FilterMode::Nearest);
+        set_camera(&SunCamera {
+            matrix,
+            target: &target,
+        });
+        clear_background(WHITE);
+        gl_use_material(&mats.depth);
+        level.fill.draw();
+        gl_use_default_material();
+        set_default_camera();
+        ShadowMap {
+            target,
+            matrix,
+            depth_per_m: 1.0 / (far - near),
+            res,
+        }
+    }
+}
+
+/// How the world is lit this frame.
+pub struct Lighting<'a> {
+    pub shadow: Option<&'a ShadowMap>,
+    pub textures: bool,
+    /// Colour multiplier (the first-person gun takes the shade of where you stand).
+    pub tint: Vec3,
+}
+
 impl Materials {
     pub fn new() -> Materials {
-        Materials {
+        let depth = load_material(
+            ShaderSource::Glsl {
+                vertex: DEPTH_VS,
+                fragment: DEPTH_FS,
+            },
+            MaterialParams {
+                pipeline_params: PipelineParams {
+                    cull_face: CullFace::Nothing,
+                    depth_test: Comparison::LessOrEqual,
+                    depth_write: true,
+                    ..Default::default()
+                },
+                uniforms: vec![],
+                textures: vec![],
+            },
+        )
+        .expect("depth material");
+        let white = Texture2D::from_rgba8(1, 1, &[255, 255, 255, 255]);
+        let m = Materials {
             world: mat(CullFace::Nothing, true),
             outline: mat(CullFace::Front, true),
             fx: mat(CullFace::Nothing, true),
-        }
+            depth,
+            atlas: crate::textures::detail_atlas(),
+            white,
+        };
+        m.set_lighting(&Lighting {
+            shadow: None,
+            textures: false,
+            tint: Vec3::ONE,
+        });
+        m
     }
 
     pub fn set_view(&self, cam: Vec3, fog: Color, near: f32, far: f32) {
@@ -383,6 +626,33 @@ impl Materials {
         }
     }
 
+    pub fn set_lighting(&self, l: &Lighting) {
+        let (tex, matrix, params) = match l.shadow {
+            Some(s) => (
+                &s.target.texture,
+                s.matrix,
+                vec4(
+                    1.0,
+                    l.textures as u8 as f32,
+                    1.0 / s.res as f32,
+                    0.03 * s.depth_per_m,
+                ),
+            ),
+            None => (
+                &self.white,
+                Mat4::IDENTITY,
+                vec4(0.0, l.textures as u8 as f32, 0.0, 0.0),
+            ),
+        };
+        for m in [&self.world, &self.outline, &self.fx] {
+            m.set_texture("ShadowMap", tex.clone());
+            m.set_uniform("SunMatrix", matrix);
+            m.set_uniform("SunDir", LIGHT_DIR.normalize());
+            m.set_uniform("Params", params);
+            m.set_uniform("Tint", l.tint);
+        }
+    }
+
     /// Draws a toon mesh: outline pass then fill.
     pub fn draw_toon(&self, m: &ToonMesh) {
         if !m.outline.is_empty() {
@@ -390,8 +660,8 @@ impl Materials {
             m.outline.draw();
         }
         gl_use_material(&self.world);
-        m.fill.draw();
-        m.decals.draw();
+        m.fill.draw_tex(Some(&self.atlas));
+        m.decals.draw_tex(Some(&self.atlas));
         gl_use_default_material();
     }
 }

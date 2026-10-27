@@ -9,6 +9,7 @@ pub mod game;
 pub mod http;
 pub mod nav;
 pub mod netserver;
+pub mod pickups;
 pub mod sab;
 
 use config::ServerConfig;

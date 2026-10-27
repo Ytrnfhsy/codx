@@ -188,6 +188,32 @@ pub fn add_gun_ex(m: &mut ToonMesh, base: &Mat4, w: WeaponId, outline: f32, mag_
     }
 }
 
+/// A weapon lying on the ground. `age` drives the short fall when it was just dropped;
+/// `highlight` makes it bob a little when it can be picked up.
+pub fn add_dropped_gun(
+    m: &mut ToonMesh,
+    pos: Vec3,
+    yaw: f32,
+    w: WeaponId,
+    age: f32,
+    highlight: bool,
+) {
+    let fall = (1.0 - age / 0.4).max(0.0);
+    let lift = 1.0 * fall * fall
+        + if highlight {
+            0.06 + (age * 4.0).sin().abs() * 0.05
+        } else {
+            0.0
+        };
+    let base = trs(
+        pos + vec3(0.0, 0.07 + lift, 0.0),
+        yaw + fall * 3.0,
+        0.0,
+        std::f32::consts::FRAC_PI_2 * (1.0 - fall * 0.6),
+    ) * Mat4::from_scale(Vec3::splat(1.25));
+    add_gun(m, &base, w, if highlight { 0.03 } else { 0.016 });
+}
+
 /// Big cartoon head with helmet, eyes and nose. `head` is the head centre transform.
 pub fn add_head(m: &mut ToonMesh, head: &Mat4, team: Team, blink: bool, dead: bool, ow: f32) {
     let look = team_look(team);

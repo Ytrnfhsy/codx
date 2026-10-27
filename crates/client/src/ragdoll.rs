@@ -79,7 +79,6 @@ pub struct Ragdoll {
     prev: [Vec3; N],
     sticks: Vec<Stick>,
     pub team: Team,
-    pub weapon: WeaponId,
     pub age: f32,
     acc: f32,
     still: f32,
@@ -94,7 +93,7 @@ impl Ragdoll {
         stance: Stance,
         vel: Vec3,
         team: Team,
-        weapon: WeaponId,
+        _weapon: WeaponId,
         blow: DeathBlow,
         rng: &mut Rng,
     ) -> Ragdoll {
@@ -241,7 +240,6 @@ impl Ragdoll {
             prev,
             sticks,
             team,
-            weapon,
             age: 0.0,
             acc: 0.0,
             still: 0.0,
@@ -403,12 +401,5 @@ impl Ragdoll {
             seg(m, p[sh], p[hand], 0.075, look.shirt);
             m.sphere(&Mat4::from_translation(p[hand]), 0.08, SKIN, ow);
         }
-
-        // the dropped gun
-        let gd = (p[MUZZLE] - p[GRIP]).normalize_or(Vec3::NEG_Z);
-        let rot = Quat::from_rotation_arc(Vec3::NEG_Z, gd);
-        let base =
-            Mat4::from_rotation_translation(rot, p[GRIP]) * Mat4::from_scale(Vec3::splat(1.25));
-        models::add_gun(m, &base, self.weapon, if outlines { 0.016 } else { 0.0 });
     }
 }

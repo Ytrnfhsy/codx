@@ -165,6 +165,30 @@ pub fn render_world(
     view: &View,
 ) -> Vec<NameTag> {
     let fog = fog_color(g);
+    if settings.shadows
+        && g.shadow
+            .as_ref()
+            .is_none_or(|s| s.res != shadow_res(settings))
+    {
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for b in g.map.boxes.iter().filter(|b| b.visible) {
+            lo = lo.min(b.min);
+            hi = hi.max(b.max);
+        }
+        lo.y = lo.y.max(-1.0);
+        g.shadow = Some(crate::mesh::ShadowMap::render(
+            mats,
+            &g.map_mesh,
+            lo,
+            hi,
+            shadow_res(settings),
+        ));
+    }
+    mats.set_lighting(&crate::mesh::Lighting {
+        shadow: g.shadow.as_ref().filter(|_| settings.shadows),
+        textures: settings.textures,
+        tint: Vec3::ONE,
+    });
     set_camera(&view.cam);
     clear_background(fog);
     mats.set_view(view.pos, fog, 55.0, 230.0);
@@ -306,6 +330,24 @@ pub fn render_world(
             EntSnap::Plane { pos, yaw, .. } => {
                 models::add_jet(&mut m, Vec3::from_array(*pos), look_dir(*yaw, 0.0))
             }
+            EntSnap::Weapon {
+                id,
+                weapon,
+                pos,
+                yaw,
+            } => {
+                // freshly dropped guns fall out of the hands first
+                let age = match kc {
+                    Some(_) => 1.0,
+                    None => g
+                        .pickup_seen
+                        .get(id)
+                        .map(|t| (now - t) as f32)
+                        .unwrap_or(1.0),
+                };
+                let target = g.pickup_target.map(|t| t.0) == Some(*id) && kc.is_none();
+                models::add_dropped_gun(&mut m, Vec3::from_array(*pos), *yaw, *weapon, age, target);
+            }
         }
     }
     // airstrike jets (purely visual)
@@ -362,6 +404,14 @@ pub fn render_world(
     tags
 }
 
+fn shadow_res(settings: &Settings) -> u32 {
+    if settings.render_scale < 0.75 {
+        1024
+    } else {
+        2048
+    }
+}
+
 fn blob_shadow(m: &mut crate::mesh::MeshBuilder, c: Vec3, r: f32) {
     let n = 10;
     for i in 0..n {
@@ -404,9 +454,29 @@ pub fn render_viewmodel(
         z_near: 0.01,
         z_far: 10.0,
     });
+    // the gun takes the shade of where the player stands
+    let eye = g.camera().0;
+    let in_shade = settings.shadows
+        && !g
+            .world
+            .line_of_sight(eye, eye + crate::mesh::LIGHT_DIR.normalize() * 120.0);
+    mats.set_lighting(&crate::mesh::Lighting {
+        shadow: None,
+        textures: false,
+        tint: if in_shade {
+            vec3(0.74, 0.77, 0.9)
+        } else {
+            Vec3::ONE
+        },
+    });
     set_camera(&cam);
     mats.set_view(Vec3::ZERO, Color::new(0.0, 0.0, 0.0, 1.0), 100.0, 200.0);
     draw_viewmodel(&vm, mats, settings);
+    mats.set_lighting(&crate::mesh::Lighting {
+        shadow: None,
+        textures: false,
+        tint: Vec3::ONE,
+    });
 }
 
 fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {

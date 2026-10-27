@@ -55,6 +55,10 @@ pub struct Settings {
     pub fullscreen: bool,
     /// Draw cartoon outlines on characters (slightly slower).
     pub outlines: bool,
+    /// Sun shadows from buildings and props.
+    pub shadows: bool,
+    /// Surface detail textures (brick, planks, sand...).
+    pub textures: bool,
     /// 3D resolution scale (0.5 = half resolution, much faster on weak GPUs).
     pub render_scale: f32,
     /// Vertical sync (FPS locked to the monitor refresh rate). Applied on restart.
@@ -80,6 +84,8 @@ impl Default for Settings {
             show_fps: true,
             fullscreen: false,
             outlines: true,
+            shadows: true,
+            textures: true,
             render_scale: 1.0,
             vsync: true,
             fps_limit: 144,

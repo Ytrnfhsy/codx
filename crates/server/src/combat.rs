@@ -246,6 +246,7 @@ impl Game {
         if !v.alive {
             return;
         }
+        let dropped = *v.weapon();
         v.alive = false;
         v.hp = 0.0;
         v.deaths += 1;
@@ -265,6 +266,9 @@ impl Game {
             .collect();
         v.attackers.clear();
         self.drop_bomb_if_carrier(victim);
+        if self.state != MatchState::PostMatch {
+            self.drop_weapon(dropped, vpos);
+        }
         if martyr && !matches!(cause, Cause::Bomb | Cause::Fall) {
             let id = self.new_ent_id();
             self.grenades.push(Grenade {
