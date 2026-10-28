@@ -242,10 +242,6 @@ pub fn render_world(
     let mut tags = Vec::new();
     let now = g.now;
     let my_team = g.team;
-    let mut painted = std::mem::take(&mut g.painted_meshes);
-    for pm in painted.values_mut() {
-        pm.clear();
-    }
     let kc = g.killcam.as_ref();
     let ents = kc.map(|k| &k.ents).unwrap_or(&g.ents);
     let bomb = match kc {
@@ -332,7 +328,7 @@ pub fn render_world(
             stance: a.stance,
             team: a.team,
             weapon: a.weapon,
-            skin: g.look_of(a.id).0,
+            skin: g.look_of(a.id),
             lod: {
                 let d = a.pos.distance(view.pos);
                 if d < 8.0 {
@@ -352,10 +348,7 @@ pub fn render_world(
             melee: a.melee,
             reload: a.reload,
         };
-        let muzzle = match g.look_of(a.id).1 {
-            Some(sid) => models::add_soldier(&mut m, Some(painted.entry(sid).or_default()), &pose),
-            None => models::add_soldier(&mut m, None, &pose),
-        };
+        let muzzle = models::add_soldier(&mut m, None, &pose);
 
         let floor = g
             .world
@@ -397,16 +390,7 @@ pub fn render_world(
         None => &g.ragdolls,
     };
     for (id, r) in ragdolls {
-        let (skin, sid) = g.look_of(*id);
-        match sid {
-            Some(sid) => r.draw(
-                &mut m,
-                Some(painted.entry(sid).or_default()),
-                &skin,
-                now as f32,
-            ),
-            None => r.draw(&mut m, None, &skin, now as f32),
-        }
+        r.draw(&mut m, None, &g.look_of(*id), now as f32);
 
         let c = r.centre();
         if let Some(f) = g.world.floor_below(c + vec3(0.0, 0.2, 0.0), 2.5) {
@@ -414,11 +398,6 @@ pub fn render_world(
         }
     }
     mats.draw_toon(&m);
-    for (sid, pm) in &painted {
-        if let Some(tex) = g.skin_assets.get(sid).and_then(|a| a.tex.as_ref()) {
-            mats.draw_toon_painted(pm, tex);
-        }
-    }
 
     // shadows + particles (blended)
     let fx = kc.map(|k| &k.fx).unwrap_or(&g.fx);
@@ -437,7 +416,6 @@ pub fn render_world(
     }
     g.frame_mesh = m;
     g.fx_mesh = shadows;
-    g.painted_meshes = painted;
     tags
 }
 

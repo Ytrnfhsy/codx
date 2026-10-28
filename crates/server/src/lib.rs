@@ -11,7 +11,6 @@ pub mod nav;
 pub mod netserver;
 pub mod pickups;
 pub mod sab;
-pub mod skins;
 
 use config::ServerConfig;
 use std::net::UdpSocket;
@@ -89,7 +88,7 @@ pub fn start(cfg: ServerConfig, cfg_path: Option<PathBuf>) -> Result<ServerHandl
     let mut game = game::Game::new(cfg);
     game.cfg_path = cfg_path;
     let http_port = if http_enabled {
-        match http::spawn(&bind, port, tx.clone(), game.skins.clone()) {
+        match http::spawn(&bind, port, tx.clone()) {
             Ok(_) => Some(port),
             Err(e) => {
                 eprintln!("[http] веб-панель недоступна ({e})");

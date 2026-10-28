@@ -84,10 +84,6 @@ pub struct Player {
     pub progress: f32,
     pub joined_at: f64,
     pub chat_budget: f32,
-    /// Painted skin id (0 = standard look).
-    pub skin: u32,
-    /// Skin definitions this client has already received.
-    pub sent_skins: Vec<u32>,
 }
 
 impl Player {
@@ -153,8 +149,6 @@ impl Player {
             progress: 0.0,
             joined_at: now,
             chat_budget: 5.0,
-            skin: 0,
-            sent_skins: Vec::new(),
         }
     }
     pub fn is_bot(&self) -> bool {
@@ -279,8 +273,6 @@ pub struct Game {
     pub grenades: Vec<Grenade>,
     pub helis: Vec<Heli>,
     pub pickups: Vec<crate::pickups::Pickup>,
-    /// Painted skins (shared with the web server).
-    pub skins: std::sync::Arc<std::sync::Mutex<crate::skins::SkinStore>>,
     pub blasts: Vec<PendingBlast>,
     pub next_ent: u16,
     pub uav_until: [f64; 2],
@@ -317,7 +309,6 @@ impl Game {
             overtime_end: 0.0,
         };
         let tuning = cfg.tuning();
-        let skin_store = crate::skins::SkinStore::load(&cfg.data_dir);
         let mut g = Game {
             tuning,
             cfg,
@@ -338,7 +329,6 @@ impl Game {
             grenades: Vec::new(),
             helis: Vec::new(),
             pickups: Vec::new(),
-            skins: std::sync::Arc::new(std::sync::Mutex::new(skin_store)),
             blasts: Vec::new(),
             next_ent: 1,
             uav_until: [0.0; 2],
@@ -428,87 +418,6 @@ impl Game {
         self.broadcast(S2C::Tuning(Box::new(self.tuning.clone())));
     }
 
-    /// Sends a painted skin's definition and picture to one client (once).
-    pub fn send_skin_def(&mut self, to: u8, skin_id: u32) {
-        let Some(p) = self.p(to) else { return };
-        if p.is_bot() || p.sent_skins.contains(&skin_id) {
-            return;
-        }
-        let entry = {
-            let store = self.skins.lock().unwrap();
-            store.get(skin_id).map(|e| (e.skin, e.png.clone()))
-        };
-        let Some((skin, png)) = entry else { return };
-        self.send(
-            to,
-            S2C::SkinDef {
-                id: skin_id,
-                skin,
-                png_len: png.len() as u32,
-            },
-        );
-        for (k, chunk) in png.chunks(700).enumerate() {
-            self.send(
-                to,
-                S2C::SkinData {
-                    id: skin_id,
-                    offset: (k * 700) as u32,
-                    data: chunk.to_vec(),
-                },
-            );
-        }
-        if let Some(p) = self.pm(to) {
-            p.sent_skins.push(skin_id);
-        }
-    }
-
-    /// A player sends the skin codes they own; the first valid one is worn.
-    pub fn redeem_skin(&mut self, id: u8, codes: &[String]) {
-        let found = {
-            let store = self.skins.lock().unwrap();
-            codes
-                .iter()
-                .take(8)
-                .filter(|c| c.len() <= 24)
-                .find_map(|c| store.find_code(c))
-        };
-        let Some(skin_id) = found else {
-            if !codes.is_empty() {
-                self.send(
-                    id,
-                    S2C::Center {
-                        text: "Код скіна не діє на цьому сервері".into(),
-                        secs: 2.5,
-                    },
-                );
-            }
-            return;
-        };
-        let Some(p) = self.pm(id) else { return };
-        if p.skin == skin_id {
-            return;
-        }
-        p.skin = skin_id;
-        for other in self.ids() {
-            self.send_skin_def(other, skin_id);
-        }
-        self.broadcast(S2C::Skins(vec![(id, skin_id)]));
-        let name = self
-            .skins
-            .lock()
-            .unwrap()
-            .get(skin_id)
-            .map(|e| e.name.clone())
-            .unwrap_or_default();
-        self.send(
-            id,
-            S2C::Center {
-                text: format!("Скін «{name}» активовано"),
-                secs: 2.5,
-            },
-        );
-    }
-
     pub fn new_ent_id(&mut self) -> u16 {
         self.next_ent = self.next_ent.wrapping_add(1).max(1);
         self.next_ent
@@ -596,23 +505,6 @@ impl Game {
             },
         );
         self.send(id, S2C::Tuning(Box::new(self.tuning.clone())));
-        let worn: Vec<u32> = self
-            .players
-            .iter()
-            .flatten()
-            .map(|p| p.skin)
-            .filter(|s| *s != 0)
-            .collect();
-        for sid in worn {
-            self.send_skin_def(id, sid);
-        }
-        let skins = self
-            .players
-            .iter()
-            .flatten()
-            .map(|p| (p.id, p.skin))
-            .collect();
-        self.send(id, S2C::Skins(skins));
         self.broadcast(S2C::Chat {
             from: String::new(),
             team: Team::Spectator,
@@ -961,15 +853,6 @@ impl Game {
             }
             C2S::Melee => self.melee(id),
             C2S::PickUp(ent) => self.pick_up(id, ent),
-            C2S::SkinCodes(codes) => {
-                if let Some(p) = self.pm(id) {
-                    if p.chat_budget < 0.5 {
-                        return;
-                    }
-                    p.chat_budget -= 0.5;
-                }
-                self.redeem_skin(id, &codes)
-            }
             C2S::UseKillstreak { target } => self.use_killstreak(id, target),
             C2S::Chat { text, team_only } => self.on_chat(id, text, team_only),
             C2S::Rcon { password, cmd } => self.on_rcon(id, &password, &cmd),

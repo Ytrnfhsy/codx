@@ -970,17 +970,6 @@ impl Materials {
         }
     }
 
-    /// Draws a character mesh painted with a skin texture.
-    pub fn draw_toon_painted(&self, m: &ToonMesh, tex: &Texture2D) {
-        if !m.outline.is_empty() {
-            gl_use_material(&self.outline);
-            m.outline.draw();
-        }
-        gl_use_material(&self.world);
-        m.fill.draw_tex(Some(tex));
-        gl_use_default_material();
-    }
-
     /// Draws a toon mesh: outline pass then fill.
     pub fn draw_toon(&self, m: &ToonMesh) {
         if !m.outline.is_empty() {

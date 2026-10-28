@@ -1250,13 +1250,6 @@ impl GameClient {
                 if ui.button2("Налаштування", x + 24.0, y + 258.0, bw, 46.0) {
                     self.overlay = Overlay::Settings;
                 }
-                ui.text(
-                    "Скін: введи в чаті /skin КОД (код видає адмін сервера)",
-                    x + 24.0,
-                    y + 350.0,
-                    14,
-                    MUTED,
-                );
                 if ui.button_colored("Відключитися", x + 24.0, y + 392.0, bw, 46.0, BAD)
                 {
                     return Some(HudAction::Leave);

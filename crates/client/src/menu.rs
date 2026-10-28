@@ -12,7 +12,6 @@ pub enum Page {
     Host,
     Browser,
     Settings,
-    Skin,
 }
 
 pub enum MenuAction {
@@ -110,59 +109,6 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
     }
 }
 
-fn skins_page(ui: &mut Ui, st: &mut MenuState, s: &mut Settings, x: f32, y: f32, pw: f32) {
-    ui.panel(x, y, pw, 400.0);
-    ui.bold("Скіни", x + 24.0, y + 40.0, 26, ACCENT);
-    let host = s
-        .address
-        .rsplit_once(':')
-        .map(|(h, _)| h.to_string())
-        .unwrap_or_else(|| s.address.clone());
-    let port = s
-        .address
-        .rsplit_once(':')
-        .map(|(_, p)| p.to_string())
-        .unwrap_or_else(|| toon_shared::consts::DEFAULT_PORT.to_string());
-    let lines = [
-        "Скін малюють у 3D-редакторі на сайті сервера:".to_string(),
-        format!("http://{host}:{port}/skins"),
-        "Надішли його адміністратору — після підтвердження".to_string(),
-        "(наприклад, за донат) отримаєш код скіна.".to_string(),
-    ];
-    for (k, l) in lines.iter().enumerate() {
-        let c = if k == 1 { ACCENT } else { TEXT };
-        ui.text(l, x + 24.0, y + 84.0 + k as f32 * 24.0, 17, c);
-    }
-    ui.field(
-        41,
-        "Коди скінів (через пробіл)",
-        &mut s.skin_codes,
-        x + 24.0,
-        y + 210.0,
-        pw - 48.0,
-        false,
-        120,
-    );
-    ui.text(
-        "У грі код можна ввести й у чаті: /skin КОД",
-        x + 24.0,
-        y + 290.0,
-        15,
-        MUTED,
-    );
-    ui.text(
-        "Без коду, як і боти, гравець має стандартний вигляд.",
-        x + 24.0,
-        y + 312.0,
-        15,
-        MUTED,
-    );
-    if ui.button("Готово", x + pw - 200.0, y + 336.0, 176.0, 44.0) {
-        s.save();
-        st.page = Page::Main;
-    }
-}
-
 pub fn draw_menu(
     ui: &mut Ui,
     st: &mut MenuState,
@@ -234,14 +180,10 @@ pub fn draw_menu(
                 let recent = s.recent.clone();
                 st.browser.refresh(&recent);
             }
-            let tw3 = (pw - 72.0) / 3.0;
-            if ui.button2("Скіни", x + 24.0, y + 356.0, tw3, 46.0) {
-                st.page = Page::Skin;
-            }
-            if ui.button2("Налаштування", x + 36.0 + tw3, y + 356.0, tw3, 46.0) {
+            if ui.button2("Налаштування", x + 24.0, y + 356.0, bw, 46.0) {
                 st.page = Page::Settings;
             }
-            if ui.button_colored("Вихід", x + 48.0 + tw3 * 2.0, y + 356.0, tw3, 46.0, BAD) {
+            if ui.button_colored("Вихід", x + 36.0 + bw, y + 356.0, bw, 46.0, BAD) {
                 action = Some(MenuAction::Quit);
             }
             if let Some(port) = server_running {
@@ -439,7 +381,6 @@ pub fn draw_menu(
                 st.page = Page::Main;
             }
         }
-        Page::Skin => skins_page(ui, st, s, x, y, pw),
         Page::Settings => {
             ui.panel(x, y, pw, 550.0);
             ui.bold("Налаштування", x + 24.0, y + 40.0, 26, ACCENT);
