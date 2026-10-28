@@ -36,21 +36,21 @@ pub const LIFETIME: f32 = 8.0;
 /// Local joint positions of a standing soldier (forward is -Z, like the model).
 fn standing() -> [Vec3; N] {
     [
-        vec3(0.0, 1.62, 0.0),
-        vec3(0.0, 1.3, 0.0),
-        vec3(0.0, 0.85, 0.0),
-        vec3(-0.28, 1.3, 0.0),
-        vec3(0.28, 1.3, 0.0),
-        vec3(-0.13, 0.8, 0.0),
-        vec3(0.13, 0.8, 0.0),
-        vec3(-0.13, 0.42, 0.0),
-        vec3(0.13, 0.42, 0.0),
-        vec3(-0.13, 0.06, -0.05),
-        vec3(0.13, 0.06, -0.05),
-        vec3(0.1, 1.2, -0.85),
-        vec3(0.12, 1.18, -0.4),
-        vec3(0.12, 1.18, -0.4),
-        vec3(0.12, 1.25, -1.35),
+        vec3(0.0, 1.52, 0.0),
+        vec3(0.0, 1.04, 0.0),
+        vec3(0.0, 0.66, 0.0),
+        vec3(-0.27, 1.04, 0.0),
+        vec3(0.27, 1.04, 0.0),
+        vec3(-0.12, 0.58, 0.0),
+        vec3(0.12, 0.58, 0.0),
+        vec3(-0.12, 0.34, 0.0),
+        vec3(0.12, 0.34, 0.0),
+        vec3(-0.12, 0.06, -0.05),
+        vec3(0.12, 0.06, -0.05),
+        vec3(0.1, 0.96, -0.72),
+        vec3(0.12, 0.94, -0.34),
+        vec3(0.12, 0.94, -0.34),
+        vec3(0.12, 1.0, -1.25),
     ]
 }
 
@@ -111,11 +111,11 @@ impl Ragdoll {
         if stance == Stance::Crouch {
             for (i, l) in local.iter_mut().enumerate() {
                 if !matches!(i, LKNEE | RKNEE | LFOOT | RFOOT) {
-                    l.y -= 0.5;
+                    l.y -= models::CROUCH_DROP;
                 }
             }
-            local[LKNEE] = vec3(-0.13, 0.32, -0.38);
-            local[RKNEE] = vec3(0.13, 0.32, -0.38);
+            local[LKNEE] = vec3(-0.12, 0.32, -0.3);
+            local[RKNEE] = vec3(0.12, 0.32, -0.3);
         }
         let p: [Vec3; N] = std::array::from_fn(|i| root.transform_point3(local[i]));
 
@@ -250,7 +250,7 @@ impl Ragdoll {
 
     fn radius(i: usize) -> f32 {
         match i {
-            HEAD => 0.27,
+            HEAD => 0.36,
             CHEST | PELVIS => 0.16,
             LFOOT | RFOOT | GRIP | MUZZLE => 0.06,
             _ => 0.09,
@@ -349,7 +349,7 @@ impl Ragdoll {
                 c.extend(1.0),
             )
         };
-        let tc = p[PELVIS].lerp(p[CHEST], 0.53);
+        let tc = p[PELVIS].lerp(p[CHEST], 0.55);
         let torso_rects = [
             tex::cell(tex::TORSO_RIGHT),
             tex::cell(tex::TORSO_LEFT),
@@ -362,14 +362,14 @@ impl Ragdoll {
             Some(pm) => {
                 pm.fill.add_rounded_box_painted(
                     &torso(tc),
-                    vec3(0.27, 0.3, 0.18),
+                    vec3(0.25, 0.27, 0.17),
                     0.13,
                     3,
                     &torso_rects,
                 );
                 m.outline.add_rounded_box_ex(
                     &torso(tc),
-                    vec3(0.27, 0.3, 0.18) + Vec3::splat(ow),
+                    vec3(0.25, 0.27, 0.17) + Vec3::splat(ow),
                     0.13 + ow,
                     m.ink.unwrap(),
                     255,
@@ -378,7 +378,7 @@ impl Ragdoll {
                 );
             }
             None => {
-                m.rounded(&torso(tc), vec3(0.27, 0.3, 0.18), 0.13, pal.shirt, ow, 3);
+                m.rounded(&torso(tc), vec3(0.25, 0.27, 0.17), 0.13, pal.shirt, ow, 3);
                 m.rounded(
                     &torso(tc + up * 0.04),
                     vec3(0.29, 0.19, 0.2),
@@ -417,7 +417,7 @@ impl Ragdoll {
             hu.extend(0.0),
             hb.extend(0.0),
             p[HEAD].extend(1.0),
-        );
+        ) * Mat4::from_scale(Vec3::splat(models::HEAD_SCALE));
         models::add_head(
             m,
             painted.as_deref_mut(),
@@ -432,7 +432,7 @@ impl Ragdoll {
         if self.dizzy && self.age < 3.5 {
             for k in 0..3 {
                 let a = now * 5.0 + k as f32 * std::f32::consts::TAU / 3.0;
-                let sp = p[HEAD] + hu * 0.38 + (hr * a.cos() + hb * a.sin()) * 0.32;
+                let sp = p[HEAD] + hu * 0.5 + (hr * a.cos() + hb * a.sin()) * 0.32;
                 m.fill
                     .add_sphere(&Mat4::from_translation(sp), 0.05, [255, 230, 60], 5, 3);
             }
@@ -469,7 +469,7 @@ impl Ragdoll {
             );
         }
         for (sh, hand, cell) in [(LSH, LHAND, tex::ARM_LEFT), (RSH, RHAND, tex::ARM_RIGHT)] {
-            limb(m, p[hand], p[sh], 0.08, pal.shirt, tex::cell(cell));
+            limb(m, p[hand], p[sh], 0.075, pal.shirt, tex::cell(cell));
         }
         let boots = [tex::half(tex::HANDS_BOOTS, true); 6];
         for (knee, foot) in [(LKNEE, LFOOT), (RKNEE, RFOOT)] {

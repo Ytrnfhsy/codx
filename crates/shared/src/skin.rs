@@ -31,7 +31,7 @@ impl Default for Skin {
             hair_color: 1,
             hat: 1,
             hat_color: 0,
-            eyes: 0,
+            eyes: 1,
             face: 0,
             mouth: 1,
             shirt: 0,

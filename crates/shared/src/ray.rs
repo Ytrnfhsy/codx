@@ -50,51 +50,44 @@ impl HitZone {
     }
 }
 
-/// Local-space hitboxes (model faces -Z) for a stance.
+/// Local-space hitboxes (model faces -Z) for a stance. They follow the chibi characters:
+/// a big round head on a small body.
 pub fn hitboxes(stance: Stance) -> [(HitZone, Vec3, Vec3); 3] {
     match stance {
         Stance::Stand => [
             (
                 HitZone::Head,
-                vec3(-0.29, 1.34, -0.29),
-                vec3(0.29, 1.92, 0.29),
+                vec3(-0.38, 1.16, -0.36),
+                vec3(0.38, 1.9, 0.36),
             ),
-            (
-                HitZone::Torso,
-                vec3(-0.32, 0.8, -0.22),
-                vec3(0.32, 1.36, 0.22),
-            ),
+            (HitZone::Torso, vec3(-0.3, 0.58, -0.2), vec3(0.3, 1.16, 0.2)),
             (
                 HitZone::Legs,
-                vec3(-0.26, 0.0, -0.16),
-                vec3(0.26, 0.8, 0.16),
+                vec3(-0.24, 0.0, -0.16),
+                vec3(0.24, 0.58, 0.16),
             ),
         ],
         Stance::Crouch => [
             (
                 HitZone::Head,
-                vec3(-0.29, 0.76, -0.33),
-                vec3(0.29, 1.33, 0.25),
+                vec3(-0.38, 0.86, -0.4),
+                vec3(0.38, 1.6, 0.32),
             ),
             (
                 HitZone::Torso,
-                vec3(-0.32, 0.4, -0.25),
-                vec3(0.32, 0.86, 0.25),
+                vec3(-0.3, 0.28, -0.25),
+                vec3(0.3, 0.86, 0.25),
             ),
-            (HitZone::Legs, vec3(-0.3, 0.0, -0.35), vec3(0.3, 0.45, 0.25)),
+            (HitZone::Legs, vec3(-0.3, 0.0, -0.42), vec3(0.3, 0.3, 0.25)),
         ],
         Stance::Prone => [
             (
                 HitZone::Head,
-                vec3(-0.29, 0.0, -1.05),
-                vec3(0.29, 0.6, -0.47),
+                vec3(-0.38, 0.0, -1.12),
+                vec3(0.38, 0.62, -0.36),
             ),
-            (
-                HitZone::Torso,
-                vec3(-0.32, 0.0, -0.5),
-                vec3(0.32, 0.42, 0.2),
-            ),
-            (HitZone::Legs, vec3(-0.28, 0.0, 0.2), vec3(0.28, 0.3, 1.0)),
+            (HitZone::Torso, vec3(-0.3, 0.0, -0.38), vec3(0.3, 0.42, 0.2)),
+            (HitZone::Legs, vec3(-0.26, 0.0, 0.2), vec3(0.26, 0.3, 0.8)),
         ],
     }
 }

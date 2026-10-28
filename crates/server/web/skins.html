@@ -145,7 +145,7 @@ const CELL = c => { const x = (c % 4) * 0.25, y = Math.floor(c / 4) * 0.25; retu
 const HALF = (c, lower) => { const r = CELL(c), m = (r[1] + r[3]) / 2; return lower ? [r[0], m, r[2], r[3]] : [r[0], r[1], r[2], m]; };
 const T = { HEAD_FRONT:0, HEAD_RIGHT:1, HEAD_BACK:2, HEAD_LEFT:3, HEAD_TOP:4, HEAD_BOTTOM:5, TORSO_FRONT:6, TORSO_BACK:7, TORSO_RIGHT:8, TORSO_LEFT:9, TORSO_ENDS:10, ARM_RIGHT:11, ARM_LEFT:12, LEG_RIGHT:13, LEG_LEFT:14, HANDS_BOOTS:15 };
 
-const skin = { tone:1, hair:1, hair_color:1, hat:1, hat_color:0, eyes:0, face:0, mouth:1, shirt:1, pants:2, pattern:0, extra:0 };
+const skin = { tone:1, hair:1, hair_color:1, hat:1, hat_color:0, eyes:1, face:0, mouth:1, shirt:1, pants:2, pattern:0, extra:0 };
 let team = 0;
 
 // ---------------------------------------------------------------- texture canvas
@@ -194,7 +194,9 @@ function paintTemplate() {
   exs.forEach((ex, k) => {
     if (sunglasses || (skin.face === 7 && k === 1)) return;
     switch (skin.eyes) {
-      case 1: dot(ex, ey, 2.6, INK); dot(ex + 1, ey - 1, 0.8, [255,255,255]); break;
+      case 1:
+        ctx.fillStyle = rgb(INK); ctx.beginPath(); ctx.ellipse(ex, ey, 2.2, 3.2, 0, 0, Math.PI * 2); ctx.fill();
+        dot(ex + 0.8, ey - 1.2, 0.8, [255,255,255]); break;
       case 2: line(ex - 3, ey + 1, ex, ey - 2, INK, 1.4); line(ex, ey - 2, ex + 3, ey + 1, INK, 1.4); break;
       default:
         dot(ex, ey, 3.6, [255,255,255]); dot(ex + (k ? -0.4 : 0.4), ey + 0.3, 2.2, INK); dot(ex + 0.9, ey - 1.1, 0.8, [255,255,255]);
@@ -202,6 +204,7 @@ function paintTemplate() {
         if (skin.eyes === 4) { ctx.fillStyle = rgb(tone); ctx.fillRect(ex - 4, ey - 4, 8, 3.5); line(ex - 4, ey - 0.5, ex + 4, ey - 0.5, INK, 1); }
     }
   });
+  if (skin.eyes <= 1 && !sunglasses) for (const [k, ex] of exs.entries()) line(ex - 3, ey - 5 + (k ? 0.6 : -0.6), ex + 3, ey - 5 - (k ? 0.6 : -0.6), mul(hair, 0.8), 1.2);
   dot(fx + 16, fy + 21, 1.2, mul(tone, 0.85));
   if (skin.face === 1) { dot(fx + 5, fy + 22, 2.2, [255,150,150]); dot(fx + 27, fy + 22, 2.2, [255,150,150]); }
   if (skin.face === 2) for (const [x, y] of [[5,21],[7,23],[4,24],[27,21],[25,23],[28,24]]) { ctx.fillStyle = rgb(mul(tone, 0.7)); ctx.fillRect(fx + x, fy + y, 1, 1); }
@@ -340,47 +343,54 @@ const W = 0.03; // outline width
 
 function inkMat() { return new THREE.MeshBasicMaterial({ color: new THREE.Color(...TEAM[team].ink.map(v => v / 255)), side: THREE.BackSide }); }
 let ink = inkMat();
-function addPart(geo, hull, at, rot) {
-  const m = new THREE.Mesh(geo, paintMat); m.position.set(...at); if (rot) m.quaternion.copy(rot);
+function addPart(geo, hull, at, scale) {
+  const m = new THREE.Mesh(geo, paintMat); m.position.set(...at); if (scale) m.scale.setScalar(scale);
   body.add(m); paintable.push(m);
-  if (hull) { const h = new THREE.Mesh(hull, ink); h.position.copy(m.position); h.quaternion.copy(m.quaternion); body.add(h); }
+  if (hull) { const h = new THREE.Mesh(hull, ink); h.position.copy(m.position); h.scale.copy(m.scale); body.add(h); }
 }
 const headRects = [CELL(T.HEAD_RIGHT), CELL(T.HEAD_LEFT), CELL(T.HEAD_TOP), CELL(T.HEAD_BOTTOM), CELL(T.HEAD_BACK), CELL(T.HEAD_FRONT)];
 const torsoRects = [CELL(T.TORSO_RIGHT), CELL(T.TORSO_LEFT), HALF(T.TORSO_ENDS, false), HALF(T.TORSO_ENDS, true), CELL(T.TORSO_BACK), CELL(T.TORSO_FRONT)];
-const HEAD = [0, 1.62, 0];
+// chibi layout (models.rs): big head drawn 1.3× larger
+const HEAD = [0, 1.52, 0], HS = 1.3;
 function buildBody() {
   // head and torso
-  addPart(roundedBox([0.29, 0.27, 0.27], 0.17, 10, headRects), roundedBox([0.29 + W, 0.27 + W, 0.27 + W], 0.17 + W, 4), HEAD);
-  addPart(roundedBox([0.27, 0.3, 0.18], 0.13, 8, torsoRects), roundedBox([0.27 + W, 0.3 + W, 0.18 + W], 0.13 + W, 4), [0, 1.1, 0]);
-  // legs and boots (standing, like in the game)
-  for (const [x, c] of [[0.13, T.LEG_RIGHT], [-0.13, T.LEG_LEFT]]) {
-    addPart(capsule([x, 0.2, 0], [x, 0.76, 0], 0.125, CELL(c)), capsule([x, 0.2, 0], [x, 0.76, 0], 0.125 + W, [0, 0, 1, 1], 10, 2), [0, 0, 0]);
+  addPart(roundedBox([0.29, 0.27, 0.27], 0.21, 10, headRects), roundedBox([0.29 + W / HS, 0.27 + W / HS, 0.27 + W / HS], 0.21 + W / HS, 4), HEAD, HS);
+  addPart(roundedBox([0.25, 0.27, 0.17], 0.13, 8, torsoRects), roundedBox([0.25 + W, 0.27 + W, 0.17 + W], 0.13 + W, 4), [0, 0.87, 0]);
+  // short legs and boots
+  for (const [x, c] of [[0.12, T.LEG_RIGHT], [-0.12, T.LEG_LEFT]]) {
+    addPart(capsule([x, 0.16, 0], [x, 0.56, 0], 0.115, CELL(c)), capsule([x, 0.16, 0], [x, 0.56, 0], 0.115 + W, [0, 0, 1, 1], 10, 2), [0, 0, 0]);
     const br = Array(6).fill(HALF(T.HANDS_BOOTS, true));
-    addPart(roundedBox([0.13, 0.085, 0.18], 0.07, 4, br), roundedBox([0.13 + W, 0.085 + W, 0.18 + W], 0.07 + W, 3), [x, 0.09, -0.04]);
+    addPart(roundedBox([0.12, 0.075, 0.165], 0.065, 4, br), roundedBox([0.12 + W, 0.075 + W, 0.165 + W], 0.065 + W, 3), [x, 0.07, -0.04]);
   }
   // arms hang down a little away from the body (easy to paint)
-  for (const [x, c] of [[0.29, T.ARM_RIGHT], [-0.29, T.ARM_LEFT]]) {
-    const sh = [x, 1.3, 0], end = [x * 1.25, 0.86, -0.02];
-    addPart(capsule(end, sh, 0.08, CELL(c)), capsule(end, sh, 0.08 + W, [0, 0, 1, 1], 10, 2), [0, 0, 0]);
-    addPart(sphere(0.09, HALF(T.HANDS_BOOTS, false)), sphere(0.09 + W, null, 10, 6), [end[0] * 1.03, end[1] - 0.07, end[2]]);
+  for (const [x, c] of [[0.27, T.ARM_RIGHT], [-0.27, T.ARM_LEFT]]) {
+    const sh = [x, 1.04, 0], end = [x * 1.22, 0.72, -0.02];
+    addPart(capsule(end, sh, 0.075, CELL(c)), capsule(end, sh, 0.075 + W, [0, 0, 1, 1], 10, 2), [0, 0, 0]);
+    addPart(sphere(0.09, HALF(T.HANDS_BOOTS, false)), sphere(0.09 + W, null, 10, 6), [end[0] * 1.03, end[1] - 0.065, end[2]]);
   }
 }
 buildBody();
 
 // ---- 3D details (hair, hats, accessories) — same shapes as models.rs
 function toon(c) { return new THREE.MeshToonMaterial({ color: new THREE.Color(...c.map(v => v / 255)), gradientMap: grad }); }
+let parent = extras;
 function rb(half, r, c, at, rot, outline = true) {
-  const m = new THREE.Mesh(roundedBox(half, r, 5), toon(c)); m.position.set(...at); if (rot) m.rotation.set(...rot); extras.add(m);
-  if (outline) { const h = new THREE.Mesh(roundedBox(half.map(v => v + W * 0.7), r + W * 0.7, 3), ink); h.position.copy(m.position); h.rotation.copy(m.rotation); extras.add(h); }
+  const m = new THREE.Mesh(roundedBox(half, r, 5), toon(c)); m.position.set(...at); if (rot) m.rotation.set(...rot); parent.add(m);
+  if (outline) { const h = new THREE.Mesh(roundedBox(half.map(v => v + W * 0.7), r + W * 0.7, 3), ink); h.position.copy(m.position); h.rotation.copy(m.rotation); parent.add(h); }
   return m;
 }
-function ball(r, c, at, scale, rot) {
-  const m = new THREE.Mesh(sphere(r, null), toon(c)); m.position.set(...at); if (scale) m.scale.set(...scale); if (rot) m.rotation.set(...rot); extras.add(m); return m;
+function ball(r, c, at, scale, rot, outline = false) {
+  const m = new THREE.Mesh(sphere(r, null), toon(c)); m.position.set(...at); if (scale) m.scale.set(...scale); if (rot) m.rotation.set(...rot); parent.add(m);
+  if (outline) { const h = new THREE.Mesh(sphere(r + W * 0.7, null, 12, 8), ink); h.position.copy(m.position); h.scale.copy(m.scale); h.rotation.copy(m.rotation); parent.add(h); }
+  return m;
 }
-function caps(a, b, r, c) { const m = new THREE.Mesh(capsule(a, b, r, [0, 0, 1, 1], 10, 3), toon(c)); extras.add(m); }
-const H = (x, y, z) => [HEAD[0] + x, HEAD[1] + y, HEAD[2] + z];
+function caps(a, b, r, c) { const m = new THREE.Mesh(capsule(a, b, r, [0, 0, 1, 1], 10, 3), toon(c)); parent.add(m); }
+// head-attached details live in a group placed and scaled like the game's big head
+const H = (x, y, z) => [x, y, z];
 function buildExtras() {
   extras.clear();
+  const hg = new THREE.Group(); hg.position.set(...HEAD); hg.scale.setScalar(HS); extras.add(hg);
+  parent = hg;
   const hatless = skin.hat === 0, hairc = HAIR_COLORS[skin.hair_color][1];
   const hatc = cloth(skin.hat_color, TEAM[team].helmet);
   const cap = () => rb([0.305, 0.17, 0.285], 0.16, hairc, H(0, 0.13, 0.03));
@@ -395,19 +405,19 @@ function buildExtras() {
     case 7: if (hatless) ball(0.3, hairc, H(0, 0.12, 0.08), [1.25, 1, 1.15]); break;
   }
   switch (skin.hat) {
-    case 1: rb([0.33, 0.17, 0.31], 0.16, hatc, H(0, 0.15, 0.02)); rb([0.3, 0.025, 0.06], 0.02, hatc, H(0, 0.03, -0.31)); rb([0.07, 0.05, 0.03], 0.02, TEAM[team].helmet, H(0, 0.2, -0.3), null, false); break;
+    case 1: ball(0.3, hatc, H(0, 0.12, 0.02), [1.17, 0.85, 1.13], null, true); ball(0.3, mul(hatc, 0.88), H(0, 0.08, 0.02), [1.23, 0.12, 1.2], null, true); rb([0.07, 0.05, 0.02], 0.02, TEAM[team].helmet, H(0, 0.23, -0.32), null, false); break;
     case 2: rb([0.315, 0.14, 0.295], 0.14, hatc, H(0, 0.17, 0.02)); rb([0.24, 0.02, 0.13], 0.02, mul(hatc, 0.85), H(0, 0.06, -0.37)); ball(0.03, mul(hatc, 0.8), H(0, 0.32, 0.02)); break;
     case 3: rb([0.315, 0.16, 0.295], 0.16, hatc, H(0, 0.18, 0.02)); rb([0.325, 0.055, 0.305], 0.05, mul(hatc, 0.85), H(0, 0.05, 0.02), null, false); ball(0.08, [245, 245, 240], H(0, 0.37, 0.02)); break;
     case 4: ball(0.3, hatc, H(0.05, 0.25, 0.02), [1.2, 0.35, 1.1], [0, 0, -0.2]); ball(0.025, mul(hatc, 0.7), H(0.08, 0.36, 0.02)); break;
     case 5: rb([0.305, 0.05, 0.29], 0.05, hatc, H(0, 0.13, 0)); ball(0.05, hatc, H(0, 0.12, 0.3)); for (const x of [-0.06, 0.06]) caps(H(x, -0.02, 0.38), H(0, 0.12, 0.31), 0.025, hatc); break;
     case 6: rb([0.31, 0.12, 0.29], 0.12, hatc, H(0, 0.2, 0.02)); ball(0.48, mul(hatc, 0.92), H(0, 0.1, 0.02), [1, 0.1, 1]); break;
   }
-  const backpack = () => { rb([0.21, 0.23, 0.1], 0.08, [92, 108, 66], [0, 1.12, 0.27]); rb([0.14, 0.09, 0.03], 0.03, [78, 92, 56], [0, 1.02, 0.37], null, false); };
+  const backpack = () => { parent = extras; rb([0.19, 0.21, 0.09], 0.08, [92, 108, 66], [0, 0.9, 0.25]); rb([0.13, 0.08, 0.03], 0.03, [78, 92, 56], [0, 0.81, 0.34], null, false); };
   switch (skin.extra) {
     case 1: backpack(); break;
-    case 4: backpack(); caps([0.14, 1.3, 0.3], [0.19, 1.85, 0.38], 0.012, INK); break;
-    case 2: rb([0.24, 0.06, 0.2], 0.06, hatc, [0, 1.4, 0]); rb([0.06, 0.14, 0.03], 0.03, hatc, [0.12, 1.24, -0.2], null, false); break;
-    case 3: {
+    case 4: backpack(); caps([0.13, 1.05, 0.28], [0.18, 1.6, 0.36], 0.012, INK); break;
+    case 2: parent = extras; rb([0.22, 0.055, 0.18], 0.06, hatc, [0, 1.1, 0]); rb([0.06, 0.14, 0.03], 0.03, hatc, [0.11, 0.96, -0.19], null, false); break;
+    case 3: { parent = hg;
       const p = [H(-0.31, 0, 0.02), H(-0.27, 0.28, 0.02), H(0, 0.36, 0.02), H(0.27, 0.28, 0.02), H(0.31, 0, 0.02)];
       for (let i = 0; i < 4; i++) caps(p[i], p[i + 1], 0.025, [50, 50, 60]);
       for (const x of [-0.32, 0.32]) { rb([0.05, 0.085, 0.085], 0.04, [50, 50, 60], H(x, -0.01, 0.02)); rb([0.02, 0.06, 0.06], 0.02, hatc, H(x * 1.12, -0.01, 0.02), null, false); }

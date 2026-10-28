@@ -526,7 +526,8 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     let def = w.def();
     let ads = vm.ads;
     let hip = vec3(0.26, -0.27, -0.66);
-    let ads_pos = vec3(0.0, -0.132, -0.5);
+    // line the top of the sights up just under the screen centre
+    let ads_pos = vec3(0.0, -models::sight_height(w) * 0.85 - 0.006, -0.5);
     let mut pos = hip.lerp(ads_pos, ads);
     let mut pitch = 0.0f32;
     let mut yaw = 0.0f32;
@@ -616,26 +617,19 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     let mut m = ToonMesh::new();
     let ow = if settings.outlines { 0.004 } else { 0.0 };
     for p in models::gun_parts(w) {
-        let c = if p.mag { p.c + mag_off } else { p.c };
+        let c = if p.mag {
+            p.c + mag_off
+        } else if p.pump {
+            p.c + vec3(0.0, 0.0, pump * 0.1)
+        } else {
+            p.c
+        };
         m.boxed(&(base * Mat4::from_translation(c)), p.h, p.col, ow);
-    }
-    // shotgun pump slides back
-    if pump > 0.0 {
-        m.boxed(
-            &(base * Mat4::from_translation(vec3(0.0, 0.035, -0.38 + pump * 0.1))),
-            vec3(0.034, 0.03, 0.1),
-            [170, 104, 52],
-            ow,
-        );
     }
     // arms
     let sleeve = vm.sleeve;
     let grip = base.transform_point3(vec3(0.0, -0.03, 0.02));
-    let fore_rest = if def.class == WeaponClass::Pistol {
-        vec3(-0.02, -0.03, 0.03)
-    } else {
-        vec3(0.0, 0.02, -0.36 + pump * 0.1)
-    };
+    let fore_rest = models::fore_grip(w) + vec3(0.0, 0.0, pump * 0.1);
     let mag_spot = if shotgun {
         vec3(0.02, 0.0, -0.12)
     } else {
@@ -769,4 +763,100 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     gl_use_material(&mats.fx);
     f.draw();
     gl_use_default_material();
+}
+
+/// Developer view (`--model-gallery`): every gun and a few soldiers side by side.
+pub fn draw_model_gallery(mats: &Materials) {
+    clear_background(Color::from_rgba(236, 230, 214, 255));
+    let cam = Camera3D {
+        position: vec3(0.0, 2.2, -9.5),
+        target: vec3(0.0, 1.0, 0.0),
+        up: Vec3::Y,
+        fovy: 0.62,
+        projection: Projection::Perspective,
+        z_near: 0.1,
+        z_far: 60.0,
+        ..Default::default()
+    };
+    set_camera(&cam);
+    mats.set_lighting(&crate::mesh::Lighting {
+        shadow: None,
+        textures: false,
+        tint: Vec3::ONE,
+    });
+    mats.set_view(cam.position, Color::new(0.0, 0.0, 0.0, 1.0), 100.0, 200.0);
+    let mut m = ToonMesh::new();
+    // guns: 3 rows of 5, seen from the side, barrels pointing right
+    for (i, w) in WeaponId::all().enumerate() {
+        let (col, row) = ((i % 5) as f32, (i / 5) as f32);
+        let pos = vec3(4.4 - col * 2.2, 3.55 - row * 0.75, 2.0);
+        let base =
+            trs(pos, std::f32::consts::FRAC_PI_2, 0.0, 0.0) * Mat4::from_scale(Vec3::splat(1.7));
+        models::add_gun(&mut m, &base, w, 0.012);
+    }
+    // soldiers in a few looks
+    let looks = [
+        (
+            Team::Allies,
+            toon_shared::skin::Skin::default(),
+            WeaponId::M4,
+        ),
+        (
+            Team::Axis,
+            toon_shared::skin::Skin::default(),
+            WeaponId::Ak47,
+        ),
+        (
+            Team::Allies,
+            toon_shared::skin::Skin {
+                hat: 2,
+                hat_color: 7,
+                hair: 4,
+                hair_color: 3,
+                shirt: 9,
+                eyes: 0,
+                face: 1,
+                ..Default::default()
+            },
+            WeaponId::P90,
+        ),
+        (
+            Team::Axis,
+            toon_shared::skin::Skin {
+                hat: 0,
+                hair: 7,
+                hair_color: 0,
+                tone: 5,
+                shirt: 3,
+                pants: 6,
+                face: 6,
+                extra: 1,
+                ..Default::default()
+            },
+            WeaponId::M249,
+        ),
+    ];
+    for (k, (team, skin, weapon)) in looks.iter().enumerate() {
+        let pose = SoldierPose {
+            pos: vec3(2.7 - k as f32 * 1.8, 0.0, -1.5),
+            yaw: -0.45,
+            pitch: -0.15,
+            stance: Stance::Stand,
+            team: *team,
+            weapon: *weapon,
+            skin: *skin,
+            lod: 6,
+            phase: 0.0,
+            walk: 0.0,
+            sprint: false,
+            dead: None,
+            has_bomb: false,
+            blink: false,
+            melee: 0.0,
+            reload: None,
+        };
+        models::add_soldier(&mut m, None, &pose);
+    }
+    mats.draw_toon(&m);
+    set_default_camera();
 }

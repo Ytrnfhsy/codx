@@ -4,12 +4,20 @@ use crate::mesh::{trs, ToonMesh};
 use macroquad::prelude::*;
 use toon_shared::physics::Stance;
 use toon_shared::skin::Skin;
-use toon_shared::weapons::{WeaponClass, WeaponId};
+use toon_shared::weapons::WeaponId;
 use toon_shared::Team;
+
+/// Chibi body layout (metres, standing): hips, how far crouching lowers them, shoulders and
+/// neck above the hips, and the big head (its model is drawn scaled up).
+pub const HIP: f32 = 0.6;
+pub const CROUCH_DROP: f32 = 0.3;
+pub const SHOULDER_Y: f32 = 0.44;
+pub const NECK_Y: f32 = 0.5;
+pub const HEAD_UP: f32 = 0.42;
+pub const HEAD_SCALE: f32 = 1.3;
 
 pub const BOOT: [u8; 3] = [60, 52, 48];
 const METAL: [u8; 3] = [58, 62, 72];
-const METAL_L: [u8; 3] = [96, 102, 116];
 const WOOD: [u8; 3] = [170, 104, 52];
 const TAN: [u8; 3] = [196, 170, 120];
 const OLIVE: [u8; 3] = [104, 120, 70];
@@ -58,122 +66,284 @@ pub struct GunPart {
     pub c: Vec3,
     pub h: Vec3,
     pub col: [u8; 3],
-    /// Detachable magazine / ammo box (moves during reloads).
+    /// Detachable magazine / ammo box / drum (moves during reloads).
     pub mag: bool,
+    /// Shotgun pump (slides back when racked).
+    pub pump: bool,
+}
+
+const BLACK: [u8; 3] = [42, 44, 50];
+const SILVER: [u8; 3] = [196, 200, 208];
+const DARK_WOOD: [u8; 3] = [120, 72, 40];
+const BROWN: [u8; 3] = [150, 108, 70];
+const GREEN_BOX: [u8; 3] = [92, 120, 60];
+const BAKELITE: [u8; 3] = [170, 90, 50];
+
+/// Builds the chunky toy-like guns, one recognisable silhouette per weapon.
+/// Gun space: barrel along -Z, origin at the pistol grip, Y up.
+struct Gun(Vec<GunPart>);
+
+impl Gun {
+    fn new() -> Gun {
+        Gun(Vec::new())
+    }
+    fn b(&mut self, c: [f32; 3], h: [f32; 3], col: [u8; 3]) -> &mut Self {
+        self.0.push(GunPart {
+            c: Vec3::from_array(c),
+            h: Vec3::from_array(h),
+            col,
+            mag: false,
+            pump: false,
+        });
+        self
+    }
+    fn mag(&mut self, c: [f32; 3], h: [f32; 3], col: [u8; 3]) -> &mut Self {
+        self.b(c, h, col);
+        self.0.last_mut().unwrap().mag = true;
+        self
+    }
+    fn pump(&mut self, c: [f32; 3], h: [f32; 3], col: [u8; 3]) -> &mut Self {
+        self.b(c, h, col);
+        self.0.last_mut().unwrap().pump = true;
+        self
+    }
+    /// Pistol grip with a trigger guard.
+    fn grip(&mut self, col: [u8; 3]) -> &mut Self {
+        self.b([0.0, -0.035, 0.02], [0.026, 0.06, 0.03], col).b(
+            [0.0, 0.0, -0.05],
+            [0.008, 0.016, 0.03],
+            BLACK,
+        )
+    }
+    /// Folding bipod under the barrel.
+    fn bipod(&mut self, z: f32) -> &mut Self {
+        self.b([0.035, -0.02, z], [0.008, 0.075, 0.008], BLACK)
+            .b([-0.035, -0.02, z], [0.008, 0.075, 0.008], BLACK)
+            .b([0.0, 0.05, z], [0.035, 0.008, 0.012], BLACK)
+    }
+    /// Telescopic sight above the receiver.
+    fn scope(&mut self, z: f32, col: [u8; 3]) -> &mut Self {
+        self.b([0.0, 0.155, z], [0.022, 0.022, 0.16], col)
+            .b([0.0, 0.155, z - 0.17], [0.032, 0.032, 0.03], col)
+            .b([0.0, 0.155, z + 0.15], [0.028, 0.028, 0.025], col)
+            .b([0.0, 0.115, z - 0.07], [0.012, 0.02, 0.012], BLACK)
+            .b([0.0, 0.115, z + 0.07], [0.012, 0.02, 0.012], BLACK)
+    }
+}
+
+fn gun_def(w: WeaponId) -> Gun {
+    let mut g = Gun::new();
+    match w {
+        WeaponId::M4 => {
+            g.b([0.0, 0.07, -0.1], [0.04, 0.05, 0.17], BLACK) // receiver
+                .b([0.0, 0.135, -0.08], [0.015, 0.02, 0.1], BLACK) // carry handle
+                .b([0.0, 0.15, 0.0], [0.015, 0.025, 0.015], BLACK)
+                .b([0.0, 0.07, -0.38], [0.046, 0.045, 0.12], METAL) // handguard
+                .b([0.0, 0.14, -0.46], [0.012, 0.04, 0.012], BLACK) // front sight
+                .b([0.0, 0.07, -0.6], [0.016, 0.016, 0.12], BLACK) // barrel
+                .b([0.0, 0.07, -0.73], [0.023, 0.023, 0.02], BLACK)
+                .b([0.0, 0.065, 0.12], [0.018, 0.018, 0.08], BLACK) // buffer tube
+                .b([0.0, 0.04, 0.23], [0.035, 0.07, 0.045], METAL) // stock
+                .grip(BLACK)
+                .mag([0.0, -0.06, -0.15], [0.026, 0.07, 0.035], METAL)
+                .mag([0.0, -0.14, -0.17], [0.026, 0.025, 0.035], METAL);
+        }
+        WeaponId::Ak47 => {
+            g.b([0.0, 0.07, -0.1], [0.04, 0.045, 0.17], METAL)
+                .b([0.0, 0.118, -0.33], [0.018, 0.016, 0.11], METAL) // gas tube
+                .b([0.0, 0.065, -0.35], [0.043, 0.036, 0.1], WOOD) // handguard
+                .b([0.0, 0.07, -0.56], [0.015, 0.015, 0.12], METAL)
+                .b([0.0, 0.12, -0.62], [0.012, 0.035, 0.012], METAL)
+                .b([0.0, 0.07, -0.69], [0.019, 0.019, 0.015], METAL)
+                .b([0.0, 0.035, 0.16], [0.03, 0.05, 0.12], WOOD) // stock
+                .b([0.0, 0.0, 0.27], [0.032, 0.08, 0.03], WOOD)
+                .grip(WOOD)
+                .mag([0.0, -0.05, -0.16], [0.026, 0.06, 0.035], BAKELITE)
+                .mag([0.0, -0.12, -0.2], [0.026, 0.035, 0.035], BAKELITE);
+        }
+        WeaponId::G3 => {
+            g.b([0.0, 0.075, -0.1], [0.04, 0.05, 0.2], METAL)
+                .b([0.0, 0.14, 0.03], [0.015, 0.02, 0.02], BLACK) // drum sight
+                .b([0.0, 0.065, -0.42], [0.046, 0.042, 0.13], OLIVE)
+                .b([0.0, 0.075, -0.64], [0.015, 0.015, 0.1], BLACK)
+                .b([0.0, 0.13, -0.62], [0.016, 0.03, 0.016], BLACK)
+                .b([0.0, 0.05, 0.2], [0.032, 0.06, 0.15], OLIVE) // long stock
+                .b([0.0, 0.04, 0.35], [0.034, 0.07, 0.012], BLACK)
+                .grip(OLIVE)
+                .mag([0.0, -0.065, -0.16], [0.026, 0.08, 0.035], BLACK);
+        }
+        WeaponId::Mp5 => {
+            g.b([0.0, 0.07, -0.05], [0.04, 0.045, 0.15], BLACK)
+                .b([0.0, 0.06, -0.26], [0.046, 0.042, 0.07], BLACK) // fat handguard
+                .b([0.0, 0.07, -0.37], [0.016, 0.016, 0.05], BLACK)
+                .b([0.0, 0.135, -0.3], [0.016, 0.03, 0.016], BLACK) // front sight ring
+                .b([0.0, 0.135, 0.06], [0.016, 0.025, 0.016], BLACK)
+                .b([0.0, 0.085, 0.13], [0.008, 0.008, 0.1], METAL) // retractable stock
+                .b([0.0, 0.035, 0.13], [0.008, 0.008, 0.1], METAL)
+                .b([0.0, 0.06, 0.23], [0.03, 0.045, 0.012], BLACK)
+                .grip(BLACK)
+                .mag([0.0, -0.05, -0.12], [0.02, 0.06, 0.025], METAL)
+                .mag([0.0, -0.12, -0.15], [0.02, 0.035, 0.025], METAL);
+        }
+        WeaponId::P90 => {
+            g.b([0.0, 0.03, -0.06], [0.045, 0.075, 0.22], TAN) // bullpup body
+                .b([0.0, -0.06, -0.13], [0.03, 0.04, 0.025], TAN) // thumb-hole front
+                .b([0.0, 0.17, -0.12], [0.024, 0.024, 0.06], BLACK) // optic
+                .b([0.0, 0.04, -0.3], [0.016, 0.016, 0.04], BLACK)
+                .b([0.0, -0.035, 0.02], [0.026, 0.05, 0.03], BLACK)
+                .mag([0.0, 0.12, -0.08], [0.038, 0.02, 0.17], [70, 72, 80]);
+        }
+        WeaponId::Ak74u => {
+            g.b([0.0, 0.07, -0.08], [0.04, 0.045, 0.15], METAL)
+                .b([0.0, 0.065, -0.29], [0.043, 0.036, 0.07], WOOD)
+                .b([0.0, 0.07, -0.4], [0.02, 0.02, 0.05], METAL)
+                .b([0.0, 0.07, -0.47], [0.028, 0.028, 0.03], METAL) // flash cone
+                .b([0.032, 0.06, 0.12], [0.008, 0.008, 0.11], METAL) // folding stock
+                .b([0.0, 0.03, 0.22], [0.032, 0.05, 0.012], METAL)
+                .grip(WOOD)
+                .mag([0.0, -0.05, -0.15], [0.026, 0.06, 0.035], BAKELITE)
+                .mag([0.0, -0.12, -0.19], [0.026, 0.035, 0.035], BAKELITE);
+        }
+        WeaponId::M249 => {
+            g.b([0.0, 0.08, -0.08], [0.05, 0.06, 0.2], METAL)
+                .b([0.0, 0.15, -0.05], [0.045, 0.016, 0.12], BLACK) // feed cover
+                .b([0.0, 0.07, -0.38], [0.046, 0.04, 0.1], BLACK)
+                .b([0.0, 0.075, -0.62], [0.017, 0.017, 0.14], BLACK)
+                .b([0.0, 0.075, -0.77], [0.022, 0.022, 0.016], BLACK)
+                .b([0.0, 0.17, -0.3], [0.012, 0.016, 0.06], BLACK) // carry handle
+                .bipod(-0.56)
+                .b([0.0, 0.06, 0.2], [0.03, 0.06, 0.13], BLACK)
+                .grip(BLACK)
+                .mag([0.0, -0.05, -0.1], [0.045, 0.07, 0.07], GREEN_BOX);
+        }
+        WeaponId::Rpd => {
+            g.b([0.0, 0.07, -0.06], [0.04, 0.05, 0.16], METAL)
+                .b([0.0, 0.06, -0.32], [0.042, 0.04, 0.1], WOOD)
+                .b([0.0, 0.07, -0.62], [0.016, 0.016, 0.2], METAL)
+                .b([0.0, 0.12, -0.78], [0.012, 0.035, 0.012], METAL)
+                .bipod(-0.62)
+                .b([0.0, 0.02, 0.2], [0.032, 0.07, 0.14], WOOD)
+                .grip(WOOD)
+                .mag([0.0, -0.07, -0.12], [0.032, 0.075, 0.075], BLACK); // drum
+        }
+        WeaponId::W1200 => {
+            g.b([0.0, 0.06, -0.05], [0.04, 0.045, 0.12], METAL)
+                .b([0.0, 0.085, -0.45], [0.018, 0.018, 0.28], METAL) // barrel
+                .b([0.0, 0.045, -0.42], [0.015, 0.015, 0.22], METAL) // tube magazine
+                .pump([0.0, 0.04, -0.32], [0.032, 0.03, 0.09], WOOD)
+                .b([0.0, 0.025, 0.19], [0.03, 0.06, 0.14], WOOD)
+                .b([0.0, -0.025, 0.04], [0.025, 0.05, 0.03], WOOD);
+        }
+        WeaponId::M1014 => {
+            g.b([0.0, 0.06, -0.05], [0.04, 0.05, 0.13], BLACK)
+                .b([0.0, 0.09, -0.42], [0.018, 0.018, 0.24], BLACK)
+                .b([0.0, 0.05, -0.38], [0.016, 0.016, 0.2], BLACK)
+                .b([0.0, 0.05, -0.27], [0.034, 0.032, 0.08], BLACK) // forend
+                .b([0.0, 0.135, 0.0], [0.016, 0.02, 0.01], BLACK) // ghost ring
+                .b([0.0, 0.075, 0.18], [0.012, 0.012, 0.13], METAL) // skeleton stock
+                .b([0.0, 0.0, 0.18], [0.012, 0.012, 0.12], METAL)
+                .b([0.0, 0.035, 0.31], [0.022, 0.065, 0.015], BLACK)
+                .grip(BLACK)
+                .mag([0.0, -0.0, -0.1], [0.02, 0.02, 0.03], BLACK);
+        }
+        WeaponId::M40 => {
+            g.b([0.0, 0.035, -0.06], [0.036, 0.045, 0.26], BROWN) // stock & forend
+                .b([0.0, 0.0, 0.25], [0.036, 0.075, 0.07], BROWN) // butt
+                .b([0.0, 0.085, -0.05], [0.03, 0.025, 0.12], METAL) // action
+                .b([0.05, 0.085, 0.04], [0.03, 0.01, 0.01], METAL) // bolt handle
+                .b([0.075, 0.085, 0.04], [0.012, 0.014, 0.014], METAL)
+                .b([0.0, 0.085, -0.5], [0.014, 0.014, 0.25], METAL)
+                .scope(-0.06, BLACK)
+                .mag([0.0, -0.01, -0.08], [0.02, 0.025, 0.035], METAL);
+        }
+        WeaponId::R700 => {
+            g.b([0.0, 0.035, -0.04], [0.036, 0.045, 0.24], DARK_WOOD)
+                .b([0.0, 0.0, 0.24], [0.036, 0.075, 0.06], DARK_WOOD)
+                .b([0.0, 0.085, -0.04], [0.03, 0.025, 0.11], SILVER)
+                .b([0.05, 0.085, 0.04], [0.03, 0.01, 0.01], SILVER)
+                .b([0.0, 0.085, -0.46], [0.015, 0.015, 0.23], BLACK)
+                .scope(-0.04, [52, 56, 66])
+                .mag([0.0, -0.01, -0.06], [0.02, 0.025, 0.03], METAL);
+        }
+        WeaponId::M9 => {
+            g.b([0.0, 0.07, -0.08], [0.025, 0.03, 0.12], BLACK) // slide
+                .b([0.0, 0.035, -0.07], [0.023, 0.016, 0.1], METAL)
+                .b([0.0, 0.11, -0.19], [0.006, 0.012, 0.006], BLACK)
+                .b([0.0, -0.03, 0.02], [0.025, 0.06, 0.03], BROWN)
+                .b([0.0, 0.0, -0.06], [0.008, 0.016, 0.028], BLACK)
+                .mag([0.0, -0.095, 0.02], [0.022, 0.012, 0.028], BLACK);
+        }
+        WeaponId::Usp => {
+            g.b([0.0, 0.07, -0.08], [0.027, 0.033, 0.125], BLACK)
+                .b([0.0, 0.035, -0.07], [0.025, 0.018, 0.1], BLACK)
+                .b([0.0, -0.03, 0.02], [0.027, 0.062, 0.032], BLACK)
+                .b([0.0, 0.0, -0.06], [0.008, 0.016, 0.028], BLACK)
+                .mag([0.0, -0.1, 0.02], [0.024, 0.012, 0.03], METAL);
+        }
+        WeaponId::Deagle => {
+            g.b([0.0, 0.08, -0.1], [0.028, 0.037, 0.15], SILVER) // big slide
+                .b([0.0, 0.035, -0.08], [0.026, 0.02, 0.11], SILVER)
+                .b([0.0, 0.125, -0.23], [0.007, 0.012, 0.007], BLACK)
+                .b([0.0, -0.035, 0.025], [0.028, 0.065, 0.033], BLACK)
+                .b([0.0, 0.0, -0.07], [0.009, 0.018, 0.03], SILVER)
+                .mag([0.0, -0.105, 0.025], [0.025, 0.012, 0.03], SILVER);
+        }
+    }
+    g
 }
 
 /// Gun parts in gun space: barrel along -Z, origin at the grip.
 pub fn gun_parts(w: WeaponId) -> Vec<GunPart> {
-    gun_boxes(w)
-        .into_iter()
-        .map(|(c, h, col)| GunPart {
-            c,
-            h,
-            col,
-            mag: false,
-        })
-        .chain(gun_mag(w).map(|(c, h, col)| GunPart {
-            c,
-            h,
-            col,
-            mag: true,
-        }))
-        .collect()
+    gun_def(w).0
 }
 
-/// Magazine box of a gun (None for tube-fed / internal magazines).
+/// Centre of the magazine (where the off hand goes when reloading).
 pub fn gun_mag(w: WeaponId) -> Option<(Vec3, Vec3, [u8; 3])> {
-    match w.def().class {
-        WeaponClass::Pistol => Some((vec3(0.0, -0.075, 0.0), vec3(0.022, 0.02, 0.028), METAL)),
-        WeaponClass::Lmg => Some((vec3(0.0, -0.03, -0.12), vec3(0.06, 0.07, 0.07), OLIVE)),
-        WeaponClass::Shotgun => None,
-        WeaponClass::Sniper => Some((vec3(0.0, -0.01, -0.14), vec3(0.022, 0.035, 0.04), METAL)),
-        _ => Some((vec3(0.0, -0.04, -0.17), vec3(0.025, 0.07, 0.035), METAL)),
+    gun_parts(w)
+        .iter()
+        .find(|p| p.mag)
+        .map(|p| (p.c, p.h, p.col))
+}
+
+/// Height of the gun's highest point (sights) in gun space.
+pub fn sight_height(w: WeaponId) -> f32 {
+    gun_parts(w)
+        .iter()
+        .map(|p| p.c.y + p.h.y)
+        .fold(0.1, f32::max)
+}
+
+/// Where the off hand holds the gun.
+pub fn fore_grip(w: WeaponId) -> Vec3 {
+    match w {
+        WeaponId::P90 => vec3(0.0, -0.06, -0.14),
+        WeaponId::Mp5 | WeaponId::Ak74u => vec3(0.0, 0.03, -0.27),
+        WeaponId::W1200 => vec3(0.0, 0.02, -0.32),
+        WeaponId::M1014 => vec3(0.0, 0.02, -0.27),
+        WeaponId::M40 | WeaponId::R700 => vec3(0.0, 0.0, -0.26),
+        WeaponId::M9 | WeaponId::Usp | WeaponId::Deagle => vec3(-0.02, -0.03, 0.03),
+        _ => vec3(0.0, 0.03, -0.36),
     }
 }
 
-fn gun_boxes(w: WeaponId) -> Vec<(Vec3, Vec3, [u8; 3])> {
-    let d = w.def();
-    let accent = match w {
-        WeaponId::Ak47 | WeaponId::Rpd | WeaponId::Ak74u => WOOD,
-        WeaponId::G3 | WeaponId::M40 => OLIVE,
-        WeaponId::P90 | WeaponId::M1014 | WeaponId::Deagle => TAN,
-        WeaponId::W1200 | WeaponId::R700 => WOOD,
-        _ => METAL_L,
-    };
-    let mut v = Vec::new();
-    match d.class {
-        WeaponClass::Pistol => {
-            v.push((vec3(0.0, 0.07, -0.08), vec3(0.03, 0.04, 0.12), METAL));
-            v.push((vec3(0.0, 0.0, 0.0), vec3(0.028, 0.07, 0.035), accent));
-            v.push((
-                vec3(0.0, 0.075, -0.2),
-                vec3(0.012, 0.012, 0.01),
-                [255, 220, 90],
-            ));
-        }
-        _ => {
-            let (len, h) = match d.class {
-                WeaponClass::Smg => (0.42, 0.1),
-                WeaponClass::Lmg => (0.62, 0.13),
-                WeaponClass::Shotgun => (0.62, 0.09),
-                WeaponClass::Sniper => (0.72, 0.09),
-                _ => (0.55, 0.1),
-            };
-            // receiver
-            v.push((vec3(0.0, 0.07, -0.12), vec3(0.04, h * 0.5, 0.22), METAL));
-            // barrel
-            v.push((
-                vec3(0.0, 0.08, -0.34 - len * 0.35),
-                vec3(0.016, 0.016, len * 0.38),
-                METAL,
-            ));
-            // handguard
-            v.push((vec3(0.0, 0.065, -0.4), vec3(0.042, 0.04, 0.14), accent));
-            // stock
-            v.push((vec3(0.0, 0.04, 0.2), vec3(0.03, 0.055, 0.13), accent));
-            // grip
-            v.push((vec3(0.0, -0.02, 0.0), vec3(0.025, 0.06, 0.03), METAL));
-            match d.class {
-                WeaponClass::Lmg => {
-                    v.push((vec3(0.0, 0.0, -0.6), vec3(0.04, 0.008, 0.008), METAL));
-                }
-                WeaponClass::Sniper => {
-                    v.push((vec3(0.0, 0.16, -0.12), vec3(0.03, 0.03, 0.16), [30, 30, 36]));
-                    v.push((vec3(0.0, 0.16, -0.29), vec3(0.04, 0.04, 0.02), [30, 30, 36]));
-                }
-                WeaponClass::Shotgun => {
-                    v.push((vec3(0.0, 0.035, -0.38), vec3(0.03, 0.025, 0.1), WOOD));
-                }
-                _ => {
-                    // front sight
-                    v.push((vec3(0.0, 0.13, -0.5), vec3(0.008, 0.02, 0.008), METAL));
-                    v.push((vec3(0.0, 0.13, -0.02), vec3(0.015, 0.015, 0.012), METAL));
-                }
-            }
-            // a fun orange tip so guns read as toys
-            v.push((
-                vec3(0.0, 0.08, -0.34 - len * 0.73),
-                vec3(0.02, 0.02, 0.012),
-                [255, 150, 40],
-            ));
-        }
-    }
-    v
-}
-
-/// Muzzle offset in gun space.
+/// Muzzle position in gun space.
 pub fn muzzle(w: WeaponId) -> Vec3 {
-    let d = w.def();
-    let len = match d.class {
-        WeaponClass::Pistol => return vec3(0.0, 0.075, -0.22),
-        WeaponClass::Smg => 0.42,
-        WeaponClass::Lmg => 0.62,
-        WeaponClass::Shotgun => 0.62,
-        WeaponClass::Sniper => 0.72,
-        _ => 0.55,
-    };
-    vec3(0.0, 0.08, -0.34 - len * 0.75)
+    match w {
+        WeaponId::M4 => vec3(0.0, 0.07, -0.75),
+        WeaponId::Ak47 => vec3(0.0, 0.07, -0.71),
+        WeaponId::G3 => vec3(0.0, 0.075, -0.75),
+        WeaponId::Mp5 => vec3(0.0, 0.07, -0.43),
+        WeaponId::P90 => vec3(0.0, 0.04, -0.35),
+        WeaponId::Ak74u => vec3(0.0, 0.07, -0.51),
+        WeaponId::M249 => vec3(0.0, 0.075, -0.79),
+        WeaponId::Rpd => vec3(0.0, 0.07, -0.83),
+        WeaponId::W1200 => vec3(0.0, 0.085, -0.74),
+        WeaponId::M1014 => vec3(0.0, 0.09, -0.67),
+        WeaponId::M40 => vec3(0.0, 0.085, -0.76),
+        WeaponId::R700 => vec3(0.0, 0.085, -0.7),
+        WeaponId::M9 | WeaponId::Usp => vec3(0.0, 0.07, -0.21),
+        WeaponId::Deagle => vec3(0.0, 0.08, -0.26),
+    }
 }
 
 pub fn add_gun(m: &mut ToonMesh, base: &Mat4, w: WeaponId, outline: f32) {
@@ -387,7 +557,7 @@ pub fn add_head(
         &mut painted,
         head,
         vec3(0.29, 0.27, 0.27),
-        0.17,
+        0.21,
         pal.tone,
         ow,
         lod,
@@ -508,25 +678,22 @@ pub fn add_head(
     // ---- hats
     match hat {
         1 => {
-            m.rounded(
-                &at(0.0, 0.15, 0.02),
-                vec3(0.33, 0.17, 0.31),
-                0.16,
+            // round dome helmet with a rim all around
+            m.sphere(
+                &(at(0.0, 0.12, 0.02) * Mat4::from_scale(vec3(1.17, 0.85, 1.13))),
+                0.3,
                 pal.hat,
                 ow,
-                lod,
             );
-            m.rounded(
-                &at(0.0, 0.03, -0.31),
-                vec3(0.3, 0.025, 0.06),
-                0.02,
-                pal.hat,
+            m.sphere(
+                &(at(0.0, 0.08, 0.02) * Mat4::from_scale(vec3(1.23, 0.12, 1.2))),
+                0.3,
+                mul(pal.hat, 0.88),
                 ow * 0.6,
-                2,
             );
             m.rounded(
-                &at(0.0, 0.2, -0.3),
-                vec3(0.07, 0.05, 0.03),
+                &at(0.0, 0.23, -0.32),
+                vec3(0.07, 0.05, 0.02),
                 0.02,
                 pal.team,
                 0.0,
@@ -724,6 +891,17 @@ fn add_face(
             bar(m, x, -0.03, ez - 0.02, 0.06, 0.0, INK);
             continue;
         }
+        if matches!(skin.eye_style(), 0 | 1) {
+            bar(
+                m,
+                x,
+                0.075,
+                ez - 0.005,
+                0.042,
+                -side * 0.18,
+                mul(pal.hair, 0.8),
+            );
+        }
         match skin.eye_style() {
             0 | 3 | 4 => {
                 disc(m, x, -0.03, ez + 0.01, 0.078, [255, 255, 255]);
@@ -739,8 +917,15 @@ fn add_face(
                 }
             }
             1 => {
-                disc(m, x, -0.03, ez, 0.058, INK);
-                disc(m, x + 0.018, -0.012, ez - 0.02, 0.016, [255, 255, 255]);
+                // small dark oval eyes with a shine (the default chibi look)
+                m.fill.add_sphere(
+                    &(at(x, -0.035, ez) * Mat4::from_scale(vec3(0.8, 1.3, 0.35))),
+                    0.05,
+                    INK,
+                    8,
+                    5,
+                );
+                disc(m, x + 0.012, -0.012, ez - 0.02, 0.014, [255, 255, 255]);
             }
             _ => {
                 // happy "^" eyes
@@ -921,10 +1106,10 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
             root =
                 root * Mat4::from_translation(vec3(0.0, 0.22, 0.78)) * Mat4::from_rotation_x(-1.5);
         }
-        (None, Stance::Crouch) => crouch = 0.5,
+        (None, Stance::Crouch) => crouch = CROUCH_DROP,
         _ => {}
     }
-    let hip = 0.8 - crouch;
+    let hip = HIP - crouch;
     let swing = (p.phase).sin() * 0.7 * p.walk;
     let pt = |mat: &Mat4, v: Vec3| mat.transform_point3(v);
     let pattern = p.skin.pattern_style();
@@ -933,14 +1118,14 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
     let body_right = root.transform_vector3(Vec3::X);
     let boot_rects = [tex::half(tex::HANDS_BOOTS, true); 6];
     for (side, s) in [(-1.0f32, 1.0f32), (1.0, -1.0)] {
-        let x = side * 0.13;
+        let x = side * 0.12;
         let rect = tex::cell(if side > 0.0 {
             tex::LEG_RIGHT
         } else {
             tex::LEG_LEFT
         });
         let (hip_p, foot_p, boot) = if crouch > 0.0 && p.dead.is_none() {
-            let knee = pt(&root, vec3(x, hip + 0.02, -0.36 + swing * 0.04 * s));
+            let knee = pt(&root, vec3(x, hip + 0.02, -0.3 + swing * 0.04 * s));
             let hip_p = pt(&root, vec3(x, hip + 0.04, 0.0));
             let upper = [rect[0], rect[1], rect[2], (rect[1] + rect[3]) * 0.5];
             let lower = [rect[0], upper[3], rect[2], rect[3]];
@@ -956,7 +1141,7 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
                 body_right,
                 upper,
             );
-            let foot = pt(&root, vec3(x, 0.12, -0.4));
+            let foot = pt(&root, vec3(x, 0.1, -0.34));
             part_capsule(
                 m,
                 &mut painted,
@@ -972,33 +1157,33 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
             (
                 hip_p,
                 foot,
-                root * Mat4::from_translation(vec3(x, 0.075, -0.44)),
+                root * Mat4::from_translation(vec3(x, 0.07, -0.38)),
             )
         } else {
             let leg =
                 root * Mat4::from_translation(vec3(x, hip, 0.0)) * Mat4::from_rotation_x(swing * s);
             let a = pt(&leg, vec3(0.0, -0.04, 0.0));
-            let b = pt(&leg, vec3(0.0, -0.6, 0.0));
+            let b = pt(&leg, vec3(0.0, -0.44, 0.0));
             part_capsule(
                 m,
                 &mut painted,
                 b,
                 a,
-                0.125,
+                0.115,
                 pal.pants,
                 ow,
                 cap_seg,
                 body_right,
                 rect,
             );
-            (a, b, leg * Mat4::from_translation(vec3(0.0, -0.71, -0.04)))
+            (a, b, leg * Mat4::from_translation(vec3(0.0, -0.53, -0.04)))
         };
         part_box(
             m,
             &mut painted,
             &boot,
-            vec3(0.13, 0.085, 0.18),
-            0.07,
+            vec3(0.12, 0.075, 0.165),
+            0.065,
             BOOT,
             ow,
             small,
@@ -1038,8 +1223,8 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
     part_box(
         m,
         &mut painted,
-        &tat(0.0, 0.3, 0.0),
-        vec3(0.27, 0.3, 0.18),
+        &tat(0.0, 0.27, 0.0),
+        vec3(0.25, 0.27, 0.17),
         0.13,
         pal.shirt,
         ow,
@@ -1048,18 +1233,18 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
     );
     if !is_painted {
         m.rounded(
-            &tat(0.0, 0.33, 0.0),
-            vec3(0.29, 0.19, 0.2),
-            0.1,
+            &tat(0.0, 0.3, 0.0),
+            vec3(0.265, 0.16, 0.185),
+            0.09,
             pal.vest,
             ow * 0.5,
             small,
         );
         let pocket = mul(pal.vest, 0.82);
-        for x in [-0.12f32, 0.12] {
+        for x in [-0.11f32, 0.11] {
             m.rounded(
-                &tat(x, 0.27, -0.205),
-                vec3(0.075, 0.06, 0.025),
+                &tat(x, 0.25, -0.19),
+                vec3(0.07, 0.055, 0.025),
                 0.02,
                 pocket,
                 0.0,
@@ -1067,25 +1252,25 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
             );
         }
         m.rounded(
-            &tat(0.0, 0.06, 0.0),
-            vec3(0.28, 0.045, 0.19),
+            &tat(0.0, 0.05, 0.0),
+            vec3(0.26, 0.04, 0.18),
             0.04,
             BOOT,
             0.0,
             small,
         );
         m.rounded(
-            &tat(0.0, 0.06, -0.195),
+            &tat(0.0, 0.05, -0.185),
             vec3(0.04, 0.03, 0.01),
             0.01,
             [230, 190, 70],
             0.0,
             1,
         );
-        for x in [-0.31f32, 0.31] {
+        for x in [-0.28f32, 0.28] {
             m.rounded(
-                &tat(x, 0.55, 0.0),
-                vec3(0.1, 0.06, 0.13),
+                &tat(x, 0.46, 0.0),
+                vec3(0.09, 0.055, 0.12),
                 0.05,
                 pal.team,
                 ow * 0.6,
@@ -1094,10 +1279,10 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
         }
         match pattern {
             2 => {
-                for y in [0.13f32, 0.47] {
+                for y in [0.12f32, 0.42] {
                     m.rounded(
                         &tat(0.0, y, 0.0),
-                        vec3(0.275, 0.025, 0.185),
+                        vec3(0.255, 0.025, 0.175),
                         0.025,
                         mul(pal.shirt, 0.78),
                         0.0,
@@ -1107,12 +1292,12 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
             }
             1 | 3 if lod > 2 => {
                 let spots: Vec<Mat4> = [
-                    (-0.15f32, 0.12f32, -0.185f32),
-                    (0.14, 0.15, -0.185),
-                    (0.0, 0.1, -0.185),
-                    (-0.12, 0.25, 0.205),
-                    (0.12, 0.35, 0.205),
-                    (0.0, 0.14, 0.185),
+                    (-0.14f32, 0.11f32, -0.175f32),
+                    (0.13, 0.14, -0.175),
+                    (0.0, 0.09, -0.175),
+                    (-0.11, 0.23, 0.19),
+                    (0.11, 0.32, 0.19),
+                    (0.0, 0.13, 0.175),
                 ]
                 .iter()
                 .map(|(x, y, z)| {
@@ -1133,23 +1318,23 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
         1 | 4 => {
             let c = [92, 108, 66];
             m.rounded(
-                &tat(0.0, 0.32, 0.27),
-                vec3(0.21, 0.23, 0.1),
+                &tat(0.0, 0.3, 0.25),
+                vec3(0.19, 0.21, 0.09),
                 0.08,
                 c,
                 ow,
                 small,
             );
             m.rounded(
-                &tat(0.0, 0.22, 0.37),
-                vec3(0.14, 0.09, 0.03),
+                &tat(0.0, 0.21, 0.34),
+                vec3(0.13, 0.08, 0.03),
                 0.03,
                 mul(c, 0.85),
                 0.0,
                 1,
             );
             if p.skin.extra_style() == 4 {
-                let a = pt(&torso_base, vec3(0.14, 0.5, 0.3));
+                let a = pt(&torso_base, vec3(0.13, 0.45, 0.28));
                 m.capsule(
                     a,
                     a + torso_base.transform_vector3(vec3(0.05, 0.55, 0.08)),
@@ -1162,15 +1347,15 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
         }
         2 => {
             m.rounded(
-                &tat(0.0, 0.6, 0.0),
-                vec3(0.24, 0.06, 0.2),
+                &tat(0.0, 0.5, 0.0),
+                vec3(0.22, 0.055, 0.18),
                 0.06,
                 pal.hat,
                 ow * 0.6,
                 small,
             );
             m.rounded(
-                &tat(0.12, 0.44, -0.2),
+                &tat(0.11, 0.36, -0.19),
                 vec3(0.06, 0.14, 0.03),
                 0.03,
                 pal.hat,
@@ -1182,8 +1367,8 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
     }
     if p.has_bomb {
         m.rounded(
-            &tat(0.0, 0.3, 0.27),
-            vec3(0.2, 0.2, 0.09),
+            &tat(0.0, 0.28, 0.25),
+            vec3(0.18, 0.18, 0.08),
             0.05,
             [220, 50, 40],
             ow,
@@ -1193,9 +1378,12 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
 
     // head — follows pitch a little
     let neck = torso_base
-        * Mat4::from_translation(vec3(0.0, 0.62, 0.0))
+        * Mat4::from_translation(vec3(0.0, NECK_Y, 0.0))
         * Mat4::from_rotation_x(p.pitch * 0.35);
-    let head = neck * Mat4::from_translation(vec3(0.0, 0.2, 0.0));
+    // big chibi head: the head model is drawn scaled up
+    let head = neck
+        * Mat4::from_translation(vec3(0.0, HEAD_UP, 0.0))
+        * Mat4::from_scale(Vec3::splat(HEAD_SCALE));
     add_head(
         m,
         painted.as_deref_mut(),
@@ -1204,7 +1392,7 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
         p.team,
         p.blink,
         p.dead.is_some(),
-        ow,
+        ow / HEAD_SCALE,
         lod,
     );
 
@@ -1221,15 +1409,18 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
         _ => (0.0, 0.0),
     };
     let aim_pitch = aim_pitch * (1.0 - reload_k) - 0.35 * reload_k;
-    let shoulder =
-        torso_base * Mat4::from_translation(vec3(0.0, 0.5, 0.0)) * Mat4::from_rotation_x(aim_pitch);
+    let shoulder = torso_base
+        * Mat4::from_translation(vec3(0.0, SHOULDER_Y, 0.0))
+        * Mat4::from_rotation_x(aim_pitch);
     let gun_base = shoulder
-        * Mat4::from_translation(vec3(0.1, -0.08, -0.32 - melee_push))
+        * Mat4::from_translation(vec3(0.1, -0.06, -0.28 - melee_push))
         * Mat4::from_rotation_y(if p.sprint { 0.7 } else { 0.0 })
         * Mat4::from_rotation_z(0.5 * reload_k)
-        * Mat4::from_scale(Vec3::splat(1.25));
+        * Mat4::from_scale(Vec3::splat(1.2));
     let mag_off = vec3(0.0, -mag_drop, 0.0);
-    add_gun_ex(m, &gun_base, p.weapon, 0.016, mag_off);
+    let team_ink = m.ink.take();
+    add_gun_ex(m, &gun_base, p.weapon, 0.02, mag_off);
+    m.ink = team_ink;
     let right_hand = gun_base.transform_point3(vec3(0.0, -0.02, 0.0));
     let left_hand = if reload_k > 0.0 {
         let mag = gun_mag(p.weapon)
@@ -1238,15 +1429,15 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
         gun_base
             .transform_point3(mag + mag_off + vec3(0.0, -0.06, 0.0))
             .lerp(
-                gun_base.transform_point3(vec3(0.0, 0.03, -0.38)),
+                gun_base.transform_point3(fore_grip(p.weapon)),
                 1.0 - reload_k,
             )
     } else {
-        gun_base.transform_point3(vec3(0.0, 0.03, -0.38))
+        gun_base.transform_point3(fore_grip(p.weapon))
     };
     let torso_right = torso_base.transform_vector3(Vec3::X);
-    for (sx, hand) in [(0.29f32, right_hand), (-0.29, left_hand)] {
-        let sh = torso_base.transform_point3(vec3(sx, 0.5, 0.0));
+    for (sx, hand) in [(0.27f32, right_hand), (-0.27, left_hand)] {
+        let sh = torso_base.transform_point3(vec3(sx, SHOULDER_Y, 0.0));
         let d = hand - sh;
         let end = hand - d.normalize_or_zero() * 0.06;
         let rect = tex::cell(if sx > 0.0 {
@@ -1259,7 +1450,7 @@ pub fn add_soldier(m: &mut ToonMesh, mut painted: Option<&mut ToonMesh>, p: &Sol
             &mut painted,
             end,
             sh,
-            0.08,
+            0.075,
             pal.shirt,
             ow,
             cap_seg,

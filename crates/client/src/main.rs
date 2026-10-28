@@ -38,6 +38,7 @@ struct Args {
     /// Take the screenshot this many seconds into the first killcam instead.
     shot_killcam: Option<f32>,
     score_limit: Option<i32>,
+    model_gallery: bool,
     auto: bool,
     class: Option<usize>,
     team: Option<String>,
@@ -94,6 +95,7 @@ fn parse_args() -> Args {
                 a.score_limit = next.and_then(|s| s.parse().ok());
                 i += 1;
             }
+            "--model-gallery" => a.model_gallery = true,
             "--auto" => a.auto = true,
             "--class" => {
                 a.class = next.and_then(|s| s.parse().ok());
@@ -355,6 +357,9 @@ async fn amain(args: Args) {
 
         let mut next: Option<Screen> = None;
         match &mut screen {
+            Screen::Menu if args.model_gallery => {
+                render::draw_model_gallery(&mats);
+            }
             Screen::Menu => {
                 if grabbed {
                     set_cursor_grab(false);
