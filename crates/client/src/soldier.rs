@@ -1,0 +1,429 @@
+//! Third-person soldiers: an animated character (see `character.rs`) with the aim, the
+//! stance and a gun held in both hands on top of the walk/run cycle.
+
+use crate::character::{clip, rig, Rig, Xf, SCALE};
+use crate::mesh::{trs, ToonMesh};
+use crate::models::{add_gun_ex, fore_grip, gun_mag, muzzle, team_ink};
+use macroquad::prelude::*;
+use std::f32::consts::{PI, TAU};
+use toon_shared::physics::Stance;
+use toon_shared::weapons::WeaponId;
+use toon_shared::Team;
+
+/// Hips go down this much when crouching (metres).
+pub const CROUCH_DROP: f32 = 0.2;
+/// Walk/run clip cycles per walk-phase cycle (the phase turns 2.2 rad per metre).
+const WALK_CYCLES: f32 = 2.3;
+const RUN_CYCLES: f32 = 1.9;
+/// Silhouette width up close (metres).
+pub const OUTLINE: f32 = 0.022;
+
+/// Silhouette width for a soldier `dist` metres away: it widens with distance so the
+/// team colour stays readable far away.
+pub fn outline_at(dist: f32) -> f32 {
+    (OUTLINE + dist * 0.0011).min(0.07)
+}
+
+const TONES: [[u8; 3]; 6] = [
+    [255, 214, 178],
+    [246, 196, 150],
+    [222, 168, 120],
+    [192, 138, 96],
+    [150, 102, 70],
+    [112, 76, 54],
+];
+
+pub struct SoldierPose {
+    pub pos: Vec3,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub stance: Stance,
+    pub team: Team,
+    pub weapon: WeaponId,
+    /// Picks the model and skin tone (the player id).
+    pub look: u8,
+    /// Clock for the idle breathing (seconds).
+    pub time: f32,
+    /// Walk cycle phase (radians).
+    pub phase: f32,
+    /// 0..1 amount of walking.
+    pub walk: f32,
+    pub sprint: bool,
+    pub has_bomb: bool,
+    /// Third-person melee swing 0..1.
+    pub melee: f32,
+    /// Seconds into a reload (None = not reloading).
+    pub reload: Option<f32>,
+    /// Team silhouette width (metres).
+    pub outline: f32,
+}
+
+/// Model index for a team and look: each team has its own uniforms.
+pub fn model_for(team: Team, look: u8) -> usize {
+    let r = rig();
+    let prefix = match team {
+        Team::Axis => "Soldier_",
+        _ => "BlueSoldier_",
+    };
+    let list: Vec<usize> = (0..r.models.len())
+        .filter(|&i| r.models[i].name.starts_with(prefix))
+        .collect();
+    if list.is_empty() {
+        return 0;
+    }
+    list[look as usize % list.len()]
+}
+
+/// Colours of every material of a model.
+pub fn colors(model: usize, look: u8) -> Vec<[u8; 3]> {
+    let md = &rig().models[model];
+    md.mats
+        .iter()
+        .map(|(name, c)| match name.as_str() {
+            "Skin" => TONES[(look as usize / 2) % TONES.len()],
+            // the pack's eyes are white on dark skin; ours are dark on light skin
+            "Face" => [44, 36, 46],
+            // the pack is quite dark; lift it to the game's bright cartoon palette
+            _ => {
+                let lift = |v: u8| (v as f32 * 1.35 + 34.0).min(255.0) as u8;
+                [lift(c[0]), lift(c[1]), lift(c[2])]
+            }
+        })
+        .collect()
+}
+
+/// Sleeve and hand colours of a soldier (first-person arms).
+pub fn arm_colors(team: Team, look: u8) -> ([u8; 3], [u8; 3]) {
+    let model = model_for(team, look);
+    let md = &rig().models[model];
+    let c = colors(model, look);
+    let sleeve = md.mat("Main").map(|i| c[i]).unwrap_or([120, 120, 120]);
+    (sleeve, TONES[(look as usize / 2) % TONES.len()])
+}
+
+/// Turns a bone around the model's X axis (positive leans forward) and refreshes `g`.
+fn bend(r: &Rig, local: &mut [Xf], g: &mut Vec<Xf>, bone: usize, angle: f32) {
+    if angle != 0.0 {
+        r.turn(local, g, bone, Quat::from_rotation_x(angle));
+        *g = r.globals(local);
+    }
+}
+
+/// Distance between two bones in the bind pose (model units).
+fn bind_dist(r: &Rig, a: usize, b: usize) -> f32 {
+    let p = |i: usize| r.bones[i].inv_bind.inverse().w_axis.truncate();
+    p(a).distance(p(b))
+}
+
+/// Builds a soldier. Returns the world-space muzzle position.
+pub fn add_soldier(m: &mut ToonMesh, p: &SoldierPose) -> Vec3 {
+    let r = rig();
+    let ids = &r.ids;
+    let model = model_for(p.team, p.look);
+
+    // walk/run cycle over the idle breathing
+    let mut local = r.sample(clip::IDLE, p.time + p.look as f32 * 0.37, true);
+    let walk = p.walk.clamp(0.0, 1.0);
+    if walk > 0.01 && p.stance != Stance::Prone {
+        let (c, k) = if p.sprint {
+            (clip::RUN, RUN_CYCLES)
+        } else {
+            (clip::WALK, WALK_CYCLES)
+        };
+        let t = p.phase / TAU * k * r.clips[c].dur;
+        let mv = r.sample(c, t, true);
+        for (a, b) in local.iter_mut().zip(&mv) {
+            a.t = a.t.lerp(b.t, walk);
+            a.r = a.r.slerp(b.r, walk);
+        }
+    }
+
+    let mut root = trs(p.pos, p.yaw, 0.0, 0.0);
+    let mut lean = 0.0;
+    match p.stance {
+        Stance::Crouch => {
+            local[ids.body].t.y -= CROUCH_DROP / SCALE;
+            lean = 0.35;
+        }
+        Stance::Prone => {
+            root =
+                root * Mat4::from_translation(vec3(0.0, 0.16, 0.75)) * Mat4::from_rotation_x(-1.5);
+        }
+        Stance::Stand => {}
+    }
+    let world = root * Mat4::from_rotation_y(PI) * Mat4::from_scale(Vec3::splat(SCALE));
+    let to_model = world.inverse();
+    let mut g = r.globals(&local);
+
+    // knees bend so the feet stay on the ground
+    if p.stance == Stance::Crouch {
+        for s in 0..2 {
+            let side = if s == 0 { 1.0 } else { -1.0 };
+            let len = bind_dist(r, ids.lower_leg[s], ids.foot[s]);
+            let target = g[ids.foot[s]].t;
+            r.reach(
+                &mut local,
+                &mut g,
+                ids.upper_leg[s],
+                ids.lower_leg[s],
+                len,
+                target,
+                vec3(side * 0.3, 0.0, 1.0),
+            );
+        }
+    }
+
+    // aim: the spine and head follow the pitch
+    let aim_pitch = if p.sprint { -0.7 } else { p.pitch };
+    let (reload_k, mag_drop) = match p.reload {
+        Some(t) => {
+            let k = (t / 0.25).min(1.0);
+            let cyc = (t * 2.6).sin().abs();
+            (k, cyc * 0.22)
+        }
+        None => (0.0, 0.0),
+    };
+    let aim_pitch = aim_pitch * (1.0 - reload_k) - 0.35 * reload_k;
+    // lying down the body is already flat: the chest lifts to look ahead
+    let prone_lift = if p.stance == Stance::Prone {
+        -0.45
+    } else {
+        0.0
+    };
+    bend(
+        r,
+        &mut local,
+        &mut g,
+        ids.abdomen,
+        lean * 0.6 - p.pitch * 0.25 + prone_lift * 0.5,
+    );
+    bend(
+        r,
+        &mut local,
+        &mut g,
+        ids.torso,
+        lean * 0.4 - p.pitch * 0.25 + prone_lift * 0.5,
+    );
+    bend(
+        r,
+        &mut local,
+        &mut g,
+        ids.neck,
+        -lean * 0.6 - p.pitch * 0.2 - prone_lift * 0.4,
+    );
+
+    // gun at the shoulders, pitched with the aim
+    let shoulders = world.transform_point3((g[ids.upper_arm[0]].t + g[ids.upper_arm[1]].t) * 0.5);
+    let melee_push = (p.melee * PI).sin() * 0.35;
+    let gun_base = trs(shoulders, p.yaw, aim_pitch, 0.0)
+        * Mat4::from_translation(vec3(0.12, -0.13, -0.2 - melee_push))
+        * Mat4::from_rotation_y(if p.sprint { 0.7 } else { 0.0 })
+        * Mat4::from_rotation_z(0.5 * reload_k)
+        * Mat4::from_scale(Vec3::splat(1.2));
+    let mag_off = vec3(0.0, -mag_drop, 0.0);
+    add_gun_ex(m, &gun_base, p.weapon, 0.02, mag_off);
+
+    // hands on the grips
+    let right_hand = gun_base.transform_point3(vec3(0.0, -0.03, 0.02));
+    let left_hand = if reload_k > 0.0 {
+        let mag = gun_mag(p.weapon)
+            .map(|g| g.0)
+            .unwrap_or(vec3(0.0, 0.0, -0.3));
+        gun_base
+            .transform_point3(mag + mag_off + vec3(0.0, -0.06, 0.0))
+            .lerp(
+                gun_base.transform_point3(fore_grip(p.weapon)),
+                1.0 - reload_k,
+            )
+    } else {
+        gun_base.transform_point3(fore_grip(p.weapon))
+    };
+    for (s, hand) in [(1usize, right_hand), (0, left_hand)] {
+        let side = if s == 0 { 1.0 } else { -1.0 };
+        let len = local[ids.fist[s]].t.length();
+        let sh = g[ids.upper_arm[s]].t;
+        let target = to_model.transform_point3(hand);
+        // the wrist stops short of the grip so the fist wraps around it
+        let target = target - (target - sh).normalize_or_zero() * 0.12;
+        r.reach(
+            &mut local,
+            &mut g,
+            ids.upper_arm[s],
+            ids.lower_arm[s],
+            len,
+            target,
+            vec3(side * 0.7, -1.0, -0.3),
+        );
+    }
+
+    let prev_ink = m.ink.replace(team_ink(p.team));
+    r.draw(m, model, &g, world, &colors(model, p.look), p.outline);
+    if p.has_bomb {
+        let back = world * g[ids.torso].mat();
+        m.rounded(
+            &(back
+                * Mat4::from_translation(vec3(0.0, 0.25, -0.42))
+                * Mat4::from_scale(Vec3::splat(1.0 / SCALE))),
+            vec3(0.18, 0.18, 0.08),
+            0.05,
+            [220, 50, 40],
+            p.outline,
+            3,
+        );
+    }
+    m.ink = prev_ink;
+    gun_base.transform_point3(muzzle(p.weapon))
+}
+
+/// Ragdoll joints in world space.
+pub struct RagdollJoints {
+    pub head: Vec3,
+    pub chest: Vec3,
+    pub pelvis: Vec3,
+    /// [left, right]
+    pub shoulder: [Vec3; 2],
+    pub knee: [Vec3; 2],
+    pub foot: [Vec3; 2],
+    pub hand: [Vec3; 2],
+}
+
+/// Draws a limp soldier following ragdoll joints.
+pub fn add_ragdoll(m: &mut ToonMesh, team: Team, look: u8, j: &RagdollJoints) {
+    let r = rig();
+    let ids = &r.ids;
+    let model = model_for(team, look);
+    // body frame: up along the spine, right across the shoulders; the model faces +Z
+    let up = (j.chest - j.pelvis).normalize_or(Vec3::Y);
+    let right = (j.shoulder[1] - j.shoulder[0]).normalize_or(Vec3::X);
+    let fwd = up.cross(right).normalize_or(Vec3::NEG_Z);
+    let right = fwd.cross(up).normalize();
+    // model +X is the character's left
+    let basis = Mat3::from_cols(-right, up, fwd);
+    let mut local = r.sample(clip::IDLE, 0.0, true);
+    let mut g = r.globals(&local);
+    let hips_model = g[ids.hips].t;
+    let world = Mat4::from_translation(j.pelvis)
+        * Mat4::from_mat3(basis)
+        * Mat4::from_scale(Vec3::splat(SCALE))
+        * Mat4::from_translation(-hips_model);
+    let to_model = world.inverse();
+    let mp = |v: Vec3| to_model.transform_point3(v);
+
+    r.aim(&mut local, &mut g, ids.neck, mp(j.head));
+    for s in 0..2 {
+        let side = if s == 0 { 1.0 } else { -1.0 };
+        let arm_len = local[ids.fist[s]].t.length();
+        r.reach(
+            &mut local,
+            &mut g,
+            ids.upper_arm[s],
+            ids.lower_arm[s],
+            arm_len,
+            mp(j.hand[s]),
+            vec3(side, -1.0, -0.5),
+        );
+        let leg_len = bind_dist(r, ids.lower_leg[s], ids.foot[s]);
+        // the foot bones are separate (IK controls in the original rig): they follow the
+        // shin, keeping their angle to it
+        let foot_rel = g[ids.lower_leg[s]].r.inverse() * g[ids.foot[s]].r;
+        r.aim(&mut local, &mut g, ids.upper_leg[s], mp(j.knee[s]));
+        r.aim(&mut local, &mut g, ids.lower_leg[s], mp(j.foot[s]));
+        let shin = g[ids.lower_leg[s]];
+        let foot = Xf {
+            t: shin.t + shin.r * Vec3::Y * leg_len,
+            r: shin.r * foot_rel,
+        };
+        r.set_global(&mut local, &mut g, ids.foot[s], foot);
+    }
+    let prev_ink = m.ink.replace(team_ink(team));
+    r.draw(m, model, &g, world, &colors(model, look), OUTLINE);
+    m.ink = prev_ink;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn soldier_mesh_budget() {
+        let mut m = ToonMesh::new();
+        for round in 0..3 {
+            m.clear();
+            let t0 = std::time::Instant::now();
+            for k in 0..16u8 {
+                let pose = SoldierPose {
+                    pos: Vec3::ZERO,
+                    yaw: 0.3,
+                    pitch: 0.1,
+                    stance: Stance::Stand,
+                    team: if k % 2 == 0 { Team::Allies } else { Team::Axis },
+                    weapon: WeaponId::M4,
+                    look: k,
+                    time: 1.0,
+                    phase: 0.5 + k as f32,
+                    walk: 1.0,
+                    sprint: false,
+                    has_bomb: false,
+                    melee: 0.0,
+                    reload: None,
+                    outline: OUTLINE,
+                };
+                add_soldier(&mut m, &pose);
+            }
+            let verts: usize = m
+                .fill
+                .chunks
+                .iter()
+                .chain(m.outline.chunks.iter())
+                .map(|c| c.verts.len())
+                .sum();
+            println!(
+                "round {round}: 16 soldiers = {verts} verts in {:?}",
+                t0.elapsed()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod fit {
+    use super::*;
+
+    /// The top of the model matches the top of the head hitbox in every stance.
+    #[test]
+    fn model_fits_hitboxes() {
+        for stance in [Stance::Stand, Stance::Crouch, Stance::Prone] {
+            let mut m = ToonMesh::new();
+            let pose = SoldierPose {
+                pos: Vec3::ZERO,
+                yaw: 0.0,
+                pitch: 0.0,
+                stance,
+                team: Team::Allies,
+                weapon: WeaponId::M4,
+                look: 0,
+                time: 0.0,
+                phase: 0.0,
+                walk: 0.0,
+                sprint: false,
+                has_bomb: false,
+                melee: 0.0,
+                reload: None,
+                outline: OUTLINE,
+            };
+            add_soldier(&mut m, &pose);
+            let top = m
+                .fill
+                .chunks
+                .iter()
+                .flat_map(|c| c.verts.iter())
+                .map(|v| v.position.y)
+                .fold(0.0f32, f32::max);
+            let head = toon_shared::ray::hitboxes(stance)[0].2.y;
+            assert!(
+                (top - head).abs() < 0.08,
+                "{stance:?}: model {top}, hitbox {head}"
+            );
+        }
+    }
+}

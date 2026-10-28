@@ -2,6 +2,7 @@
 //! Toon Warfare — game client.
 
 mod audio;
+mod character;
 mod effects;
 mod game;
 mod hud;
@@ -13,6 +14,7 @@ mod netclient;
 mod ragdoll;
 mod render;
 mod settings;
+mod soldier;
 mod textures;
 mod ui;
 

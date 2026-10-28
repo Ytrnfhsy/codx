@@ -16,7 +16,6 @@ use toon_shared::physics::{Body, MoveInput, Stance, World};
 use toon_shared::protocol::*;
 use toon_shared::ray::ray_player;
 use toon_shared::rng::Rng;
-use toon_shared::skin::Skin;
 use toon_shared::tuning::{Tuning, WeaponStats};
 use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
 use toon_shared::{look_dir, maps, wrap_angle, yaw_basis, Mode, Team};
@@ -1144,15 +1143,9 @@ impl GameClient {
                 .any(|s| flat(*s) < SAB_SITE_RADIUS + 0.4)
     }
 
-    /// How a player looks (everyone wears the standard look for now).
-    pub fn look_of(&self, _id: u8) -> Skin {
-        Skin::default()
-    }
-
     /// Sleeve and hand colours for a first-person view.
     pub fn vm_colors(&self, id: u8, team: Team) -> ([u8; 3], [u8; 3]) {
-        let pal = crate::models::palette(&self.look_of(id), team);
-        (pal.shirt, pal.tone)
+        crate::soldier::arm_colors(team, id)
     }
 
     /// Living remote players, interpolated for this frame.

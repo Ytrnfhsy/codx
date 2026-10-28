@@ -2,8 +2,9 @@
 
 use crate::game::GameClient;
 use crate::mesh::{trs, Materials, ToonMesh};
-use crate::models::{self, SoldierPose};
+use crate::models;
 use crate::settings::Settings;
+use crate::soldier::{self, SoldierPose};
 use macroquad::prelude::*;
 use toon_shared::look_dir;
 use toon_shared::physics::Stance;
@@ -328,27 +329,17 @@ pub fn render_world(
             stance: a.stance,
             team: a.team,
             weapon: a.weapon,
-            skin: g.look_of(a.id),
-            lod: {
-                let d = a.pos.distance(view.pos);
-                if d < 8.0 {
-                    4
-                } else if d < 22.0 {
-                    3
-                } else {
-                    2
-                }
-            },
+            look: a.id,
+            time: now as f32,
             phase: a.phase,
             walk: a.walk,
             sprint: a.flags & flags::SPRINT != 0,
-            dead: None,
             has_bomb,
-            blink: ((now * 0.37 + a.id as f64 * 0.31).fract()) < 0.035,
             melee: a.melee,
             reload: a.reload,
+            outline: soldier::outline_at(a.pos.distance(view.pos)),
         };
-        let muzzle = models::add_soldier(&mut m, None, &pose);
+        let muzzle = soldier::add_soldier(&mut m, &pose);
 
         let floor = g
             .world
@@ -390,7 +381,7 @@ pub fn render_world(
         None => &g.ragdolls,
     };
     for (id, r) in ragdolls {
-        r.draw(&mut m, None, &g.look_of(*id), now as f32);
+        r.draw(&mut m, *id, now as f32);
 
         let c = r.centre();
         if let Some(f) = g.world.floor_below(c + vec3(0.0, 0.2, 0.0), 2.5) {
@@ -772,69 +763,92 @@ pub fn draw_model_gallery(mats: &Materials) {
             trs(pos, std::f32::consts::FRAC_PI_2, 0.0, 0.0) * Mat4::from_scale(Vec3::splat(1.7));
         models::add_gun(&mut m, &base, w, 0.012);
     }
-    // soldiers in a few looks
+    // soldiers of both teams
     let looks = [
         (
             Team::Allies,
-            toon_shared::skin::Skin::default(),
+            0u8,
             WeaponId::M4,
-        ),
-        (
-            Team::Axis,
-            toon_shared::skin::Skin::default(),
-            WeaponId::Ak47,
+            Stance::Stand,
+            vec3(2.7, 0.0, -1.5),
         ),
         (
             Team::Allies,
-            toon_shared::skin::Skin {
-                hat: 2,
-                hat_color: 7,
-                hair: 4,
-                hair_color: 3,
-                shirt: 9,
-                eyes: 0,
-                face: 1,
-                ..Default::default()
-            },
+            5,
             WeaponId::P90,
+            Stance::Crouch,
+            vec3(0.9, 0.0, -1.5),
         ),
         (
             Team::Axis,
-            toon_shared::skin::Skin {
-                hat: 0,
-                hair: 7,
-                hair_color: 0,
-                tone: 5,
-                shirt: 3,
-                pants: 6,
-                face: 6,
-                extra: 1,
-                ..Default::default()
-            },
+            2,
+            WeaponId::Ak47,
+            Stance::Stand,
+            vec3(-0.9, 0.0, -1.5),
+        ),
+        (
+            Team::Axis,
+            9,
             WeaponId::M249,
+            Stance::Stand,
+            vec3(-2.7, 0.0, -1.5),
+        ),
+        (
+            Team::Allies,
+            6,
+            WeaponId::M40,
+            Stance::Prone,
+            vec3(2.6, 0.0, -3.6),
         ),
     ];
-    for (k, (team, skin, weapon)) in looks.iter().enumerate() {
+    for (k, (team, look, weapon, stance, pos)) in looks.iter().enumerate() {
         let pose = SoldierPose {
-            pos: vec3(2.7 - k as f32 * 1.8, 0.0, -1.5),
-            yaw: -0.45,
+            pos: *pos,
+            yaw: if *stance == Stance::Prone {
+                -1.3
+            } else {
+                -0.45
+            },
             pitch: -0.15,
-            stance: Stance::Stand,
+            stance: *stance,
             team: *team,
             weapon: *weapon,
-            skin: *skin,
-            lod: 6,
-            phase: 0.0,
-            walk: 0.0,
-            sprint: false,
-            dead: None,
-            has_bomb: false,
-            blink: false,
+            look: *look,
+            time: 0.0,
+            // one walks, one sprints
+            phase: k as f32 * 0.9,
+            walk: if (2..=3).contains(&k) { 1.0 } else { 0.0 },
+            sprint: k == 3,
+            has_bomb: k == 3,
             melee: 0.0,
             reload: None,
+            outline: soldier::OUTLINE,
         };
-        models::add_soldier(&mut m, None, &pose);
+        soldier::add_soldier(&mut m, &pose);
     }
+    // a fallen soldier: a ragdoll simulated for a moment on flat ground
+    let mut flat = toon_shared::maps::build(toon_shared::map::MapId::Wreck);
+    flat.boxes.retain(|b| b.max.y <= 0.01);
+    let world = toon_shared::physics::World::from_map(&flat);
+    let mut rng = toon_shared::rng::Rng::new(7);
+    let blow = crate::ragdoll::DeathBlow {
+        cause: toon_shared::weapons::Cause::Weapon(WeaponId::M4),
+        headshot: false,
+        from: Some(vec3(5.0, 1.0, -4.6)),
+    };
+    let mut rd = crate::ragdoll::Ragdoll::new(
+        vec3(0.6, 0.0, -4.6),
+        2.6,
+        Stance::Stand,
+        Vec3::ZERO,
+        Team::Axis,
+        blow,
+        &mut rng,
+    );
+    for _ in 0..90 {
+        rd.update(&world, 1.0 / 60.0);
+    }
+    rd.draw(&mut m, 3, 0.0);
     mats.draw_toon(&m);
     set_default_camera();
 }
