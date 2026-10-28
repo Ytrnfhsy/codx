@@ -55,26 +55,24 @@ pub fn wreck() -> Map {
     b.heli_wreck(-1.0, -1.0);
 
     // low adobe walls framing the square, with gaps to the lanes
-    b.wall_z(
-        -13.0,
-        13.0,
-        -17.0,
-        0.0,
-        1.2,
-        0.5,
-        &[door(-8.0), wide_door(0.0), door(8.0)],
-        pal::ADOBE_LIGHT,
-    );
-    b.wall_z(
-        -13.0,
-        13.0,
-        17.0,
-        0.0,
-        1.2,
-        0.5,
-        &[door(-8.0), wide_door(0.0), door(8.0)],
-        pal::ADOBE_LIGHT,
-    );
+    for x in [-17.0, 17.0] {
+        b.low_wall(
+            false,
+            -13.0,
+            13.0,
+            x,
+            1.2,
+            0.5,
+            &[door(-8.0), wide_door(0.0), door(8.0)],
+            pal::ADOBE_LIGHT,
+        );
+    }
+    // kerbs along the main street outside the square
+    for (z0, z1) in [(-38.0, -13.0), (13.0, 38.0)] {
+        for x in [-4.0f32, 4.0] {
+            b.push_detail(x - 0.25, 0.0, z0, x + 0.25, 0.12, z1, pal::CONCRETE);
+        }
+    }
 
     // cover in the square
     b.burnt_car(-11.0, -8.0, false);
@@ -219,6 +217,36 @@ pub fn wreck() -> Map {
         upper: &[],
         roof_access: true,
     });
+
+    // lived-in corners: a pickup by the east house, a well, stacked crates, stalls, palms
+    b.car(29.0, 21.5, true, pal::WALL_TAN);
+    b.car(-29.5, -19.0, true, pal::WALL_BLUE);
+    b.cbox(-21.0, -17.0, 1.8, 1.8, 0.0, 0.9, pal::ADOBE);
+    b.cbox(-21.0, -17.0, 1.2, 1.2, 0.9, 0.05, [70, 110, 150]);
+    for (x, z) in [(-21.8f32, -17.8f32), (-20.2, -16.2)] {
+        b.push_detail(x - 0.08, 0.9, z - 0.08, x + 0.08, 2.6, z + 0.08, pal::WOOD);
+    }
+    b.push_detail(-22.2, 2.6, -18.2, -19.8, 2.75, -15.8, pal::ROOF_RED);
+    b.crate_(11.0, -18.0, 1.2, 0.0);
+    b.crate_(12.3, -18.3, 1.0, 0.0);
+    b.crate_(11.5, -18.1, 0.9, 1.2);
+    b.crate_(-11.0, 18.5, 1.2, 0.0);
+    b.crate_(-12.2, 18.8, 1.0, 0.0);
+    for (x, z) in [
+        (8.0f32, -24.0f32),
+        (-24.5, 22.0),
+        (21.0, 24.0),
+        (-8.0, 31.0),
+        (8.0, -33.0),
+    ] {
+        b.tree(x, z, true);
+    }
+    for (x, z, c) in [(20.5, -5.5, pal::AWNING_B), (-20.5, 5.5, pal::AWNING_A)] {
+        b.cbox(x, z, 1.0, 2.4, 0.0, 1.0, pal::WOOD);
+        b.push_detail(x - 0.9, 2.3, z - 1.5, x + 0.9, 2.4, z + 1.5, c);
+        b.push_detail(x - 0.85, 0.0, z - 1.4, x - 0.75, 2.3, z - 1.3, pal::WOOD);
+        b.push_detail(x - 0.85, 0.0, z + 1.3, x - 0.75, 2.3, z + 1.4, pal::WOOD);
+    }
 
     // east lane cover
     b.crate_(19.5, 18.0, 1.3, 0.0);
@@ -399,6 +427,42 @@ pub fn site() -> Map {
     );
     // scaffolding along the south face, leading onto the first floor
     b.scaffold_x(-5.0, 4.0, 7.0, 1.4, h);
+    // rebar sticking out of the columns on top, a darker yard under the frame
+    for x in [x0, -3.0, 3.0, x1] {
+        for z in [z0, 0.0, z1] {
+            let px = x.clamp(x0 + 0.3, x1 - 0.3);
+            let pz = z.clamp(z0 + 0.3, z1 - 0.3);
+            for (dx, dz) in [(-0.15f32, -0.15f32), (0.15, 0.15)] {
+                b.push_detail(
+                    px + dx - 0.03,
+                    2.0 * h,
+                    pz + dz - 0.03,
+                    px + dx + 0.03,
+                    2.0 * h + 0.7,
+                    pz + dz + 0.03,
+                    pal::RUST,
+                );
+            }
+        }
+    }
+    b.decal(-12.0, -10.0, 12.0, 10.0, 0.0, [178, 152, 108]);
+    // a tower crane over the frame, pallets of bricks, cabins and toilets for the crew
+    b.crane(12.5, 11.0, 20.0);
+    for (x, z) in [
+        (-11.2f32, -9.2f32),
+        (-12.6, -9.2),
+        (10.8, 8.6),
+        (-3.2, 10.4),
+        (-4.6, 10.4),
+    ] {
+        b.brick_pallet(x, z);
+    }
+    b.site_cabin(-25.0, -28.5, true, pal::CABIN);
+    b.site_cabin(-25.0, -31.8, true, pal::CONT_BLUE);
+    b.toilet(-29.5, -25.8, pal::CONT_BLUE);
+    b.toilet(-28.2, -25.8, pal::CONT_GREEN);
+    b.site_fence(true, -22.0, -8.0, -19.0, &[wide_door(-16.0)]);
+    b.site_fence(false, 14.0, 22.0, 13.0, &[door(18.0)]);
     // building material around
     b.cbox(-3.0, -10.0, 4.0, 1.4, 0.0, 0.8, pal::WOOD);
     b.cbox(-3.0, -10.0, 3.0, 1.2, 0.8, 0.5, pal::WOOD);
@@ -484,11 +548,11 @@ pub fn site() -> Map {
         pal::WALL_GREEN,
         Some(pal::ROOF_RED),
     );
-    b.wall_x(
+    b.low_wall(
+        true,
         -22.0,
         -10.0,
         14.0,
-        0.0,
         2.2,
         0.4,
         &[door(-16.0)],

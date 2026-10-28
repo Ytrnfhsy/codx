@@ -1,7 +1,7 @@
 //! Bigger building blocks for level design: multi-storey buildings with stairwells and roof
 //! access, balconies, a crashed helicopter, scaffolding and small cover props.
 
-use crate::map::{pal, MapBuilder, Opening, Side};
+use crate::map::{pal, shade, wall_segments, MapBuilder, Opening, Side};
 
 /// Rise of one stair step (physics steps up to 0.5 m).
 const STEP_RISE: f32 = 0.34;
@@ -424,6 +424,268 @@ impl MapBuilder {
         self.cbox(cx, cz, w, d, 0.0, 1.0, pal::BURNT);
         let (cw, cd) = if along_x { (2.0, 1.6) } else { (1.6, 2.0) };
         self.cbox(cx, cz, cw, cd, 1.0, 0.55, [90, 70, 60]);
+        // empty window frames and rusty streaks
+        let (gw, gd) = if along_x { (1.6, 1.64) } else { (1.64, 1.6) };
+        self.push_detail(
+            cx - gw / 2.0,
+            1.1,
+            cz - gd / 2.0,
+            cx + gw / 2.0,
+            1.45,
+            cz + gd / 2.0,
+            [36, 32, 32],
+        );
+        let (rw, rd) = if along_x { (4.24, 0.5) } else { (0.5, 4.24) };
+        self.push_detail(
+            cx - rw / 2.0,
+            0.55,
+            cz - rd / 2.0,
+            cx + rw / 2.0,
+            0.7,
+            cz + rd / 2.0,
+            pal::RUST,
+        );
+        self.car_details(cx, cz, along_x, [34, 30, 30], false);
+    }
+
+    /// Low wall with a coping on top and square pillars at its ends and openings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn low_wall(
+        &mut self,
+        along_x: bool,
+        a: f32,
+        b: f32,
+        line: f32,
+        h: f32,
+        t: f32,
+        ops: &[Opening],
+        c: [u8; 3],
+    ) {
+        if along_x {
+            self.wall_x(a, b, line, 0.0, h, t, ops, c);
+        } else {
+            self.wall_z(a, b, line, 0.0, h, t, ops, c);
+        }
+        let cap = shade(c, 0.86);
+        let mut piece = |s0: f32, s1: f32, y0: f32, y1: f32, out: f32, solid: bool| {
+            let (p0, p1) = (line - t / 2.0 - out, line + t / 2.0 + out);
+            let (lo, hi) = if along_x {
+                (glam::vec3(s0, y0, p0), glam::vec3(s1, y1, p1))
+            } else {
+                (glam::vec3(p0, y0, s0), glam::vec3(p1, y1, s1))
+            };
+            if solid {
+                self.block(lo.x, lo.y, lo.z, hi.x, hi.y, hi.z, cap);
+            } else {
+                self.push_detail(lo.x, lo.y, lo.z, hi.x, hi.y, hi.z, cap);
+            }
+        };
+        for (s0, s1, ya, _) in wall_segments(a, b, h, ops) {
+            if ya > 0.0 {
+                continue;
+            }
+            piece(s0, s1, h, h + 0.1, 0.06, false);
+            for e in [s0, s1] {
+                piece(e - 0.3, e + 0.3, 0.0, h + 0.3, 0.15, true);
+            }
+        }
+    }
+
+    /// Construction-site fence: blue panels on posts, solid (cover), with gaps in `ops`.
+    pub fn site_fence(&mut self, along_x: bool, a: f32, b: f32, line: f32, ops: &[Opening]) {
+        let h = 2.0;
+        if along_x {
+            self.wall_x(a, b, line, 0.0, h, 0.12, ops, pal::FENCE);
+        } else {
+            self.wall_z(a, b, line, 0.0, h, 0.12, ops, pal::FENCE);
+        }
+        // white stripe and posts every 2.5 m
+        for (s0, s1, ya, _) in wall_segments(a, b, h, ops) {
+            if ya > 0.0 {
+                continue;
+            }
+            let mut k = s0;
+            while k <= s1 + 0.01 {
+                let (x0, z0, x1, z1) = if along_x {
+                    (k - 0.06, line - 0.12, k + 0.06, line + 0.12)
+                } else {
+                    (line - 0.12, k - 0.06, line + 0.12, k + 0.06)
+                };
+                self.push_detail(x0, 0.0, z0, x1, h + 0.1, z1, pal::METAL);
+                k += 2.5;
+            }
+            let (x0, z0, x1, z1) = if along_x {
+                (s0, line - 0.08, s1, line + 0.08)
+            } else {
+                (line - 0.08, s0, line + 0.08, s1)
+            };
+            self.push_detail(x0, 1.45, z0, x1, 1.65, z1, pal::WALL_WHITE);
+        }
+    }
+
+    /// Pallet stacked with bricks (waist-high cover).
+    pub fn brick_pallet(&mut self, cx: f32, cz: f32) {
+        self.cbox(cx, cz, 1.2, 1.0, 0.0, 0.15, pal::WOOD);
+        self.cbox(cx, cz, 1.1, 0.9, 0.15, 0.7, pal::BRICK);
+        for y in [0.38f32, 0.62] {
+            self.push_detail(
+                cx - 0.56,
+                y,
+                cz - 0.46,
+                cx + 0.56,
+                y + 0.03,
+                cz + 0.46,
+                shade(pal::BRICK, 0.75),
+            );
+        }
+    }
+
+    /// Site office cabin (6 × 2.4) with windows and a door on its +z / +x long side.
+    pub fn site_cabin(&mut self, cx: f32, cz: f32, along_x: bool, c: [u8; 3]) {
+        let (w, d) = if along_x { (6.0, 2.4) } else { (2.4, 6.0) };
+        self.cbox(cx, cz, w, d, 0.0, 0.25, pal::DARK);
+        self.cbox(cx, cz, w, d, 0.25, 2.4, c);
+        self.cbox(cx, cz, w + 0.2, d + 0.2, 2.65, 0.15, pal::ROOF_GREY);
+        // windows on both long sides, a door on the front
+        for (l0, l1, y0, y1, col) in [
+            (-2.4f32, -1.2f32, 1.2f32, 2.1f32, pal::WINDOW),
+            (0.2, 1.4, 1.2, 2.1, pal::WINDOW),
+            (1.8, 2.6, 0.25, 2.2, pal::WOOD),
+        ] {
+            if along_x {
+                self.push_detail(
+                    cx + l0,
+                    y0,
+                    cz - d / 2.0 - 0.04,
+                    cx + l1,
+                    y1,
+                    cz + d / 2.0 + 0.04,
+                    col,
+                );
+            } else {
+                self.push_detail(
+                    cx - w / 2.0 - 0.04,
+                    y0,
+                    cz + l0,
+                    cx + w / 2.0 + 0.04,
+                    y1,
+                    cz + l1,
+                    col,
+                );
+            }
+        }
+    }
+
+    /// Portable toilet.
+    pub fn toilet(&mut self, cx: f32, cz: f32, c: [u8; 3]) {
+        self.cbox(cx, cz, 1.1, 1.1, 0.0, 2.2, c);
+        self.cbox(cx, cz, 1.2, 1.2, 2.2, 0.12, pal::WALL_WHITE);
+        self.push_detail(
+            cx - 0.35,
+            0.1,
+            cz + 0.55,
+            cx + 0.35,
+            2.0,
+            cz + 0.58,
+            shade(c, 0.8),
+        );
+    }
+
+    /// Tower crane: a solid lattice mast and a long jib high above (visual), with a hook.
+    pub fn crane(&mut self, cx: f32, cz: f32, height: f32) {
+        let y = pal::SCAFFOLD;
+        self.cbox(cx, cz, 3.0, 3.0, 0.0, 0.6, pal::CONCRETE_DARK);
+        self.cbox(cx, cz, 1.3, 1.3, 0.6, height - 0.6, y);
+        // lattice bands on the mast
+        let mut h = 1.6;
+        while h < height - 1.0 {
+            self.push_detail(
+                cx - 0.7,
+                h,
+                cz - 0.7,
+                cx + 0.7,
+                h + 0.12,
+                cz + 0.7,
+                shade(y, 0.75),
+            );
+            h += 1.6;
+        }
+        // cab, jib towards -x, counter-jib with weights towards +x
+        self.push_detail(
+            cx - 0.8,
+            height,
+            cz + 0.65,
+            cx + 0.8,
+            height + 1.6,
+            cz + 2.2,
+            pal::CABIN,
+        );
+        self.push_detail(
+            cx - 0.6,
+            height + 0.9,
+            cz + 2.2,
+            cx + 0.6,
+            height + 1.4,
+            cz + 2.24,
+            pal::WINDOW,
+        );
+        self.push_detail(
+            cx - 22.0,
+            height,
+            cz - 0.5,
+            cx + 0.65,
+            height + 1.0,
+            cz + 0.5,
+            y,
+        );
+        self.push_detail(
+            cx + 0.65,
+            height,
+            cz - 0.5,
+            cx + 7.0,
+            height + 0.7,
+            cz + 0.5,
+            y,
+        );
+        self.push_detail(
+            cx + 5.0,
+            height - 1.2,
+            cz - 0.8,
+            cx + 7.0,
+            height,
+            cz + 0.8,
+            pal::CONCRETE_DARK,
+        );
+        self.push_detail(
+            cx - 0.4,
+            height + 1.0,
+            cz - 0.4,
+            cx + 0.4,
+            height + 4.0,
+            cz + 0.4,
+            y,
+        );
+        // trolley, cable and a hook with a load of planks
+        let hx = cx - 14.0;
+        self.push_detail(
+            hx - 0.5,
+            height - 0.4,
+            cz - 0.6,
+            hx + 0.5,
+            height,
+            cz + 0.6,
+            pal::DARK,
+        );
+        self.push_detail(
+            hx - 0.04,
+            6.2,
+            cz - 0.04,
+            hx + 0.04,
+            height - 0.4,
+            cz + 0.04,
+            pal::DARK,
+        );
+        self.push_detail(hx - 1.4, 5.6, cz - 0.5, hx + 1.4, 6.2, cz + 0.5, pal::WOOD);
     }
 
     /// Scaffolding: a plank walkway at height `y` along a wall, with stairs up at one end

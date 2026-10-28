@@ -177,6 +177,20 @@ pub mod pal {
     pub const LEAVES: [u8; 3] = [92, 168, 84];
     pub const TRUNK: [u8; 3] = [130, 90, 60];
     pub const BRICK: [u8; 3] = [190, 92, 72];
+    pub const TYRE: [u8; 3] = [44, 44, 50];
+    pub const LIGHT: [u8; 3] = [255, 240, 170];
+    pub const FENCE: [u8; 3] = [70, 130, 190];
+    pub const CABIN: [u8; 3] = [228, 230, 226];
+    pub const WINDOW: [u8; 3] = [60, 80, 100];
+}
+
+/// A colour darkened (or lightened) by `k`.
+pub fn shade(c: [u8; 3], k: f32) -> [u8; 3] {
+    [
+        (c[0] as f32 * k).min(255.0) as u8,
+        (c[1] as f32 * k).min(255.0) as u8,
+        (c[2] as f32 * k).min(255.0) as u8,
+    ]
 }
 
 #[derive(Default)]
@@ -247,6 +261,7 @@ impl MapBuilder {
         for (a, b, ya, yb) in wall_segments(x0, x1, h, ops) {
             self.block(a, y0 + ya, z - t / 2.0, b, y0 + yb, z + t / 2.0, c);
         }
+        self.trims(true, z, y0, h, t, ops, c);
     }
 
     /// Wall along Z (from z0 to z1) centered on `x`, with openings.
@@ -263,6 +278,52 @@ impl MapBuilder {
     ) {
         for (a, b, ya, yb) in wall_segments(z0, z1, h, ops) {
             self.block(x - t / 2.0, y0 + ya, a, x + t / 2.0, y0 + yb, b, c);
+        }
+        self.trims(false, x, y0, h, t, ops, c);
+    }
+
+    /// Sills under windows and lintels over doors and windows (visual only), a shade
+    /// darker than the wall. `line` is the wall's centre line.
+    #[allow(clippy::too_many_arguments)]
+    fn trims(
+        &mut self,
+        along_x: bool,
+        line: f32,
+        y0: f32,
+        h: f32,
+        t: f32,
+        ops: &[Opening],
+        c: [u8; 3],
+    ) {
+        let dark = shade(c, 0.8);
+        for o in ops {
+            let (a, b) = (o.at - o.w / 2.0 - 0.12, o.at + o.w / 2.0 + 0.12);
+            let mut add = |ya: f32, yb: f32, out: f32| {
+                let (p0, p1) = (line - t / 2.0 - out, line + t / 2.0 + out);
+                if along_x {
+                    self.push(
+                        vec3(a, y0 + ya, p0),
+                        vec3(b, y0 + yb, p1),
+                        dark,
+                        false,
+                        true,
+                    );
+                } else {
+                    self.push(
+                        vec3(p0, y0 + ya, a),
+                        vec3(p1, y0 + yb, b),
+                        dark,
+                        false,
+                        true,
+                    );
+                }
+            };
+            if o.bottom > 0.0 {
+                add(o.bottom - 0.1, o.bottom, 0.12);
+            }
+            if o.top < h - 0.05 {
+                add(o.top, (o.top + 0.14).min(h), 0.05);
+            }
         }
     }
 
@@ -389,7 +450,7 @@ impl MapBuilder {
         self.cbox(cx, cz, s, s, y0, s, pal::CRATE);
     }
 
-    /// Simple toon car: body + cabin.
+    /// Simple toon car: body + cabin, wheels and lights.
     pub fn car(&mut self, cx: f32, cz: f32, along_x: bool, c: [u8; 3]) {
         let (w, d) = if along_x { (4.2, 1.9) } else { (1.9, 4.2) };
         self.cbox(cx, cz, w, d, 0.0, 0.25, pal::DARK);
@@ -397,6 +458,59 @@ impl MapBuilder {
         let (cw, cd) = if along_x { (2.2, 1.7) } else { (1.7, 2.2) };
         self.cbox(cx, cz, cw, cd, 1.1, 0.7, pal::GLASS);
         self.cbox(cx, cz, cw + 0.05, cd + 0.05, 1.8, 0.08, c);
+        self.car_details(cx, cz, along_x, pal::TYRE, true);
+    }
+
+    /// Wheels sticking out of the sides, head- and taillights (visual only).
+    pub(crate) fn car_details(
+        &mut self,
+        cx: f32,
+        cz: f32,
+        along_x: bool,
+        tyre: [u8; 3],
+        lights: bool,
+    ) {
+        // local frame: `l` along the car, `s` across it
+        let mut at = |l0: f32, l1: f32, s0: f32, s1: f32, y0: f32, y1: f32, c: [u8; 3]| {
+            if along_x {
+                self.push(
+                    vec3(cx + l0, y0, cz + s0),
+                    vec3(cx + l1, y1, cz + s1),
+                    c,
+                    false,
+                    true,
+                );
+            } else {
+                self.push(
+                    vec3(cx + s0, y0, cz + l0),
+                    vec3(cx + s1, y1, cz + l1),
+                    c,
+                    false,
+                    true,
+                );
+            }
+        };
+        for l in [-1.35f32, 1.35] {
+            for s in [-1.0f32, 1.0] {
+                let (s0, s1) = if s < 0.0 { (-1.02, -0.8) } else { (0.8, 1.02) };
+                at(l - 0.36, l + 0.36, s0, s1, 0.0, 0.66, tyre);
+                at(
+                    l - 0.16,
+                    l + 0.16,
+                    s0 - 0.01 * s,
+                    s1 + 0.01 * s,
+                    0.2,
+                    0.46,
+                    pal::METAL,
+                );
+            }
+        }
+        if lights {
+            for s in [-0.65f32, 0.45] {
+                at(-2.13, -2.08, s, s + 0.2, 0.75, 0.9, pal::LIGHT);
+                at(2.08, 2.13, s, s + 0.2, 0.75, 0.9, pal::BARREL_RED);
+            }
+        }
     }
 
     /// Low sandbag wall.
@@ -442,7 +556,7 @@ impl MapBuilder {
 }
 
 /// Splits a wall into solid pieces around openings: (from, to, y_from, y_to) relative to wall base.
-fn wall_segments(a: f32, b: f32, h: f32, ops: &[Opening]) -> Vec<(f32, f32, f32, f32)> {
+pub(crate) fn wall_segments(a: f32, b: f32, h: f32, ops: &[Opening]) -> Vec<(f32, f32, f32, f32)> {
     let mut ops = ops.to_vec();
     ops.sort_by(|p, q| p.at.partial_cmp(&q.at).unwrap());
     let mut out = Vec::new();
