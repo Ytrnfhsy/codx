@@ -13,6 +13,7 @@ pub enum Hit {
     None,
     Player(u8, f32, HitZone),
     Heli(usize, f32),
+    Vehicle(usize, f32),
 }
 
 impl Game {
@@ -41,6 +42,15 @@ impl Game {
                 if dist < best {
                     best = dist;
                     hit = Hit::Heli(i, dist);
+                }
+            }
+        }
+        for (i, v) in self.vehicles.iter().enumerate() {
+            let (c, r) = v.sphere();
+            if let Some(dist) = ray_sphere(o, d, c, r) {
+                if dist < best {
+                    best = dist;
+                    hit = Hit::Vehicle(i, dist);
                 }
             }
         }
@@ -108,6 +118,7 @@ impl Game {
 
         let mut per_victim: Vec<(u8, f32, bool)> = Vec::new();
         let mut heli_dmg: Vec<(usize, f32)> = Vec::new();
+        let mut vehicle_dmg: Vec<(usize, f32)> = Vec::new();
         for (k, d) in dirs.iter().take(def.pellets.max(1) as usize).enumerate() {
             if !d.is_finite() || d.length_squared() < 0.5 {
                 continue;
@@ -134,6 +145,7 @@ impl Game {
                     }
                 }
                 Hit::Heli(i, dist) => heli_dmg.push((i, def.damage_at(dist))),
+                Hit::Vehicle(i, dist) => vehicle_dmg.push((i, def.damage_at(dist))),
                 Hit::None => {}
             }
             if k < 3 {
@@ -154,6 +166,9 @@ impl Game {
         }
         for (v, dmg, head) in per_victim {
             self.damage(v, Some(id), dmg, Cause::Weapon(weapon), head, origin);
+        }
+        for (i, dmg) in vehicle_dmg {
+            self.damage_vehicle(i, dmg, Some(id));
         }
         for (i, dmg) in heli_dmg {
             if let Some(h) = self.helis.get_mut(i) {
@@ -305,12 +320,7 @@ impl Game {
                                 "Вбивство".to_string()
                             },
                         ));
-                        reward = match k.streak {
-                            UAV_KILLS => Some(Killstreak::Uav),
-                            AIRSTRIKE_KILLS => Some(Killstreak::Airstrike),
-                            HELI_KILLS => Some(Killstreak::Helicopter),
-                            _ => None,
-                        };
+                        reward = Killstreak::for_streak(k.streak);
                         if let Some(r) = reward {
                             if !k.rewards.contains(&r) {
                                 k.rewards.push(r);
@@ -560,6 +570,20 @@ impl Game {
         for (v, dmg) in victims {
             self.damage(v, owner, dmg, cause, false, pos);
         }
+        // vehicles caught in the blast
+        let hits: Vec<(usize, f32)> = self
+            .vehicles
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| {
+                let (c, r) = v.sphere();
+                let d = (c.distance(pos) - r).max(0.0);
+                (d < radius).then(|| (i, max_dmg * (1.0 - d / radius)))
+            })
+            .collect();
+        for (i, dmg) in hits {
+            self.damage_vehicle(i, dmg, owner);
+        }
         // helicopters caught in big blasts
         if big {
             for h in self.helis.iter_mut() {
@@ -608,13 +632,13 @@ impl Game {
         }
     }
 
-    pub fn use_killstreak(&mut self, id: u8, target: Option<[f32; 2]>) {
+    pub fn use_killstreak(&mut self, id: u8, target: Option<[f32; 2]>, pilot: bool) {
         if self.state != MatchState::Playing && self.state != MatchState::Warmup {
             return;
         }
         let time = self.time;
         let Some(p) = self.pm(id) else { return };
-        if !p.alive || time < p.protected_until {
+        if !p.alive || time < p.protected_until || p.driving.is_some() {
             return;
         }
         let Some(&k) = p.rewards.last() else { return };
@@ -663,6 +687,42 @@ impl Game {
                     from: from.to_array(),
                     to: to.to_array(),
                 });
+            }
+            Killstreak::Artillery => {
+                let Some([tx, tz]) = target else { return };
+                let tx = tx.clamp(self.map.min.x, self.map.max.x);
+                let tz = tz.clamp(self.map.min.y, self.map.max.y);
+                let spread = 9.0;
+                // a barrage: shells land one after another over a few seconds
+                for k in 0..14 {
+                    let a = self.rng.range(0.0, std::f32::consts::TAU);
+                    let r = spread * self.rng.f32().sqrt();
+                    let x = tx + a.cos() * r;
+                    let z = tz + a.sin() * r;
+                    let y = self
+                        .world
+                        .floor_below(vec3(x, 40.0, z), 50.0)
+                        .unwrap_or(0.0)
+                        + 0.3;
+                    self.blasts.push(PendingBlast {
+                        at: time + 3.0 + k as f64 * 0.32 + self.rng.range(0.0, 0.15) as f64,
+                        pos: vec3(x, y, z),
+                        radius: 5.5,
+                        damage: 150.0,
+                        owner: Some(id),
+                        cause: Cause::Artillery,
+                    });
+                }
+                self.broadcast(S2C::Artillery {
+                    target: [tx, 0.0, tz],
+                    radius: spread,
+                });
+            }
+            Killstreak::Fpv | Killstreak::Bomber | Killstreak::Nrk => {
+                let kind = k.vehicle().unwrap();
+                if !self.launch_vehicle(id, kind, pilot) {
+                    return;
+                }
             }
             Killstreak::Helicopter => {
                 if self.helis.iter().any(|h| h.team == team) {

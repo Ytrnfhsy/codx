@@ -914,12 +914,7 @@ impl GameClient {
             ui.centered(&format!("Граната: {left:.1}"), w / 2.0, h * 0.62, 22, BAD);
         }
         // killstreak
-        let next = match self.me.streak as u32 {
-            s if s < UAV_KILLS => Some((Killstreak::Uav, UAV_KILLS)),
-            s if s < AIRSTRIKE_KILLS => Some((Killstreak::Airstrike, AIRSTRIKE_KILLS)),
-            s if s < HELI_KILLS => Some((Killstreak::Helicopter, HELI_KILLS)),
-            _ => None,
-        };
+        let next = Killstreak::next_after(self.me.streak as u32).map(|k| (k, k.kills()));
         let streak_txt = match next {
             Some((k, n)) => format!(
                 "Серія: {} (до «{}» {})",
@@ -1591,6 +1586,57 @@ fn draw_cause_icon(c: Cause, x: f32, cy: f32, h: f32, a: f32) -> f32 {
             draw_rectangle(x, top + h * 0.45, h, h * 0.12, bg);
             draw_line(x + h * 0.8, top + h * 0.25, x + h, top, 2.0, fg);
             h * 1.1
+        }
+        Cause::Artillery => {
+            // a shell, nose to the right
+            let w = h * 1.8;
+            draw_rectangle(x - 1.0, cy - h * 0.22 - 1.0, w * 0.65 + 2.0, h * 0.44 + 2.0, bg);
+            draw_rectangle(x, cy - h * 0.22, w * 0.65, h * 0.44, fg);
+            draw_triangle(
+                vec2(x + w * 0.65, cy - h * 0.22),
+                vec2(x + w * 0.65, cy + h * 0.22),
+                vec2(x + w, cy),
+                fg,
+            );
+            draw_rectangle(x + w * 0.12, cy - h * 0.22, w * 0.06, h * 0.44, bg);
+            w
+        }
+        Cause::Fpv => {
+            // a quad drone from above
+            let s = h * 0.9;
+            let (cx, cy2) = (x + s * 0.6, cy);
+            draw_line(cx - s * 0.45, cy2 - s * 0.45, cx + s * 0.45, cy2 + s * 0.45, 3.0, fg);
+            draw_line(cx - s * 0.45, cy2 + s * 0.45, cx + s * 0.45, cy2 - s * 0.45, 3.0, fg);
+            for (dx, dy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                draw_circle_lines(cx + dx * s * 0.45, cy2 + dy * s * 0.45, s * 0.2, 1.5, fg);
+            }
+            draw_rectangle(cx - s * 0.14, cy2 - s * 0.14, s * 0.28, s * 0.28, fg);
+            s * 1.25
+        }
+        Cause::Drop => {
+            // a falling bomb with fins
+            let (bx, w) = (x + h * 0.35, h * 0.5);
+            draw_circle(bx, cy + h * 0.15, w * 0.5 + 1.0, bg);
+            draw_circle(bx, cy + h * 0.15, w * 0.5, fg);
+            draw_rectangle(bx - w * 0.5, cy - h * 0.2, w, h * 0.35, fg);
+            draw_triangle(
+                vec2(bx - w * 0.6, cy - h * 0.45),
+                vec2(bx + w * 0.6, cy - h * 0.45),
+                vec2(bx, cy - h * 0.15),
+                fg,
+            );
+            h * 0.8
+        }
+        Cause::Nrk => {
+            // a tracked robot with a gun
+            let w = h * 1.8;
+            draw_rectangle(x, cy + h * 0.1, w * 0.62, h * 0.3, fg);
+            draw_rectangle(x + w * 0.08, cy - h * 0.2, w * 0.45, h * 0.3, fg);
+            draw_rectangle(x + w * 0.5, cy - h * 0.12, w * 0.5, h * 0.1, fg);
+            for k in 0..3 {
+                draw_circle(x + w * (0.1 + k as f32 * 0.21), cy + h * 0.25, h * 0.08, bg);
+            }
+            w
         }
         Cause::Fall | Cause::World => {
             // cartoon skull

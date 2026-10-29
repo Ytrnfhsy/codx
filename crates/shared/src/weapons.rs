@@ -388,20 +388,76 @@ pub const DEFAULT_CLASSES: [(&str, Loadout); 5] = [
     ),
 ];
 
-/// Killstreak rewards.
+/// Killstreak rewards, earned at 3, 6, 9 … 21 kills in a row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Killstreak {
+    /// Radar: enemies show on the minimap.
     Uav,
     Airstrike,
+    /// A barrage of shells over a wider area.
+    Artillery,
     Helicopter,
+    /// A kamikaze drone you fly yourself.
+    Fpv,
+    /// A big drone you steer from above, dropping bombs.
+    Bomber,
+    /// A ground robot with a machine gun (piloted or on its own).
+    Nrk,
 }
 
 impl Killstreak {
+    pub const ALL: [Killstreak; 7] = [
+        Killstreak::Uav,
+        Killstreak::Airstrike,
+        Killstreak::Artillery,
+        Killstreak::Helicopter,
+        Killstreak::Fpv,
+        Killstreak::Bomber,
+        Killstreak::Nrk,
+    ];
     pub fn name(self) -> &'static str {
         match self {
-            Killstreak::Uav => "Розвідувальний БПЛА",
+            Killstreak::Uav => "Радар",
             Killstreak::Airstrike => "Авіаудар",
-            Killstreak::Helicopter => "Бойовий гелікоптер",
+            Killstreak::Artillery => "Артилерія",
+            Killstreak::Helicopter => "Гелікоптер",
+            Killstreak::Fpv => "FPV-дрон",
+            Killstreak::Bomber => "Дрон-бомбер",
+            Killstreak::Nrk => "НРК",
+        }
+    }
+    /// Kills in a row needed.
+    pub fn kills(self) -> u32 {
+        match self {
+            Killstreak::Uav => 3,
+            Killstreak::Airstrike => 6,
+            Killstreak::Artillery => 9,
+            Killstreak::Helicopter => 12,
+            Killstreak::Fpv => 15,
+            Killstreak::Bomber => 18,
+            Killstreak::Nrk => 21,
+        }
+    }
+    /// The reward for reaching exactly `streak` kills.
+    pub fn for_streak(streak: u32) -> Option<Killstreak> {
+        Killstreak::ALL.into_iter().find(|k| k.kills() == streak)
+    }
+    /// The next reward above `streak` kills.
+    pub fn next_after(streak: u32) -> Option<Killstreak> {
+        Killstreak::ALL.into_iter().find(|k| k.kills() > streak)
+    }
+    /// Called in on a point picked on the map.
+    pub fn needs_target(self) -> bool {
+        matches!(self, Killstreak::Airstrike | Killstreak::Artillery)
+    }
+    /// A vehicle the player drives (and the kind it is).
+    pub fn vehicle(self) -> Option<crate::vehicles::VehicleKind> {
+        use crate::vehicles::VehicleKind;
+        match self {
+            Killstreak::Fpv => Some(VehicleKind::Fpv),
+            Killstreak::Bomber => Some(VehicleKind::Bomber),
+            Killstreak::Nrk => Some(VehicleKind::Nrk),
+            _ => None,
         }
     }
 }
@@ -417,6 +473,11 @@ pub enum Cause {
     Bomb,
     Fall,
     World,
+    Artillery,
+    Fpv,
+    /// A bomb dropped by a drone.
+    Drop,
+    Nrk,
 }
 
 impl Cause {
@@ -430,6 +491,10 @@ impl Cause {
             Cause::Bomb => "Бомба",
             Cause::Fall => "Падіння",
             Cause::World => "Світ",
+            Cause::Artillery => "Артилерія",
+            Cause::Fpv => "FPV-дрон",
+            Cause::Drop => "Скид з дрона",
+            Cause::Nrk => "НРК",
         }
     }
 }

@@ -11,6 +11,7 @@ pub mod nav;
 pub mod netserver;
 pub mod pickups;
 pub mod sab;
+pub mod vehicles;
 
 use config::ServerConfig;
 use std::net::UdpSocket;

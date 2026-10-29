@@ -67,7 +67,7 @@ pub const HELP: &str = "Команди:
   team <id|ім'я> <allies|axis|spec> — перевести гравця
   kill <id|ім'я>             — вбити гравця
   bots <n>                   — заповнювати сервер ботами до n гравців
-  givestreak <id|ім'я> <uav|airstrike|heli> — видати кілстрік
+  givestreak <id|ім'я> <radar|airstrike|artillery|heli|fpv|bomber|nrk> — видати кілстрік
   givebomb <id|ім'я> — дати бомбу гравцю (Саботаж)
   tune [movement|weapons|<зброя>]           — показати параметри руху/зброї
   tune <шлях> <значення>     — змінити: tune movement.sprint_speed 8; tune m249.rpm 850
@@ -362,13 +362,20 @@ pub fn exec(g: &mut Game, line: &str) -> String {
         }
         "givestreak" => {
             let (Some(who), Some(k)) = (args.next(), args.next()) else {
-                return "Використання: givestreak <id|ім'я> <uav|airstrike|heli>".into();
+                return "Використання: givestreak <id|ім'я> <radar|airstrike|artillery|heli|fpv|bomber|nrk>".into();
             };
             let streak = match k.to_lowercase().as_str() {
-                "uav" => toon_shared::weapons::Killstreak::Uav,
+                "uav" | "radar" => toon_shared::weapons::Killstreak::Uav,
                 "airstrike" | "air" => toon_shared::weapons::Killstreak::Airstrike,
+                "artillery" | "art" => toon_shared::weapons::Killstreak::Artillery,
                 "heli" | "helicopter" => toon_shared::weapons::Killstreak::Helicopter,
-                _ => return "Кілстрік: uav | airstrike | heli".into(),
+                "fpv" => toon_shared::weapons::Killstreak::Fpv,
+                "bomber" | "drone" => toon_shared::weapons::Killstreak::Bomber,
+                "nrk" | "robot" => toon_shared::weapons::Killstreak::Nrk,
+                _ => {
+                    return "Кілстрік: radar | airstrike | artillery | heli | fpv | bomber | nrk"
+                        .into()
+                }
             };
             let Some(id) = find_player(g, who) else {
                 return format!("Гравця «{who}» не знайдено");

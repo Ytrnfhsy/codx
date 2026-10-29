@@ -54,6 +54,8 @@ pub struct Player {
     pub weapons: [WState; 2],
     pub grenades: u8,
     pub smokes: u8,
+    /// The killstreak vehicle this player is steering.
+    pub driving: Option<u16>,
     pub shot_budget: f32,
     pub reload_end: Option<f64>,
     pub switch_end: f64,
@@ -123,6 +125,7 @@ impl Player {
             ],
             grenades: 0,
             smokes: 0,
+            driving: None,
             shot_budget: 1.0,
             reload_end: None,
             switch_end: 0.0,
@@ -275,6 +278,8 @@ pub struct Game {
     pub tick: u32,
     pub rng: Rng,
     pub grenades: Vec<Grenade>,
+    pub vehicles: Vec<crate::vehicles::Vehicle>,
+    pub drops: Vec<crate::vehicles::BombDrop>,
     /// Where and when players died or spawned lately (spawns avoid both).
     pub recent_deaths: Vec<(Vec3, f64)>,
     pub recent_spawns: Vec<(Vec3, f64)>,
@@ -349,6 +354,8 @@ impl Game {
             tick: 0,
             rng: Rng::from_time(),
             grenades: Vec::new(),
+            vehicles: Vec::new(),
+            drops: Vec::new(),
             recent_deaths: Vec::new(),
             recent_spawns: Vec::new(),
             smokes: Vec::new(),
@@ -862,6 +869,7 @@ impl Game {
         ];
         p.grenades = l.grenades();
         p.smokes = 1;
+        p.driving = None;
         p.reload_end = None;
         p.switch_end = time + 0.3;
         p.shot_budget = 1.0;
@@ -946,7 +954,13 @@ impl Game {
             ),
             C2S::Melee => self.melee(id),
             C2S::PickUp(ent) => self.pick_up(id, ent),
-            C2S::UseKillstreak { target } => self.use_killstreak(id, target),
+            C2S::UseKillstreak { target, pilot } => self.use_killstreak(id, target, pilot),
+            C2S::Drive {
+                pos,
+                yaw,
+                pitch,
+                keys,
+            } => self.on_drive(id, Vec3::from_array(pos), yaw, pitch, keys),
             C2S::Chat { text, team_only } => self.on_chat(id, text, team_only),
             C2S::Rcon { password, cmd } => self.on_rcon(id, &password, &cmd),
             C2S::Pong(ms) => {
@@ -1161,6 +1175,11 @@ impl Game {
         self.overtime = false;
         self.grenades.clear();
         self.smokes.clear();
+        self.vehicles.clear();
+        self.drops.clear();
+        for p in self.players.iter_mut().flatten() {
+            p.driving = None;
+        }
         self.helis.clear();
         self.pickups.clear();
         self.blasts.clear();
@@ -1245,6 +1264,11 @@ impl Game {
         self.overtime = false;
         self.grenades.clear();
         self.smokes.clear();
+        self.vehicles.clear();
+        self.drops.clear();
+        for p in self.players.iter_mut().flatten() {
+            p.driving = None;
+        }
         self.helis.clear();
         self.pickups.clear();
         self.blasts.clear();
@@ -1431,6 +1455,7 @@ impl Game {
             .retain(|s| ((now - s.2) as f32) < toon_shared::consts::SMOKE_TIME);
         self.update_blasts();
         self.update_helis(dt);
+        self.update_vehicles(dt);
 
         if self.time >= self.next_housekeeping {
             self.next_housekeeping = self.time + 1.0;
@@ -1528,6 +1553,7 @@ impl Game {
                 ack_seq: p.last_seq,
                 progress: p.progress,
                 protected: (p.protected_until - self.time).max(0.0) as f32,
+                vehicle: self.vehicle_hud(p.id),
             },
             None => MeSnap::default(),
         };
@@ -1537,6 +1563,24 @@ impl Game {
                 id: g.id,
                 pos: g.pos.to_array(),
                 smoke: g.smoke,
+            });
+        }
+        for v in &self.vehicles {
+            ents.push(EntSnap::Vehicle {
+                id: v.id,
+                kind: v.kind,
+                team: v.team,
+                owner: v.owner,
+                pos: v.pos.to_array(),
+                yaw: v.yaw,
+                pitch: v.pitch,
+                auto: v.auto,
+            });
+        }
+        for d in &self.drops {
+            ents.push(EntSnap::Drop {
+                id: d.id,
+                pos: d.pos.to_array(),
             });
         }
         for &(id, pos, born) in &self.smokes {

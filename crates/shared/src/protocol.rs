@@ -1,6 +1,7 @@
 //! Network messages. Encoded with bincode and carried by [`crate::net::Channel`].
 
 use crate::map::MapId;
+use crate::vehicles::VehicleKind;
 use crate::weapons::{Cause, Killstreak, Loadout, WeaponId};
 use crate::{Mode, Team};
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,16 @@ pub enum C2S {
     Melee,
     UseKillstreak {
         target: Option<[f32; 2]>,
+        /// The ground robot: drive it yourself (true) or let it fight on its own.
+        pilot: bool,
+    },
+    /// Steering a killstreak vehicle (sent like `Input`, unreliable): where the pilot's
+    /// client moved it and which `vehicles::keys` are held.
+    Drive {
+        pos: V3,
+        yaw: f32,
+        pitch: f32,
+        keys: u8,
     },
     Chat {
         text: String,
@@ -134,6 +145,21 @@ pub struct MeSnap {
     pub progress: f32,
     /// Seconds of spawn protection left.
     pub protected: f32,
+    /// The vehicle we are steering, if any.
+    pub vehicle: Option<VehicleHud>,
+}
+
+/// The vehicle a player steers, as the server sees it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VehicleHud {
+    pub id: u16,
+    pub kind: VehicleKind,
+    pub pos: V3,
+    pub yaw: f32,
+    pub hp: f32,
+    pub time_left: f32,
+    /// Bombs left (bomber).
+    pub ammo: u8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -159,6 +185,22 @@ pub enum EntSnap {
         id: u16,
         pos: V3,
         yaw: f32,
+    },
+    /// A killstreak vehicle (`auto`: a robot fighting on its own).
+    Vehicle {
+        id: u16,
+        kind: VehicleKind,
+        team: Team,
+        owner: u8,
+        pos: V3,
+        yaw: f32,
+        pitch: f32,
+        auto: bool,
+    },
+    /// A bomb falling from a drone.
+    Drop {
+        id: u16,
+        pos: V3,
     },
     /// A dropped weapon lying on the ground.
     Weapon {
@@ -309,6 +351,11 @@ pub enum S2C {
     Airstrike {
         from: V3,
         to: V3,
+    },
+    /// Artillery shells are on their way to this point (they land over a few seconds).
+    Artillery {
+        target: V3,
+        radius: f32,
     },
     MatchEnd {
         winner: Option<Team>,
