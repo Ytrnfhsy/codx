@@ -278,6 +278,8 @@ async fn amain(args: Args) {
     let mut low_res: Option<RenderTarget> = None;
     let mut frame_start = std::time::Instant::now();
     let mut fps_window = (std::time::Instant::now(), 0u32);
+    let mut worst_frame = 0.0f32;
+    let mut prev_mouse = Vec2::ZERO;
     prevent_quit();
 
     let host = |settings: &Settings, args: &Args| -> Result<toon_server::ServerHandle, String> {
@@ -587,11 +589,20 @@ async fn amain(args: Args) {
                 }
                 let md = mouse_delta_position();
                 let pixel = vec2(-md.x * screen_width() * 0.5, -md.y * screen_height() * 0.5);
-                g.mouse_delta = if grabbed {
+                let pixel = if grabbed {
                     pixel.clamp(Vec2::splat(-400.0), Vec2::splat(400.0))
                 } else {
                     Vec2::ZERO
                 };
+                // a mouse reporting at 125-1000 Hz and frames drawn at another rate give
+                // some frames no movement and others a double step; averaging two frames
+                // evens that out without changing how far the view turns
+                g.mouse_delta = if settings.mouse_smoothing {
+                    (pixel + prev_mouse) * 0.5
+                } else {
+                    pixel
+                };
+                prev_mouse = pixel;
 
                 // ---- test automation (screenshots / smoke tests)
                 if args.auto && !auto_done && get_time() - start > 1.0 {
@@ -722,12 +733,16 @@ async fn amain(args: Args) {
         next_frame().await;
         if args.log_fps {
             fps_window.1 += 1;
+            worst_frame = worst_frame.max(get_frame_time());
             if fps_window.0.elapsed().as_secs_f32() >= 1.0 {
+                // the worst frame shows hitches an average hides
                 println!(
-                    "fps {:.0}",
-                    fps_window.1 as f32 / fps_window.0.elapsed().as_secs_f32()
+                    "fps {:.0}  worst frame {:.1} ms",
+                    fps_window.1 as f32 / fps_window.0.elapsed().as_secs_f32(),
+                    worst_frame * 1000.0
                 );
                 fps_window = (std::time::Instant::now(), 0);
+                worst_frame = 0.0;
             }
         }
     }

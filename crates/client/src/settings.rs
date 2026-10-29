@@ -51,6 +51,9 @@ pub struct Settings {
     pub fov: f32,
     pub volume: f32,
     pub invert_y: bool,
+    /// Average mouse movement over two frames: removes the stair-stepping you get when the
+    /// mouse reports at a different rate than the game draws frames.
+    pub mouse_smoothing: bool,
     pub show_fps: bool,
     pub fullscreen: bool,
     /// Draw cartoon outlines on characters (slightly slower).
@@ -81,6 +84,7 @@ impl Default for Settings {
             fov: 80.0,
             volume: 0.7,
             invert_y: false,
+            mouse_smoothing: true,
             show_fps: true,
             fullscreen: false,
             outlines: true,

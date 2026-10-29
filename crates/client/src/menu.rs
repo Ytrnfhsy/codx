@@ -55,15 +55,12 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         .round();
     s.volume = ui.slider("Гучність", s.volume, 0.0, 1.0, x, y + 112.0, w, "{}");
     ui.toggle("Інвертувати Y", &mut s.invert_y, x, y + 150.0);
-    ui.toggle("Тіні", &mut s.shadows, x + w * 0.5, y + 150.0);
-    ui.toggle("Показувати FPS і пінг", &mut s.show_fps, x, y + 186.0);
-    ui.toggle("Текстури", &mut s.textures, x + w * 0.5, y + 186.0);
-    ui.toggle(
-        "Мультяшні контури (вимкни на дуже слабких ПК)",
-        &mut s.outlines,
-        x,
-        y + 222.0,
-    );
+    let col2 = x + w * 0.52;
+    ui.toggle("Тіні", &mut s.shadows, col2, y + 150.0);
+    ui.toggle("FPS і пінг", &mut s.show_fps, x, y + 186.0);
+    ui.toggle("Текстури", &mut s.textures, col2, y + 186.0);
+    ui.toggle("Контури", &mut s.outlines, x, y + 222.0);
+    ui.toggle("Згладжування миші", &mut s.mouse_smoothing, col2, y + 222.0);
     s.render_scale = (ui.slider(
         "Масштаб рендеру (менше = швидше)",
         s.render_scale * 100.0,
@@ -78,12 +75,7 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         * 5.0
         / 100.0;
     let was = s.vsync;
-    ui.toggle(
-        "Вертикальна синхронізація (FPS = частота монітора)",
-        &mut s.vsync,
-        x,
-        y + 318.0,
-    );
+    ui.toggle("Вертикальна синхронізація", &mut s.vsync, x, y + 318.0);
     if s.vsync != was || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed)
     {
         ui.text(
