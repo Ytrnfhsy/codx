@@ -1340,7 +1340,7 @@ impl GameClient {
                 ui.text("(гра на сервері триває)", x + 24.0, y + 70.0, 14, MUTED);
                 let bw = pw - 48.0;
                 if ui.button("Продовжити", x + 24.0, y + 90.0, bw, 46.0) {
-                    self.overlay = Overlay::None;
+                    self.overlay = self.after_pause();
                 }
                 if ui.button2("Змінити клас", x + 24.0, y + 146.0, bw, 46.0) {
                     self.overlay = Overlay::Class;

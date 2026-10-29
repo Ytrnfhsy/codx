@@ -566,10 +566,10 @@ async fn amain(args: Args) {
                         g.overlay = match g.overlay {
                             Overlay::Edit(_) => Overlay::Class,
                             Overlay::Settings => Overlay::Pause,
-                            Overlay::Team if g.team == Team::Spectator && !g.has_class => {
-                                Overlay::Team
-                            }
-                            Overlay::Class if !g.has_class => Overlay::Team,
+                            // before a class is chosen, Esc must still lead somewhere: the
+                            // pause menu (settings, disconnect) instead of doing nothing
+                            Overlay::Team | Overlay::Class if !g.has_class => Overlay::Pause,
+                            Overlay::Pause => g.after_pause(),
                             _ => Overlay::None,
                         };
                     }

@@ -2084,6 +2084,16 @@ impl GameClient {
         }
     }
 
+    /// Where closing the pause menu leads: back to picking a class if there is none yet.
+    pub fn after_pause(&self) -> Overlay {
+        // spectators just keep watching; the team is one click away in the pause menu
+        if self.team.is_playing() && !self.has_class {
+            Overlay::Class
+        } else {
+            Overlay::None
+        }
+    }
+
     pub fn join_team(&mut self, t: Option<Team>) {
         self.net.send(C2S::JoinTeam(t));
         self.overlay = if t == Some(Team::Spectator) {
