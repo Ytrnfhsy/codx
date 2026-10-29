@@ -107,7 +107,12 @@ impl GameClient {
         }
 
         // crosshair
-        if self.alive && self.ads_t < 0.5 && !self.sprinting && self.overlay == Overlay::None {
+        if self.alive
+            && self.ads_t < 0.5
+            && !self.sprinting
+            && self.overlay == Overlay::None
+            && self.piloting.is_none()
+        {
             let gap = self.spread_px(view.fovy) + 4.0;
             let len = 10.0;
             let c = Color::new(1.0, 1.0, 1.0, 0.9);
@@ -128,11 +133,14 @@ impl GameClient {
             self.hit_head,
         );
 
+        if self.alive {
+            self.draw_pilot_hud(ui);
+        }
         self.draw_minimap(ui);
         self.draw_score_panel(ui);
         self.draw_killfeed(ui);
         self.draw_chat(ui);
-        if self.alive {
+        if self.alive && self.piloting.is_none() {
             self.draw_weapon_panel(ui);
         }
 
@@ -546,6 +554,25 @@ impl GameClient {
                 let pulse = 5.0 + ((self.now * 6.0).sin() as f32) * 1.0;
                 draw_circle(p.x, p.y, pulse + 1.5, BLACK);
                 draw_circle(p.x, p.y, pulse, BAD);
+            }
+        }
+        // artillery about to land: a pulsing red ring
+        for (t, r, at) in &self.artillery {
+            let p = to_map(*t);
+            let pulse = 0.5 + 0.5 * ((self.now - at) * 6.0).sin() as f32;
+            draw_circle_lines(p.x, p.y, r * scale, 2.0 + pulse * 2.0, BAD);
+        }
+        // vehicles: ours always, enemy ones like enemies (on radar)
+        for e in &self.ents {
+            if let EntSnap::Vehicle { pos, team, .. } = e {
+                let friendly = *team == self.team;
+                if !friendly && !self.me.uav {
+                    continue;
+                }
+                let p = to_map(Vec3::from_array(*pos));
+                let c = if friendly { team_color(*team) } else { BAD };
+                draw_rectangle(p.x - 4.0, p.y - 4.0, 8.0, 8.0, BLACK);
+                draw_rectangle(p.x - 3.0, p.y - 3.0, 6.0, 6.0, c);
             }
         }
         for e in &self.ents {
@@ -1352,6 +1379,30 @@ impl GameClient {
                 }
                 None
             }
+            Overlay::RobotMode => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                let pw = 460.0;
+                let (x, y) = ((w - pw) / 2.0, h * 0.28);
+                ui.panel(x, y, pw, 250.0);
+                ui.bold("НРК — наземний робот", x + 24.0, y + 44.0, 26, ACCENT);
+                ui.text(
+                    "Кулемет, броня, 60 секунд. Хто ним керує?",
+                    x + 24.0,
+                    y + 72.0,
+                    15,
+                    MUTED,
+                );
+                let bw = pw - 48.0;
+                if ui.button("Керувати самому", x + 24.0, y + 96.0, bw, 50.0) {
+                    self.call_robot(true);
+                }
+                if ui.button2("Автономний (воює сам)", x + 24.0, y + 156.0, bw, 50.0)
+                {
+                    self.call_robot(false);
+                }
+                ui.text("Esc — скасувати", x + 24.0, y + 232.0, 14, MUTED);
+                None
+            }
             Overlay::Settings => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 480.0;
@@ -1369,8 +1420,12 @@ impl GameClient {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
                 let size = (h - 160.0).min(w - 80.0);
                 let (x0, y0) = ((w - size) / 2.0, 90.0);
+                let what = match self.me.rewards.last() {
+                    Some(Killstreak::Artillery) => "Артилерія",
+                    _ => "Авіаудар",
+                };
                 ui.centered(
-                    "Авіаудар: клацни ціль на карті (Esc — скасувати)",
+                    &format!("{what}: клацни ціль на карті (Esc — скасувати)"),
                     w / 2.0,
                     60.0,
                     24,
@@ -1590,7 +1645,13 @@ fn draw_cause_icon(c: Cause, x: f32, cy: f32, h: f32, a: f32) -> f32 {
         Cause::Artillery => {
             // a shell, nose to the right
             let w = h * 1.8;
-            draw_rectangle(x - 1.0, cy - h * 0.22 - 1.0, w * 0.65 + 2.0, h * 0.44 + 2.0, bg);
+            draw_rectangle(
+                x - 1.0,
+                cy - h * 0.22 - 1.0,
+                w * 0.65 + 2.0,
+                h * 0.44 + 2.0,
+                bg,
+            );
             draw_rectangle(x, cy - h * 0.22, w * 0.65, h * 0.44, fg);
             draw_triangle(
                 vec2(x + w * 0.65, cy - h * 0.22),
@@ -1605,8 +1666,22 @@ fn draw_cause_icon(c: Cause, x: f32, cy: f32, h: f32, a: f32) -> f32 {
             // a quad drone from above
             let s = h * 0.9;
             let (cx, cy2) = (x + s * 0.6, cy);
-            draw_line(cx - s * 0.45, cy2 - s * 0.45, cx + s * 0.45, cy2 + s * 0.45, 3.0, fg);
-            draw_line(cx - s * 0.45, cy2 + s * 0.45, cx + s * 0.45, cy2 - s * 0.45, 3.0, fg);
+            draw_line(
+                cx - s * 0.45,
+                cy2 - s * 0.45,
+                cx + s * 0.45,
+                cy2 + s * 0.45,
+                3.0,
+                fg,
+            );
+            draw_line(
+                cx - s * 0.45,
+                cy2 + s * 0.45,
+                cx + s * 0.45,
+                cy2 - s * 0.45,
+                3.0,
+                fg,
+            );
             for (dx, dy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
                 draw_circle_lines(cx + dx * s * 0.45, cy2 + dy * s * 0.45, s * 0.2, 1.5, fg);
             }

@@ -561,3 +561,236 @@ pub fn add_jet(m: &mut ToonMesh, pos: Vec3, dir: Vec3) {
         true,
     );
 }
+
+/// FPV kamikaze drone: an X frame with four rotors, a camera and a charge strapped
+/// underneath. Drawn about twice life size so it can be spotted (and shot).
+pub fn add_fpv(m: &mut ToonMesh, pos: Vec3, yaw: f32, pitch: f32, team: Team, t: f32) {
+    let prev = m.ink.replace(team_ink(team));
+    let base = trs(pos, yaw, pitch, 0.0) * Mat4::from_scale(Vec3::splat(1.6));
+    let dark = [52, 54, 60];
+    m.boxed(&base, vec3(0.07, 0.035, 0.11), dark, 0.012);
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, -0.06, 0.01))),
+        vec3(0.05, 0.04, 0.12),
+        [104, 120, 70],
+        0.01,
+    );
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 0.02, -0.12))),
+        vec3(0.025, 0.025, 0.02),
+        [30, 30, 34],
+        0.0,
+    );
+    for (sx, sz) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        let arm = base
+            * Mat4::from_translation(vec3(sx * 0.07, 0.0, sz * 0.07))
+            * Mat4::from_rotation_y(if sx * sz > 0.0 { -0.785 } else { 0.785 });
+        m.boxed(&arm, vec3(0.012, 0.01, 0.1), dark, 0.0);
+        let tip = base * Mat4::from_translation(vec3(sx * 0.14, 0.02, sz * 0.14));
+        m.boxed(&tip, vec3(0.02, 0.02, 0.02), METAL, 0.0);
+        // a spinning rotor reads as a pale disc
+        let spin =
+            tip * Mat4::from_translation(vec3(0.0, 0.025, 0.0)) * Mat4::from_rotation_y(t * 40.0);
+        m.sphere(
+            &(spin * Mat4::from_scale(vec3(1.0, 0.08, 1.0))),
+            0.075,
+            [205, 210, 218],
+            0.0,
+        );
+    }
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 0.04, 0.0))),
+        vec3(0.04, 0.01, 0.06),
+        team_look(team).helmet,
+        0.0,
+    );
+    m.ink = prev;
+}
+
+/// Bomber drone: a big hexacopter with a rack of bombs (`ammo` still hanging).
+pub fn add_bomber(m: &mut ToonMesh, pos: Vec3, yaw: f32, team: Team, t: f32, ammo: u8) {
+    let prev = m.ink.replace(team_ink(team));
+    let base = trs(pos, yaw, 0.0, 0.0);
+    let body = [70, 76, 70];
+    m.rounded(&base, vec3(0.42, 0.16, 0.42), 0.12, body, 0.04, 2);
+    m.rounded(
+        &(base * Mat4::from_translation(vec3(0.0, 0.16, 0.0))),
+        vec3(0.24, 0.08, 0.24),
+        0.06,
+        team_look(team).vest,
+        0.03,
+        2,
+    );
+    for k in 0..6 {
+        let a = k as f32 * std::f32::consts::TAU / 6.0 + 0.52;
+        let dir = vec3(a.sin(), 0.0, a.cos());
+        let mid = base * Mat4::from_translation(dir * 0.65) * Mat4::from_rotation_y(a);
+        m.boxed(&mid, vec3(0.04, 0.035, 0.38), body, 0.02);
+        let tip = base * Mat4::from_translation(dir * 1.05 + vec3(0.0, 0.08, 0.0));
+        m.boxed(&tip, vec3(0.07, 0.07, 0.07), METAL, 0.02);
+        let spin = tip
+            * Mat4::from_translation(vec3(0.0, 0.1, 0.0))
+            * Mat4::from_rotation_y(t * 35.0 + k as f32);
+        m.sphere(
+            &(spin * Mat4::from_scale(vec3(1.0, 0.06, 1.0))),
+            0.34,
+            [200, 205, 212],
+            0.0,
+        );
+    }
+    for s in [-1.0f32, 1.0] {
+        m.boxed(
+            &(base * Mat4::from_translation(vec3(s * 0.3, -0.34, 0.0))),
+            vec3(0.02, 0.2, 0.02),
+            METAL,
+            0.0,
+        );
+        m.boxed(
+            &(base * Mat4::from_translation(vec3(s * 0.3, -0.54, 0.0))),
+            vec3(0.03, 0.02, 0.3),
+            METAL,
+            0.0,
+        );
+    }
+    for k in 0..ammo.min(6) {
+        let x = (k as f32 - 2.5) * 0.11;
+        let at = (base * Mat4::from_translation(vec3(x, -0.3, 0.0)))
+            .w_axis
+            .truncate();
+        add_drop(m, at, 0.0);
+    }
+    m.ink = prev;
+}
+
+/// A bomb as dropped from the drone (nose down, with fins).
+pub fn add_drop(m: &mut ToonMesh, pos: Vec3, t: f32) {
+    let base = Mat4::from_translation(pos) * Mat4::from_rotation_y(t * 3.0);
+    let olive = [96, 110, 66];
+    m.sphere(
+        &(base
+            * Mat4::from_translation(vec3(0.0, -0.05, 0.0))
+            * Mat4::from_scale(vec3(1.0, 1.4, 1.0))),
+        0.07,
+        olive,
+        0.01,
+    );
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 0.08, 0.0))),
+        vec3(0.05, 0.06, 0.05),
+        olive,
+        0.01,
+    );
+    for r in [0.0f32, std::f32::consts::FRAC_PI_2] {
+        m.boxed(
+            &(base * Mat4::from_rotation_y(r) * Mat4::from_translation(vec3(0.0, 0.15, 0.0))),
+            vec3(0.08, 0.04, 0.008),
+            [60, 66, 50],
+            0.0,
+        );
+    }
+}
+
+/// Ground robot (НРК): a small tracked chassis with a machine-gun turret.
+/// `aim_pitch` tilts the gun.
+pub fn add_nrk(
+    m: &mut ToonMesh,
+    pos: Vec3,
+    yaw: f32,
+    aim_pitch: f32,
+    team: Team,
+    t: f32,
+    auto: bool,
+) {
+    let prev = m.ink.replace(team_ink(team));
+    let base = trs(pos, yaw, 0.0, 0.0);
+    let hull = [104, 112, 84];
+    let dark = [44, 46, 50];
+    for s in [-1.0f32, 1.0] {
+        m.rounded(
+            &(base * Mat4::from_translation(vec3(s * 0.42, 0.2, 0.0))),
+            vec3(0.13, 0.2, 0.62),
+            0.12,
+            dark,
+            0.03,
+            2,
+        );
+        for k in 0..4 {
+            let z = -0.42 + k as f32 * 0.28;
+            m.sphere(
+                &(base
+                    * Mat4::from_translation(vec3(s * 0.56, 0.18, z))
+                    * Mat4::from_rotation_x(t * 6.0)
+                    * Mat4::from_scale(vec3(0.4, 1.0, 1.0))),
+                0.11,
+                [120, 124, 130],
+                0.0,
+            );
+        }
+    }
+    m.rounded(
+        &(base * Mat4::from_translation(vec3(0.0, 0.42, 0.0))),
+        vec3(0.33, 0.16, 0.55),
+        0.07,
+        hull,
+        0.03,
+        2,
+    );
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 0.5, 0.0))),
+        vec3(0.335, 0.035, 0.4),
+        team_look(team).vest,
+        0.0,
+    );
+    let turret = base * Mat4::from_translation(vec3(0.0, 0.72, 0.05));
+    m.rounded(&turret, vec3(0.2, 0.12, 0.22), 0.06, hull, 0.03, 2);
+    let gun = turret
+        * Mat4::from_translation(vec3(0.0, NRK_GUN_LOCAL_Y, -0.05))
+        * Mat4::from_rotation_x(aim_pitch);
+    m.boxed(
+        &(gun * Mat4::from_translation(vec3(0.0, 0.0, -0.25))),
+        vec3(0.07, 0.07, 0.2),
+        dark,
+        0.02,
+    );
+    m.boxed(
+        &(gun * Mat4::from_translation(vec3(0.0, 0.0, -0.6))),
+        vec3(0.025, 0.025, 0.2),
+        dark,
+        0.015,
+    );
+    m.boxed(
+        &(gun * Mat4::from_translation(vec3(0.09, -0.04, -0.2))),
+        vec3(0.05, 0.07, 0.09),
+        [104, 120, 70],
+        0.0,
+    );
+    m.boxed(
+        &(turret * Mat4::from_translation(vec3(-0.13, 0.18, -0.1))),
+        vec3(0.06, 0.05, 0.06),
+        dark,
+        0.015,
+    );
+    // an autonomous robot blinks red
+    let led = if auto && (t * 3.0).fract() < 0.5 {
+        [255, 80, 60]
+    } else {
+        [120, 200, 255]
+    };
+    m.fill.add_box_ex(
+        &(turret * Mat4::from_translation(vec3(-0.13, 0.18, -0.165))),
+        vec3(0.03, 0.025, 0.01),
+        led,
+        255,
+        true,
+    );
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.22, 0.9, 0.4))),
+        vec3(0.01, 0.35, 0.01),
+        dark,
+        0.0,
+    );
+    m.ink = prev;
+}
+
+/// Gun height above the turret ring, so the muzzle sits where the server shoots from.
+const NRK_GUN_LOCAL_Y: f32 = toon_shared::vehicles::NRK_GUN_Y - 0.72;

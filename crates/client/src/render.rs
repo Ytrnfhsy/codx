@@ -9,6 +9,7 @@ use macroquad::prelude::*;
 use toon_shared::look_dir;
 use toon_shared::physics::Stance;
 use toon_shared::protocol::{flags, EntSnap, MatchState};
+use toon_shared::vehicles::VehicleKind;
 use toon_shared::weapons::{WeaponClass, WeaponId};
 use toon_shared::Team;
 
@@ -124,11 +125,23 @@ fn fog_color(g: &GameClient) -> Color {
 pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarget>) -> View {
     let (pos, yaw, pitch) = g.camera();
     let aspect = screen_width() / screen_height().max(1.0);
-    let hfov = settings.fov.clamp(60.0, 120.0).to_radians();
+    let pilot_fov = g
+        .pilot_camera()
+        .and_then(|c| c.3)
+        .filter(|_| g.killcam.is_none() && g.alive);
+    let hfov = pilot_fov
+        .unwrap_or(settings.fov)
+        .clamp(60.0, 120.0)
+        .to_radians();
     let mut fovy = 2.0 * ((hfov * 0.5).tan() / aspect).atan();
     let (weapon, ads, scoped, first_person) = match &g.killcam {
         Some(k) => (k.weapon, k.ads_t, k.scoped(), true),
-        None => (g.weapon(), g.ads_t, g.scoped(), g.alive),
+        None => (
+            g.weapon(),
+            g.ads_t,
+            g.scoped(),
+            g.alive && g.piloting.is_none(),
+        ),
     };
     let zoom = 1.0 + (g.tuning.weapon(weapon).ads_zoom - 1.0) * ads;
     let zoom = if weapon.def().scoped && !scoped {
@@ -262,6 +275,37 @@ pub fn render_world(
                     models::add_grenade(&mut m, Vec3::from_array(*pos), t)
                 }
             }
+            EntSnap::Vehicle {
+                id,
+                kind,
+                team,
+                pos,
+                yaw,
+                pitch,
+                auto,
+                ..
+            } => {
+                // our own vehicle is drawn where we steer it (below), not where the
+                // server last saw it
+                if kc.is_none() && g.piloting.as_ref().is_some_and(|p| p.id == *id) {
+                    continue;
+                }
+                let at = Vec3::from_array(*pos);
+                match kind {
+                    VehicleKind::Fpv => {
+                        models::add_fpv(&mut m, at, *yaw, *pitch, *team, now as f32)
+                    }
+                    VehicleKind::Bomber => {
+                        models::add_bomber(&mut m, at, *yaw, *team, now as f32, 6)
+                    }
+                    VehicleKind::Nrk => {
+                        models::add_nrk(&mut m, at, *yaw, *pitch, *team, now as f32, *auto)
+                    }
+                }
+            }
+            EntSnap::Drop { id, pos } => {
+                models::add_drop(&mut m, Vec3::from_array(*pos), now as f32 + *id as f32)
+            }
             EntSnap::Smoke { id, pos, age } => {
                 models::add_smoke_cloud(&mut m, Vec3::from_array(*pos), *age, *id, now as f32)
             }
@@ -289,6 +333,38 @@ pub fn render_world(
                 let target = g.pickup_target.map(|t| t.0) == Some(*id) && kc.is_none();
                 models::add_dropped_gun(&mut m, Vec3::from_array(*pos), *yaw, *weapon, age, target);
             }
+        }
+    }
+    // our own vehicle; the bomber also marks where a bomb would land
+    if let (Some(p), None) = (&g.piloting, kc) {
+        match p.kind {
+            VehicleKind::Nrk => {
+                models::add_nrk(&mut m, p.pos, p.yaw, p.pitch, g.team, now as f32, false)
+            }
+            VehicleKind::Bomber => {
+                let at = p.bomb_landing(g);
+                let pulse = 1.0 + 0.15 * ((now * 5.0).sin() as f32);
+                for k in 0..12 {
+                    let a = k as f32 * std::f32::consts::TAU / 12.0;
+                    let r = toon_shared::vehicles::DROP_RADIUS * 0.5 * pulse;
+                    let c = at + vec3(a.cos() * r, 0.08, a.sin() * r);
+                    m.fill.add_box_ex(
+                        &(Mat4::from_translation(c) * Mat4::from_rotation_y(-a)),
+                        vec3(0.08, 0.04, 0.5),
+                        [255, 80, 60],
+                        255,
+                        true,
+                    );
+                }
+                m.fill.add_box_ex(
+                    &Mat4::from_translation(at + vec3(0.0, 0.08, 0.0)),
+                    vec3(0.25, 0.04, 0.25),
+                    [255, 80, 60],
+                    255,
+                    true,
+                );
+            }
+            VehicleKind::Fpv => {}
         }
     }
     // airstrike jets (purely visual)
@@ -472,7 +548,7 @@ pub fn render_viewmodel(
             vm
         }
         Some(_) => return,
-        None if g.alive && !g.scoped() => g.vm_state(),
+        None if g.alive && !g.scoped() && g.piloting.is_none() => g.vm_state(),
         None => return,
     };
     let cam = ViewmodelCamera(Camera3D {

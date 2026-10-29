@@ -69,7 +69,10 @@ pub enum Overlay {
     Class,
     Edit(usize),
     Pause,
+    /// Picking a point on the map (airstrike, artillery).
     Airstrike,
+    /// The ground robot: steer it or let it fight on its own.
+    RobotMode,
     Settings,
 }
 
@@ -173,6 +176,10 @@ pub struct GameClient {
     pub match_end: Option<(String, Option<Team>, f64)>,
     pub overlay: Overlay,
     pub airstrikes: Vec<(Vec3, Vec3, f64)>,
+    /// Artillery barrages on their way: (target, radius, when called).
+    pub artillery: Vec<(Vec3, f32, f64)>,
+    /// The killstreak vehicle we steer.
+    pub piloting: Option<crate::pilot::Piloting>,
     pub fx: Effects,
     pub rcon_pass: String,
     pub spec_pos: Vec3,
@@ -418,6 +425,8 @@ impl GameClient {
             match_end: None,
             overlay: Overlay::Team,
             airstrikes: Vec::new(),
+            artillery: Vec::new(),
+            piloting: None,
             fx: Effects::new(),
             rcon_pass: String::new(),
             spec_pos: spec,
@@ -807,6 +816,18 @@ impl GameClient {
                     },
                 );
             }
+            S2C::Artillery { target, radius } => {
+                let t = Vec3::from_array(target);
+                self.artillery.push((t, radius, now));
+                // shells whistle in over a few seconds
+                if let Some(a) = audio {
+                    let d = t.distance(self.eye());
+                    let v = (1.0 - d / 140.0).clamp(0.25, 1.0);
+                    for k in 0..6 {
+                        a.play_later(Sfx::Whistle, 2.2 + k as f32 * 0.7, v * 0.8);
+                    }
+                }
+            }
             S2C::Airstrike { from, to } => {
                 self.airstrikes
                     .push((Vec3::from_array(from), Vec3::from_array(to), now));
@@ -973,6 +994,7 @@ impl GameClient {
             self.grenades = me.grenades;
             self.smokes = me.smokes;
         }
+        self.sync_piloting(if self.alive { me.vehicle.clone() } else { None });
         self.me = me;
         self.bomb = s.bomb;
         self.ents = s.ents;
@@ -1450,7 +1472,9 @@ impl GameClient {
         let playing_input = self.overlay == Overlay::None && self.chat_input.is_none();
         // ---- mouse look
         let md = self.mouse_delta;
-        if playing_input {
+        if playing_input && self.piloting.is_some() {
+            self.pilot_look(md, settings.sensitivity * 0.0011, settings.invert_y);
+        } else if playing_input {
             let zoom = 1.0 + (self.ws().ads_zoom - 1.0) * self.ads_t;
             let sens = settings.sensitivity * 0.0011 / zoom;
             self.yaw -= md.x * sens;
@@ -1483,7 +1507,10 @@ impl GameClient {
         }
 
         // ---- local player
-        let can_act = self.alive && playing_input && !self.frozen() && self.killcam.is_none();
+        let steer = self.alive && playing_input && !self.frozen() && self.killcam.is_none();
+        self.update_piloting(dt, steer);
+        // while steering a vehicle the soldier just stands there
+        let can_act = steer && self.piloting.is_none();
         let key = |k: KeyCode| can_act && is_key_down(k);
         let pressed = |k: KeyCode| can_act && is_key_pressed(k);
         let def = self.ws().clone();
@@ -1801,8 +1828,12 @@ impl GameClient {
             }
             if !shielded && (pressed(KeyCode::Key5) || pressed(KeyCode::Key4)) {
                 match self.me.rewards.last() {
-                    Some(Killstreak::Airstrike) => self.overlay = Overlay::Airstrike,
-                    Some(_) => self.net.send(C2S::UseKillstreak { target: None }),
+                    Some(k) if k.needs_target() => self.overlay = Overlay::Airstrike,
+                    Some(Killstreak::Nrk) => self.overlay = Overlay::RobotMode,
+                    Some(_) => self.net.send(C2S::UseKillstreak {
+                        target: None,
+                        pilot: true,
+                    }),
                     None => self.center_msg("Немає доступних кілстріків", 1.5, crate::ui::MUTED),
                 }
             }
@@ -1822,6 +1853,7 @@ impl GameClient {
         // ---- send input @30 Hz
         if now - self.last_input_send >= 1.0 / 30.0 {
             self.last_input_send = now;
+            self.send_drive();
             self.seq += 1;
             let mut f = 0;
             if self.sprinting {
@@ -1869,6 +1901,7 @@ impl GameClient {
             }
         }
         self.airstrikes.retain(|a| now - a.2 < 5.0);
+        self.artillery.retain(|a| now - a.2 < 9.0);
         self.fx.update(dt);
         // grenade smoke trails
         for e in &self.ents {
@@ -1903,6 +1936,27 @@ impl GameClient {
                 })
                 .reduce(f32::min);
             a.heli(heli);
+            // the nearest drone buzzes (our own one right in our ears)
+            let ear = self.camera().0;
+            let own = self
+                .piloting
+                .as_ref()
+                .filter(|p| p.kind != toon_shared::vehicles::VehicleKind::Nrk)
+                .map(|_| 3.0);
+            let drone = self
+                .ents
+                .iter()
+                .filter_map(|e| match e {
+                    EntSnap::Vehicle { pos, kind, .. }
+                        if *kind != toon_shared::vehicles::VehicleKind::Nrk =>
+                    {
+                        Some(Vec3::from_array(*pos).distance(ear))
+                    }
+                    _ => None,
+                })
+                .chain(own)
+                .reduce(f32::min);
+            a.drone(drone);
         }
     }
 
@@ -2111,9 +2165,19 @@ impl GameClient {
         };
     }
 
+    /// Starts the ground robot, steered or on its own.
+    pub fn call_robot(&mut self, pilot: bool) {
+        self.net.send(C2S::UseKillstreak {
+            target: None,
+            pilot,
+        });
+        self.overlay = Overlay::None;
+    }
+
     pub fn call_airstrike(&mut self, x: f32, z: f32) {
         self.net.send(C2S::UseKillstreak {
             target: Some([x, z]),
+            pilot: false,
         });
         self.overlay = Overlay::None;
     }
@@ -2126,6 +2190,11 @@ impl GameClient {
     pub fn camera(&self) -> (Vec3, f32, f32) {
         if let Some(k) = &self.killcam {
             return k.camera(self.now);
+        }
+        if self.alive {
+            if let Some((pos, yaw, pitch, _)) = self.pilot_camera() {
+                return (pos, yaw, pitch);
+            }
         }
         let shake = vec2(
             ((self.now * 53.0).sin() as f32) * self.shake * 0.02,

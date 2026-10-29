@@ -11,6 +11,7 @@ mod menu;
 mod mesh;
 mod models;
 mod netclient;
+mod pilot;
 mod ragdoll;
 mod render;
 mod settings;

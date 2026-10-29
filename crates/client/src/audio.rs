@@ -62,6 +62,10 @@ pub enum Sfx {
     Hurt,
     Bomb,
     Heli,
+    /// A shell whistling in (artillery).
+    Whistle,
+    /// Drone rotors (looped).
+    Drone,
 }
 
 impl Sfx {
@@ -793,6 +797,35 @@ impl Synth {
     }
 
     /// Helicopter rotor: one seamless second (ten blade slaps) to loop.
+    /// Drone rotors: a buzzing whine with a slow beat, one seamless second to loop.
+    fn drone(&mut self) -> Vec<[f32; 2]> {
+        let period = 1.0;
+        let xf = 0.15;
+        let n = ((period + xf) * SR) as usize;
+        let mut b = vec![0.0f32; n];
+        let mut bp = Biquad::new(Kind::Band, 900.0, 1.2);
+        for (i, v) in b.iter_mut().enumerate() {
+            let t = Self::t(i);
+            // two motors slightly apart give the beat; 180 and 186 Hz loop in one second
+            let saw = |f: f32| 2.0 * (t * f).fract() - 1.0;
+            let buzz = saw(180.0) + saw(186.0) * 0.8 + saw(360.0) * 0.3;
+            *v = buzz * 0.35 + bp.run(self.noise()) * 0.5;
+        }
+        let mut lp = Biquad::new(Kind::Low, 2600.0, 0.7);
+        for v in b.iter_mut() {
+            *v = lp.run(*v);
+        }
+        let p = (period * SR) as usize;
+        let x = n - p;
+        let mut out: Vec<f32> = b[..p].to_vec();
+        for i in 0..x {
+            let k = i as f32 / x as f32;
+            out[i] = b[i] * k + b[p + i] * (1.0 - k);
+        }
+        Synth::norm(&mut out, 0.7);
+        mono(&out)
+    }
+
     fn heli(&mut self) -> Vec<[f32; 2]> {
         let period = 1.0;
         let xf = 0.15;
@@ -897,7 +930,7 @@ impl Synth {
     fn make(&mut self, s: Sfx, variant: usize) -> Vec<[f32; 2]> {
         let mut out = self.make_raw(s, variant);
         // the rotor loop must stay seamless; everything else ends softly
-        if s != Sfx::Heli {
+        if s != Sfx::Heli && s != Sfx::Drone {
             // drop the silent end, then fade what is left
             let end = out
                 .iter()
@@ -1110,6 +1143,24 @@ impl Synth {
                 mono(&b)
             }
             Sfx::Heli => self.heli(),
+            Sfx::Whistle => {
+                // a falling pitch that grows louder, then cuts off before the blast
+                let len = 1.4;
+                let mut b = Self::buf(len);
+                let mut ph = 0.0f32;
+                let mut bp = Biquad::new(Kind::Band, 2500.0, 2.0);
+                for (i, v) in b.iter_mut().enumerate() {
+                    let t = Self::t(i);
+                    let x = t / len;
+                    let f = 1900.0 - 1100.0 * x + (t * 30.0).sin() * 12.0;
+                    ph += f / SR;
+                    let env = x.powf(1.6) * (1.0 - ((x - 0.93) / 0.07).clamp(0.0, 1.0));
+                    *v = ((ph * TAU).sin() * 0.7 + bp.run(self.noise()) * 0.5) * env;
+                }
+                Synth::norm(&mut b, 0.7);
+                mono(&b)
+            }
+            Sfx::Drone => self.drone(),
             Sfx::Streak => mono(&Synth::chord(
                 &[(0.0, 523.0), (0.09, 659.0), (0.18, 784.0), (0.27, 1046.0)],
                 0.3,
@@ -1160,6 +1211,8 @@ fn all() -> Vec<Sfx> {
         Sfx::Hurt,
         Sfx::Bomb,
         Sfx::Heli,
+        Sfx::Whistle,
+        Sfx::Drone,
     ]);
     v
 }
@@ -1295,6 +1348,7 @@ pub struct Audio {
     pub volume: f32,
     last: RefCell<HashMap<Sfx, f64>>,
     heli_on: RefCell<bool>,
+    drone_on: RefCell<bool>,
     pending: RefCell<Vec<(f64, Sfx, f32)>>,
     rng: RefCell<Rng>,
 }
@@ -1332,6 +1386,7 @@ impl Audio {
             volume,
             last: RefCell::new(HashMap::new()),
             heli_on: RefCell::new(false),
+            drone_on: RefCell::new(false),
             pending: RefCell::new(Vec::new()),
             rng: RefCell::new(Rng::from_time()),
         }
@@ -1414,13 +1469,22 @@ impl Audio {
 
     /// Helicopter rotor loop with distance-based volume (None = stop).
     pub fn heli(&self, dist: Option<f32>) {
-        let Some(snd) = self.sounds.get(&Sfx::Heli).and_then(|v| v.first()) else {
+        self.looped(Sfx::Heli, &self.heli_on, dist, 90.0, 0.7);
+    }
+
+    /// Drone buzz of the nearest drone (None = stop).
+    pub fn drone(&self, dist: Option<f32>) {
+        self.looped(Sfx::Drone, &self.drone_on, dist, 45.0, 0.55);
+    }
+
+    fn looped(&self, s: Sfx, on: &RefCell<bool>, dist: Option<f32>, range: f32, gain: f32) {
+        let Some(snd) = self.sounds.get(&s).and_then(|v| v.first()) else {
             return;
         };
-        let mut on = self.heli_on.borrow_mut();
+        let mut on = on.borrow_mut();
         match dist {
             Some(d) => {
-                let v = ((1.0 - d / 90.0).clamp(0.05, 1.0) * self.volume * 0.7).min(1.0);
+                let v = ((1.0 - d / range).clamp(0.05, 1.0) * self.volume * gain).min(1.0);
                 if !*on {
                     play_sound(
                         snd,
@@ -1468,7 +1532,9 @@ mod tests {
                 // no click at the end
                 let last = b.last().unwrap();
                 assert!(
-                    k == Sfx::Heli || (last[0].abs() < 0.05 && last[1].abs() < 0.05),
+                    k == Sfx::Heli
+                        || k == Sfx::Drone
+                        || (last[0].abs() < 0.05 && last[1].abs() < 0.05),
                     "{k:?} ends abruptly"
                 );
                 total += b.len();

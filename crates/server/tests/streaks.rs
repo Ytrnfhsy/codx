@@ -214,7 +214,13 @@ fn bomber_drops_bombs_on_the_enemy() {
     let before = deaths(&g, foe);
     // get over the enemy, then drop while hovering
     drive_towards(&mut g, me, vec3(FOE_AT.x, BOMBER_ALT, FOE_AT.z), 0, 3.0);
-    drive_towards(&mut g, me, vec3(FOE_AT.x, BOMBER_ALT, FOE_AT.z), keys::FIRE, 4.0);
+    drive_towards(
+        &mut g,
+        me,
+        vec3(FOE_AT.x, BOMBER_ALT, FOE_AT.z),
+        keys::FIRE,
+        4.0,
+    );
     assert!(deaths(&g, foe) > before, "a bomb landed on the enemy");
     let ammo = g.vehicle_hud(me).map(|v| v.ammo).unwrap_or(0);
     assert!(ammo < 6, "bombs were used");
@@ -312,4 +318,19 @@ fn vehicles_end_with_their_pilot_and_can_be_destroyed() {
     tick(&mut g, 0.1);
     assert!(g.vehicles.is_empty(), "the robot was destroyed");
     let _ = look_dir(0.0, 0.0);
+}
+
+#[test]
+fn own_killstreaks_do_not_hurt_the_pilot() {
+    let (mut g, me, _) = duel();
+    let hp = g.p(me).unwrap().hp;
+    let at = g.p(me).unwrap().body.pos;
+    for cause in [Cause::Drop, Cause::Artillery, Cause::Fpv] {
+        g.explode(at, 6.0, 300.0, Some(me), cause, false);
+    }
+    assert!(g.p(me).unwrap().alive);
+    assert_eq!(g.p(me).unwrap().hp, hp);
+    // a grenade of your own still hurts
+    g.explode(at, 6.0, 300.0, Some(me), Cause::Grenade, false);
+    assert!(!g.p(me).unwrap().alive || g.p(me).unwrap().hp < hp);
 }

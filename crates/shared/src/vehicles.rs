@@ -85,6 +85,9 @@ pub const FPV_BLAST_RADIUS: f32 = 6.5;
 pub const FPV_BLAST_DAMAGE: f32 = 230.0;
 /// Enemies this close set it off.
 pub const FPV_TRIGGER: f32 = 1.6;
+/// The charge arms this long after take-off; before that bumping into things only stops
+/// the drone (so it does not blow up its own pilot).
+pub const FPV_ARM_TIME: f32 = 0.7;
 
 // ---- bomber drone
 pub const BOMBER_ALT: f32 = 19.0;
@@ -114,7 +117,15 @@ pub fn fpv_step(world: &World, pos: Vec3, dir: Vec3, speed: f32, dt: f32) -> (Ve
 
 /// Moves the bomber drone at its fixed altitude; `forward`/`right` are -1..1 relative to
 /// `yaw`, and it stays above the map.
-pub fn bomber_step(pos: Vec3, yaw: f32, forward: f32, right: f32, dt: f32, min: Vec2, max: Vec2) -> Vec3 {
+pub fn bomber_step(
+    pos: Vec3,
+    yaw: f32,
+    forward: f32,
+    right: f32,
+    dt: f32,
+    min: Vec2,
+    max: Vec2,
+) -> Vec3 {
     let (f, r) = crate::yaw_basis(yaw);
     let mut v = f * forward + r * right;
     if v.length_squared() > 1.0 {
@@ -126,7 +137,15 @@ pub fn bomber_step(pos: Vec3, yaw: f32, forward: f32, right: f32, dt: f32, min: 
 
 /// Moves the ground robot with the same physics as soldiers (walls, stairs, gravity),
 /// as a low, crouch-height body.
-pub fn nrk_step(world: &World, body: &mut Body, forward: f32, right: f32, yaw: f32, t: &MoveTuning, dt: f32) {
+pub fn nrk_step(
+    world: &World,
+    body: &mut Body,
+    forward: f32,
+    right: f32,
+    yaw: f32,
+    t: &MoveTuning,
+    dt: f32,
+) {
     let inp = MoveInput {
         forward,
         right,

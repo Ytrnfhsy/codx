@@ -82,17 +82,21 @@ impl Game {
         let (pos0, yaw, pitch, eye) = (p.body.pos, p.yaw, p.pitch, p.eye());
         let fwd = look_dir(yaw, 0.0);
         let (pos, pitch) = match kind {
-            VehicleKind::Fpv => (eye + fwd * 0.8 + vec3(0.0, 0.3, 0.0), pitch.max(0.0)),
+            // it takes off from above the head, climbing a little, so a wall in front of
+            // the soldier does not end it at once
+            VehicleKind::Fpv => (eye + fwd * 0.3 + vec3(0.0, 0.9, 0.0), pitch.max(0.2)),
             VehicleKind::Bomber => {
                 let min = self.map.min;
                 let max = self.map.max;
+                // a little ahead of the soldier, so the first bomb is not on their head
+                let ahead = pos0 + fwd * 8.0;
                 (
                     vec3(
-                        pos0.x.clamp(min.x, max.x),
+                        ahead.x.clamp(min.x, max.x),
                         BOMBER_ALT,
-                        pos0.z.clamp(min.y, max.y),
+                        ahead.z.clamp(min.y, max.y),
                     ),
-                    -1.2,
+                    -1.45,
                 )
             }
             VehicleKind::Nrk => {
@@ -185,13 +189,20 @@ impl Game {
                     if let Some((t, _)) = self.world.raycast(v.pos, seg / len, len) {
                         let at = v.pos + seg / len * (t - 0.05).max(0.0);
                         v.pos = at;
-                        self.end_vehicle(i, End::Detonate(at));
+                        let age = v.kind.duration() - (v.until - time) as f32;
+                        if age >= FPV_ARM_TIME {
+                            self.end_vehicle(i, End::Detonate(at));
+                        }
                         return;
                     }
                 }
             }
             VehicleKind::Bomber => {
-                to = vec3(to.x.clamp(min.x, max.x), BOMBER_ALT, to.z.clamp(min.y, max.y));
+                to = vec3(
+                    to.x.clamp(min.x, max.x),
+                    BOMBER_ALT,
+                    to.z.clamp(min.y, max.y),
+                );
             }
             VehicleKind::Nrk => {
                 // falls are fine, climbing only as far as stairs allow
@@ -244,7 +255,8 @@ impl Game {
             match v.kind {
                 VehicleKind::Fpv => {
                     let (pos, team) = (v.pos, v.team);
-                    let fire = v.keys & keys::FIRE != 0;
+                    let armed = v.kind.duration() - (v.until - time) as f32 >= FPV_ARM_TIME;
+                    let fire = v.keys & keys::FIRE != 0 && armed;
                     let near = self.players.iter().flatten().any(|p| {
                         p.alive
                             && p.team != team
@@ -252,7 +264,7 @@ impl Game {
                             && (p.chest().distance(pos) < FPV_TRIGGER
                                 || p.eye().distance(pos) < FPV_TRIGGER)
                     });
-                    if fire || near {
+                    if fire || (near && armed) {
                         self.end_vehicle(i, End::Detonate(pos));
                         continue;
                     }
@@ -311,7 +323,14 @@ impl Game {
         }
         for (id, pos, owner) in boom {
             self.drops.retain(|d| d.id != id);
-            self.explode(pos, DROP_RADIUS, DROP_DAMAGE, Some(owner), Cause::Drop, false);
+            self.explode(
+                pos,
+                DROP_RADIUS,
+                DROP_DAMAGE,
+                Some(owner),
+                Cause::Drop,
+                false,
+            );
         }
     }
 
@@ -377,7 +396,8 @@ impl Game {
                 .filter(|p| p.alive && p.team != team && p.team.is_playing())
                 .filter(|p| p.chest().distance(gun) < 45.0)
                 .filter(|p| {
-                    self.world.line_of_sight(gun, p.chest()) && !smoke_blocks(gun, p.chest(), &clouds)
+                    self.world.line_of_sight(gun, p.chest())
+                        && !smoke_blocks(gun, p.chest(), &clouds)
                 })
                 .min_by(|a, b| {
                     a.chest()
@@ -492,7 +512,14 @@ impl Game {
         }
         match end {
             End::Detonate(at) => {
-                self.explode(at, FPV_BLAST_RADIUS, FPV_BLAST_DAMAGE, Some(v.owner), Cause::Fpv, false);
+                self.explode(
+                    at,
+                    FPV_BLAST_RADIUS,
+                    FPV_BLAST_DAMAGE,
+                    Some(v.owner),
+                    Cause::Fpv,
+                    false,
+                );
             }
             End::Destroyed => {
                 self.broadcast(S2C::Explosion {

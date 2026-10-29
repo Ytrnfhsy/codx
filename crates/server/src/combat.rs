@@ -197,6 +197,15 @@ impl Game {
         headshot: bool,
         from: Vec3,
     ) {
+        // your own killstreak never hurts you (the pilot often stands right under it)
+        if attacker == Some(victim)
+            && matches!(
+                cause,
+                Cause::Drop | Cause::Artillery | Cause::Fpv | Cause::Nrk | Cause::Airstrike
+            )
+        {
+            return;
+        }
         let ff = self.cfg.friendly_fire;
         let time = self.time;
         let att_team = attacker.and_then(|a| self.p(a)).map(|a| a.team);
