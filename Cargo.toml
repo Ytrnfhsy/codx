@@ -24,3 +24,9 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# macroquad 0.4.16 with a fixed font atlas (see vendor/macroquad/src/text/atlas.rs,
+# `cache_sprite`): the original grew it recursively and could overflow the stack or wrap
+# the texture size around to 0, crashing the game at random while drawing text.
+[patch.crates-io]
+macroquad = { path = "vendor/macroquad" }

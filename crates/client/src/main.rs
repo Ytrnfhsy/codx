@@ -556,7 +556,10 @@ async fn amain(args: Args) {
                     } else if is_key_pressed(KeyCode::Y) {
                         g.chat_input = Some((String::new(), true));
                     } else if is_key_pressed(KeyCode::Escape) {
-                        g.overlay = Overlay::Pause;
+                        // Esc first skips a killcam (like a click), then opens the pause menu
+                        if !g.skip_killcam() {
+                            g.overlay = Overlay::Pause;
+                        }
                     } else if is_key_pressed(KeyCode::M) && g.team.is_playing() {
                         g.overlay = Overlay::Class;
                     }

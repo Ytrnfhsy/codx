@@ -757,11 +757,11 @@ impl GameClient {
         if !k.final_cam {
             let hint = if self.me.respawn_in > 0.0 {
                 format!(
-                    "ЛКМ — пропустити · відродження через {:.0}",
+                    "ЛКМ або Esc — пропустити · відродження через {:.0}",
                     self.me.respawn_in.ceil()
                 )
             } else {
-                "ЛКМ — пропустити".to_string()
+                "ЛКМ або Esc — пропустити".to_string()
             };
             ui.text(
                 &hint,

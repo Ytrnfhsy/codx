@@ -1812,12 +1812,8 @@ impl GameClient {
             self.using = false;
             // click skips the killcam, then respawns
             if playing_input && is_mouse_button_pressed(MouseButton::Left) {
-                let skippable = self.killcam.as_ref().is_some_and(|k| !k.final_cam)
-                    || self.pending_killcam.as_ref().is_some_and(|p| !p.2);
-                if skippable {
-                    self.killcam = None;
-                    self.pending_killcam = None;
-                } else if self.team.is_playing() && self.me.respawn_in <= 0.0 {
+                // a click skips the killcam; once it is over, a click respawns
+                if !self.skip_killcam() && self.team.is_playing() && self.me.respawn_in <= 0.0 {
                     self.net.send(C2S::Spawn);
                 }
             }
@@ -2082,6 +2078,18 @@ impl GameClient {
         if self.alive {
             self.center_msg("Клас зміниться після відродження", 2.0, crate::ui::MUTED);
         }
+    }
+
+    /// Skips the killcam that is playing or about to play (the final one cannot be
+    /// skipped). Returns whether there was one.
+    pub fn skip_killcam(&mut self) -> bool {
+        let skippable = self.killcam.as_ref().is_some_and(|k| !k.final_cam)
+            || self.pending_killcam.as_ref().is_some_and(|p| !p.2);
+        if skippable {
+            self.killcam = None;
+            self.pending_killcam = None;
+        }
+        skippable
     }
 
     /// Where closing the pause menu leads: back to picking a class if there is none yet.
