@@ -492,6 +492,7 @@ dependencies = [
 name = "toon_client"
 version = "0.1.0"
 dependencies = [
+ "audrey",
  "bincode",
  "macroquad",
  "serde",

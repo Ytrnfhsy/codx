@@ -1,8 +1,12 @@
-//! Procedurally synthesized sound effects (no asset files needed).
+//! Sound effects: synthesized at start-up (no asset files needed), or real recordings
+//! dropped into `assets/sounds/` (see `assets/sounds/README.md`), which take precedence.
 //!
-//! Gunshots are layered like real recordings: a sharp transient, a filtered noise body,
-//! a low "thump", the mechanical clack of the action and an outdoor echo tail. Every
-//! frequently heard sound has a few random variants so bursts never sound like a loop.
+//! The synthesis follows how real recordings are built up. A gunshot is the supersonic
+//! crack (an N-shaped pressure wave), the muzzle blast (a noise burst shaped by resonant
+//! filters), a low punch, the clack of the action, then the town answering: early
+//! reflections off nearby walls and a stereo reverb tail where the highs die first.
+//! Mechanical sounds ring through banks of resonators tuned like small steel parts.
+//! Frequently heard sounds come in several random variants so bursts never loop audibly.
 
 use macroquad::audio::{
     load_sound_from_bytes, play_sound, set_sound_volume, stop_sound, PlaySoundParams, Sound,
@@ -10,20 +14,19 @@ use macroquad::audio::{
 use macroquad::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 use toon_shared::rng::Rng;
 use toon_shared::weapons::{WeaponClass, WeaponId};
 
 const RATE: u32 = 44100;
+const SR: f32 = RATE as f32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Sfx {
-    Rifle,
-    Smg,
-    Lmg,
-    Shotgun,
-    Sniper,
-    Pistol,
+    /// A shot of this weapon.
+    Gun(WeaponId),
+    /// The helicopter's door gun.
+    HeliGun,
     /// Muffled gunfire far away.
     Far,
     Explosion,
@@ -61,13 +64,32 @@ pub enum Sfx {
 
 impl Sfx {
     pub fn for_weapon(w: WeaponId) -> Sfx {
-        match w.def().class {
-            WeaponClass::Rifle => Sfx::Rifle,
-            WeaponClass::Smg => Sfx::Smg,
-            WeaponClass::Lmg => Sfx::Lmg,
-            WeaponClass::Shotgun => Sfx::Shotgun,
-            WeaponClass::Sniper => Sfx::Sniper,
-            WeaponClass::Pistol => Sfx::Pistol,
+        Sfx::Gun(w)
+    }
+
+    /// File name stem for a recorded replacement in `assets/sounds/`.
+    pub fn file_name(self) -> String {
+        match self {
+            Sfx::Gun(w) => format!("gun_{}", format!("{w:?}").to_lowercase()),
+            Sfx::HeliGun => "heli_gun".into(),
+            Sfx::HitHead => "hit_head".into(),
+            Sfx::MagOut => "mag_out".into(),
+            Sfx::MagIn => "mag_in".into(),
+            Sfx::ShellIn => "shell_in".into(),
+            Sfx::KnifeHit => "knife_hit".into(),
+            other => format!("{other:?}").to_lowercase(),
+        }
+    }
+
+    /// Loud enough to be heard across the map.
+    fn loud(self) -> bool {
+        match self {
+            Sfx::Gun(w) => matches!(
+                w.def().class,
+                WeaponClass::Sniper | WeaponClass::Lmg | WeaponClass::Shotgun
+            ),
+            Sfx::HeliGun => true,
+            _ => false,
         }
     }
 }
@@ -99,48 +121,381 @@ pub fn reload_cues(class: WeaponClass) -> &'static [(f32, Sfx)] {
     }
 }
 
-fn wav(samples: &[f32]) -> Vec<u8> {
-    let data_len = (samples.len() * 2) as u32;
+/// 16-bit stereo WAV.
+fn wav(samples: &[[f32; 2]]) -> Vec<u8> {
+    let data_len = (samples.len() * 4) as u32;
     let mut v = Vec::with_capacity(44 + data_len as usize);
     v.extend_from_slice(b"RIFF");
     v.extend_from_slice(&(36 + data_len).to_le_bytes());
     v.extend_from_slice(b"WAVEfmt ");
     v.extend_from_slice(&16u32.to_le_bytes());
     v.extend_from_slice(&1u16.to_le_bytes()); // PCM
-    v.extend_from_slice(&1u16.to_le_bytes()); // mono
+    v.extend_from_slice(&2u16.to_le_bytes()); // stereo
     v.extend_from_slice(&RATE.to_le_bytes());
-    v.extend_from_slice(&(RATE * 2).to_le_bytes());
-    v.extend_from_slice(&2u16.to_le_bytes());
+    v.extend_from_slice(&(RATE * 4).to_le_bytes());
+    v.extend_from_slice(&4u16.to_le_bytes());
     v.extend_from_slice(&16u16.to_le_bytes());
     v.extend_from_slice(b"data");
     v.extend_from_slice(&data_len.to_le_bytes());
     for s in samples {
-        let i = (s.clamp(-1.0, 1.0) * 32000.0) as i16;
-        v.extend_from_slice(&i.to_le_bytes());
+        for c in s {
+            let i = (c.clamp(-1.0, 1.0) * 32000.0) as i16;
+            v.extend_from_slice(&i.to_le_bytes());
+        }
     }
     v
 }
 
-/// One-pole low-pass coefficient for a cutoff in Hz.
-fn lp_k(hz: f32) -> f32 {
-    (1.0 - (-TAU * hz / RATE as f32).exp()).clamp(0.0, 1.0)
+// ---------------------------------------------------------------- DSP building blocks
+
+/// Second-order filter (RBJ cookbook), transposed direct form II.
+#[derive(Clone, Copy, Default)]
+struct Biquad {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    z1: f32,
+    z2: f32,
 }
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Low,
+    High,
+    /// Band-pass with 0 dB at the peak.
+    Band,
+    /// Peaking EQ (gain in dB).
+    Peak(f32),
+}
+
+impl Biquad {
+    fn new(kind: Kind, f: f32, q: f32) -> Biquad {
+        let mut b = Biquad::default();
+        b.set(kind, f, q);
+        b
+    }
+    fn set(&mut self, kind: Kind, f: f32, q: f32) {
+        let w0 = TAU * f.clamp(10.0, SR * 0.45) / SR;
+        let (s, c) = w0.sin_cos();
+        let alpha = s / (2.0 * q.max(0.05));
+        let (b0, b1, b2, a0, a1, a2) = match kind {
+            Kind::Low => (
+                (1.0 - c) / 2.0,
+                1.0 - c,
+                (1.0 - c) / 2.0,
+                1.0 + alpha,
+                -2.0 * c,
+                1.0 - alpha,
+            ),
+            Kind::High => (
+                (1.0 + c) / 2.0,
+                -(1.0 + c),
+                (1.0 + c) / 2.0,
+                1.0 + alpha,
+                -2.0 * c,
+                1.0 - alpha,
+            ),
+            Kind::Band => (alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * c, 1.0 - alpha),
+            Kind::Peak(db) => {
+                let a = 10f32.powf(db / 40.0);
+                (
+                    1.0 + alpha * a,
+                    -2.0 * c,
+                    1.0 - alpha * a,
+                    1.0 + alpha / a,
+                    -2.0 * c,
+                    1.0 - alpha / a,
+                )
+            }
+        };
+        self.b0 = b0 / a0;
+        self.b1 = b1 / a0;
+        self.b2 = b2 / a0;
+        self.a1 = a1 / a0;
+        self.a2 = a2 / a0;
+    }
+    fn run(&mut self, x: f32) -> f32 {
+        let y = self.b0 * x + self.z1;
+        self.z1 = self.b1 * x - self.a1 * y + self.z2;
+        self.z2 = self.b2 * x - self.a2 * y;
+        y
+    }
+}
+
+/// Runs a whole buffer through a chain of filters.
+fn filter(b: &mut [f32], chain: &[(Kind, f32, f32)]) {
+    for &(k, f, q) in chain {
+        let mut bq = Biquad::new(k, f, q);
+        for v in b.iter_mut() {
+            *v = bq.run(*v);
+        }
+    }
+}
+
+/// Freeverb-style comb filter with a damped feedback loop.
+struct Comb {
+    buf: Vec<f32>,
+    i: usize,
+    store: f32,
+}
+
+impl Comb {
+    fn run(&mut self, x: f32, feedback: f32, damp: f32) -> f32 {
+        let out = self.buf[self.i];
+        self.store = out * (1.0 - damp) + self.store * damp;
+        self.buf[self.i] = x + self.store * feedback;
+        self.i = (self.i + 1) % self.buf.len();
+        out
+    }
+}
+
+struct Allpass {
+    buf: Vec<f32>,
+    i: usize,
+}
+
+impl Allpass {
+    fn run(&mut self, x: f32) -> f32 {
+        let b = self.buf[self.i];
+        self.buf[self.i] = x + b * 0.5;
+        self.i = (self.i + 1) % self.buf.len();
+        b - x
+    }
+}
+
+/// How a place sounds: reflections off nearby walls and the reverb tail.
+#[derive(Clone, Copy)]
+struct Space {
+    /// Early reflections: (delay s, gain), alternating left and right.
+    taps: &'static [(f32, f32)],
+    /// Reverb size 0..1 (longer tail) and damping 0..1 (duller tail).
+    room: f32,
+    damp: f32,
+    wet: f32,
+    /// Low-pass on reflections and tail (air absorbs the highs).
+    air: f32,
+}
+
+/// A town street: walls a few to a few dozen metres away.
+const TOWN: Space = Space {
+    taps: &[
+        (0.021, 0.30),
+        (0.037, 0.26),
+        (0.058, 0.22),
+        (0.083, 0.20),
+        (0.121, 0.15),
+        (0.167, 0.12),
+        (0.243, 0.08),
+        (0.351, 0.05),
+    ],
+    room: 0.84,
+    damp: 0.55,
+    wet: 0.24,
+    air: 3800.0,
+};
+
+/// Explosions: the blast rolls around the whole map.
+const VALLEY: Space = Space {
+    taps: &[
+        (0.045, 0.35),
+        (0.092, 0.30),
+        (0.160, 0.26),
+        (0.260, 0.20),
+        (0.390, 0.15),
+        (0.580, 0.10),
+        (0.820, 0.06),
+    ],
+    room: 0.92,
+    damp: 0.45,
+    wet: 0.32,
+    air: 2200.0,
+};
+
+/// Close handling sounds: a hint of space only.
+const NEAR: Space = Space {
+    taps: &[(0.011, 0.12), (0.019, 0.1), (0.031, 0.06)],
+    room: 0.4,
+    damp: 0.85,
+    wet: 0.04,
+    air: 6000.0,
+};
+
+/// Places a mono dry sound into a space; returns stereo with `tail` seconds of decay.
+fn spatialize(dry: &[f32], sp: Space, tail: f32, rng: &mut Rng) -> Vec<[f32; 2]> {
+    let n = dry.len() + (tail * SR) as usize;
+    let mut out = vec![[0.0f32; 2]; n];
+    for (i, v) in dry.iter().enumerate() {
+        out[i] = [*v, *v];
+    }
+    // early reflections: walls give back a dull, smeared copy (each tap is spread over a
+    // few milliseconds, so it sounds like a wall and not like a click), panned alternately
+    let mut refl = dry.to_vec();
+    filter(
+        &mut refl,
+        &[
+            (Kind::Low, sp.air * 0.6, 0.6),
+            (Kind::Low, sp.air * 0.6, 0.6),
+        ],
+    );
+    let mut diff = [
+        Allpass {
+            buf: vec![0.0; 113],
+            i: 0,
+        },
+        Allpass {
+            buf: vec![0.0; 173],
+            i: 0,
+        },
+        Allpass {
+            buf: vec![0.0; 241],
+            i: 0,
+        },
+    ];
+    let refl: Vec<f32> = refl
+        .iter()
+        .map(|v| diff.iter_mut().fold(*v, |x, a| a.run(x)))
+        .collect();
+    for (k, (d, g)) in sp.taps.iter().enumerate() {
+        let off = ((d * rng.range(0.92, 1.08)) * SR) as usize;
+        let (gl, gr) = if k % 2 == 0 {
+            (g * 1.0, g * 0.45)
+        } else {
+            (g * 0.45, g * 1.0)
+        };
+        for (i, v) in refl.iter().enumerate() {
+            if let Some(o) = out.get_mut(off + i) {
+                o[0] += v * gl;
+                o[1] += v * gr;
+            }
+        }
+    }
+    // Freeverb tail
+    const COMBS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+    const ALLPASS: [usize; 4] = [556, 441, 341, 225];
+    let feedback = sp.room * 0.28 + 0.7;
+    let damp = sp.damp * 0.4;
+    for (ch, spread) in [(0usize, 0usize), (1, 23)] {
+        let mut combs: Vec<Comb> = COMBS
+            .iter()
+            .map(|l| Comb {
+                buf: vec![0.0; l + spread],
+                i: 0,
+                store: 0.0,
+            })
+            .collect();
+        let mut aps: Vec<Allpass> = ALLPASS
+            .iter()
+            .map(|l| Allpass {
+                buf: vec![0.0; l + spread],
+                i: 0,
+            })
+            .collect();
+        let mut tone = Biquad::new(Kind::Low, sp.air, 0.6);
+        let mut hp = Biquad::new(Kind::High, 90.0, 0.7);
+        for i in 0..n {
+            let x = refl.get(i).copied().unwrap_or(0.0) * 0.015;
+            let mut y = 0.0;
+            for c in combs.iter_mut() {
+                y += c.run(x, feedback, damp);
+            }
+            for a in aps.iter_mut() {
+                y = a.run(y);
+            }
+            out[i][ch] += hp.run(tone.run(y)) * sp.wet * 3.0;
+        }
+    }
+    out
+}
+
+fn mono(b: &[f32]) -> Vec<[f32; 2]> {
+    b.iter().map(|v| [*v, *v]).collect()
+}
+
+/// Pans a mono sound (-1 = left, 1 = right), equal power.
+fn pan(b: &[f32], p: f32) -> Vec<[f32; 2]> {
+    let a = (p.clamp(-1.0, 1.0) + 1.0) * PI / 4.0;
+    let (l, r) = (a.cos() * 1.41, a.sin() * 1.41);
+    b.iter().map(|v| [v * l, v * r]).collect()
+}
+
+fn normalize(b: &mut [[f32; 2]], peak: f32) {
+    let m = b
+        .iter()
+        .fold(0.0f32, |m, v| m.max(v[0].abs()).max(v[1].abs()));
+    if m > 1e-6 {
+        for v in b {
+            v[0] *= peak / m;
+            v[1] *= peak / m;
+        }
+    }
+}
+
+/// Fades the last `secs` out so nothing ends in a click.
+fn fade_out(b: &mut [[f32; 2]], secs: f32) {
+    let n = ((secs * SR) as usize).min(b.len());
+    let start = b.len() - n;
+    for (k, v) in b[start..].iter_mut().enumerate() {
+        let g = 1.0 - k as f32 / n as f32;
+        v[0] *= g;
+        v[1] *= g;
+    }
+}
+
+// ---------------------------------------------------------------- synthesis
 
 /// Parameters of a gunshot.
 #[derive(Clone, Copy)]
 struct Gun {
-    /// Body decay (1/s) — bigger is shorter.
-    decay: f32,
-    /// Body brightness (Hz).
+    /// Supersonic crack strength (0 for subsonic rounds).
+    crack: f32,
+    /// Where the blast's body sits (Hz) — lower for bigger calibres.
+    body: f32,
+    /// Upper limit of the blast (Hz).
     bright: f32,
-    /// Thump frequency (Hz).
-    thump: f32,
-    thump_gain: f32,
-    /// Mechanical clack after the shot.
+    /// Fast and slow decay times of the blast (s).
+    snap: f32,
+    boom: f32,
+    /// Low punch frequency and gain.
+    punch: f32,
+    punch_gain: f32,
+    /// Clack of the action cycling (0 = bolt/pump: no clack).
     mech: f32,
-    /// Echo tail amount.
-    tail: f32,
-    gain: f32,
+    /// How much of the street answers.
+    wet: f32,
+}
+
+fn gun_params(w: WeaponId) -> Gun {
+    let g = |crack, body, bright, snap, boom, punch, punch_gain, mech, wet| Gun {
+        crack,
+        body,
+        bright,
+        snap,
+        boom,
+        punch,
+        punch_gain,
+        mech,
+        wet,
+    };
+    use WeaponId::*;
+    match w {
+        M4 => g(0.8, 320.0, 7500.0, 0.006, 0.045, 70.0, 0.7, 0.25, 1.0),
+        Ak47 => g(0.8, 240.0, 6000.0, 0.007, 0.060, 58.0, 0.9, 0.3, 1.0),
+        G3 => g(0.9, 210.0, 6500.0, 0.008, 0.070, 52.0, 1.0, 0.3, 1.1),
+        Mp5 => g(0.25, 420.0, 7000.0, 0.005, 0.035, 85.0, 0.5, 0.3, 0.8),
+        P90 => g(0.6, 520.0, 9000.0, 0.004, 0.030, 95.0, 0.45, 0.25, 0.8),
+        Ak74u => g(0.7, 360.0, 8500.0, 0.006, 0.050, 75.0, 0.7, 0.3, 1.0),
+        M249 => g(0.8, 290.0, 7000.0, 0.007, 0.055, 62.0, 0.85, 0.35, 1.1),
+        Rpd => g(0.85, 230.0, 6000.0, 0.008, 0.065, 55.0, 0.95, 0.35, 1.1),
+        W1200 => g(0.0, 170.0, 4800.0, 0.010, 0.100, 45.0, 1.3, 0.0, 1.2),
+        M1014 => g(0.0, 185.0, 5200.0, 0.009, 0.090, 48.0, 1.2, 0.2, 1.2),
+        M40 => g(1.0, 190.0, 6500.0, 0.010, 0.110, 46.0, 1.3, 0.0, 1.4),
+        R700 => g(1.0, 175.0, 6000.0, 0.011, 0.120, 44.0, 1.35, 0.0, 1.4),
+        M9 => g(0.15, 600.0, 8000.0, 0.004, 0.025, 110.0, 0.45, 0.3, 0.7),
+        Usp => g(0.0, 460.0, 7000.0, 0.004, 0.030, 95.0, 0.55, 0.3, 0.7),
+        Deagle => g(0.6, 280.0, 7000.0, 0.008, 0.070, 60.0, 1.1, 0.35, 1.0),
+    }
 }
 
 struct Synth {
@@ -149,16 +504,16 @@ struct Synth {
 
 impl Synth {
     fn buf(secs: f32) -> Vec<f32> {
-        vec![0.0; (secs * RATE as f32) as usize]
+        vec![0.0; (secs * SR) as usize]
     }
     fn noise(&mut self) -> f32 {
         self.rng.f32() * 2.0 - 1.0
     }
     fn t(i: usize) -> f32 {
-        i as f32 / RATE as f32
+        i as f32 / SR
     }
     fn mix(a: &mut Vec<f32>, b: &[f32], at: f32, gain: f32) {
-        let off = (at * RATE as f32) as usize;
+        let off = (at * SR) as usize;
         if a.len() < off + b.len() {
             a.resize(off + b.len(), 0.0);
         }
@@ -166,383 +521,582 @@ impl Synth {
             a[off + i] += v * gain;
         }
     }
-    fn normalize(b: &mut [f32], peak: f32) {
-        let m = b.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    fn peak(b: &[f32]) -> f32 {
+        b.iter().fold(0.0f32, |m, v| m.max(v.abs()))
+    }
+    fn norm(b: &mut [f32], peak: f32) {
+        let m = Synth::peak(b);
         if m > 1e-6 {
             for v in b {
                 *v *= peak / m;
             }
         }
     }
-    /// Soft clipping adds punch without harsh distortion.
+    /// Soft clipping: loud and punchy without harsh distortion.
     fn saturate(b: &mut [f32], drive: f32) {
         for v in b {
             *v = (*v * drive).tanh();
         }
     }
-    /// Short metallic hit: a few inharmonic partials.
-    fn metal(&mut self, len: f32, base: f32, decay: f32) -> Vec<f32> {
-        let mut b = Self::buf(len);
-        let partials = [1.0f32, 2.76, 5.40, 8.93];
-        let jit: Vec<f32> = partials
-            .iter()
-            .map(|_| self.rng.range(0.97, 1.03))
-            .collect();
-        for (i, s) in b.iter_mut().enumerate() {
-            let t = Self::t(i);
-            let mut v = 0.0;
-            for (k, p) in partials.iter().enumerate() {
-                let f = base * p * jit[k];
-                v += (t * f * TAU).sin() * (-t * decay * (1.0 + k as f32 * 0.6)).exp()
-                    / (1.0 + k as f32);
-            }
-            let click = if t < 0.0015 { self.noise() * 0.6 } else { 0.0 };
-            *s = (v + click) * (t / 0.0008).min(1.0);
-        }
-        Synth::normalize(&mut b, 0.9);
-        b
+
+    /// N-shaped pressure wave: a sharp crack (supersonic bullet, blast front).
+    fn n_wave(len: f32) -> Vec<f32> {
+        let n = (len * SR).max(4.0) as usize;
+        (0..n)
+            .map(|i| {
+                let x = i as f32 / n as f32;
+                (1.0 - 2.0 * x) * (1.0 - (x - 0.5).abs() * 0.3)
+            })
+            .collect()
     }
-    fn shot(&mut self, g: Gun) -> Vec<f32> {
-        let len = 0.25 + g.tail * 1.1;
+
+    /// A small steel part struck: noise excitation ringing through tuned resonators.
+    fn clack(&mut self, freqs: &[f32], q: f32, len: f32, gain: f32) -> Vec<f32> {
         let mut b = Self::buf(len);
-        let (mut lp1, mut lp2, mut hp) = (0.0f32, 0.0f32, 0.0f32);
-        let k1 = lp_k(g.bright);
-        let k2 = lp_k(g.bright * 0.5);
-        let mut ph = 0.0f32;
+        let mut bank: Vec<Biquad> = freqs
+            .iter()
+            .map(|f| Biquad::new(Kind::Band, f * self.rng.range(0.96, 1.04), q))
+            .collect();
+        let exc = (0.0015 * SR) as usize;
         for (i, s) in b.iter_mut().enumerate() {
-            let t = Self::t(i);
-            let n = self.noise();
-            // transient: broadband crack in the first couple of ms
-            let crack = if t < 0.0025 {
-                n * (1.0 - t / 0.0025) * 1.4
+            let x = if i < exc {
+                self.noise() * (1.0 - i as f32 / exc as f32)
             } else {
                 0.0
             };
-            // body: band-limited noise
-            lp1 += (n - lp1) * k1;
-            lp2 += (lp1 - lp2) * k2;
-            hp += (lp2 - hp) * lp_k(180.0);
-            let body = (lp2 - hp) * 2.8 * (-t * g.decay).exp();
-            // thump: pitch drops quickly like a pressure wave
-            let f = g.thump * (1.0 + 1.5 * (-t * 40.0).exp());
-            ph += f / RATE as f32;
-            let thump = (ph * TAU).sin() * (-t * g.decay * 0.55).exp() * g.thump_gain;
-            *s = crack + body + thump;
+            let mut y = 0.0;
+            for (k, r) in bank.iter_mut().enumerate() {
+                y += r.run(x) / (1.0 + k as f32 * 0.5);
+            }
+            *s = y + x * 0.15;
         }
+        Synth::norm(&mut b, gain);
+        b
+    }
+
+    /// Filtered noise with an attack and exponential decay.
+    fn burst(&mut self, len: f32, chain: &[(Kind, f32, f32)], attack: f32, decay: f32) -> Vec<f32> {
+        let mut b: Vec<f32> = (0..(len * SR) as usize).map(|_| self.noise()).collect();
+        filter(&mut b, chain);
+        for (i, v) in b.iter_mut().enumerate() {
+            let t = Self::t(i);
+            *v *= (t / attack.max(1e-4)).min(1.0) * (-t / decay).exp();
+        }
+        b
+    }
+
+    /// Sine with a falling pitch (thumps, punches, booms).
+    fn drop(len: f32, f0: f32, f1: f32, fall: f32, decay: f32) -> Vec<f32> {
+        let mut ph = 0.0f32;
+        (0..(len * SR) as usize)
+            .map(|i| {
+                let t = Self::t(i);
+                let f = f1 + (f0 - f1) * (-t / fall).exp();
+                ph += f / SR;
+                (ph * TAU).sin() * (-t / decay).exp() * (t / 0.001).min(1.0)
+            })
+            .collect()
+    }
+
+    /// The dry gunshot, before the street answers.
+    fn shot_dry(&mut self, g: Gun) -> Vec<f32> {
+        let mut b = Self::buf(0.4);
+        // supersonic crack
+        if g.crack > 0.0 {
+            let n = Synth::n_wave(0.00045);
+            Synth::mix(&mut b, &n, 0.0, 1.6 * g.crack);
+        }
+        // muzzle blast: two layers, a snappy bright one and a darker boom
+        let at = if g.crack > 0.0 { 0.0012 } else { 0.0 };
+        let bright = self.burst(
+            0.15,
+            &[
+                (Kind::High, g.body * 0.6, 0.7),
+                (Kind::Low, g.bright, 0.7),
+                (Kind::Peak(6.0), 2800.0, 1.2),
+            ],
+            0.0002,
+            g.snap,
+        );
+        Synth::mix(&mut b, &bright, at, 3.0);
+        let boom = self.burst(
+            0.4,
+            &[(Kind::Band, g.body, 1.1), (Kind::Low, g.body * 4.0, 0.7)],
+            0.0006,
+            g.boom,
+        );
+        Synth::mix(&mut b, &boom, at, 4.0);
+        // low punch in the chest: short, felt rather than heard as a tone
+        let p = Synth::drop(0.15, g.punch * 2.5, g.punch, 0.008, 0.022 + g.boom * 0.15);
+        let level = Synth::peak(&b);
+        Synth::mix(&mut b, &p, at, 0.35 * g.punch_gain * level);
+        // gentle saturation, like a recording that is loud but not broken
+        Synth::norm(&mut b, 1.0);
+        Synth::saturate(&mut b, 1.5);
+        Synth::norm(&mut b, 1.0);
         // the action cycling
         if g.mech > 0.0 {
-            let base = self.rng.range(1900.0, 2400.0);
-            let m = self.metal(0.05, base, 70.0);
-            Synth::mix(&mut b, &m, 0.018 + self.rng.range(0.0, 0.01), g.mech);
-        }
-        // outdoor slap-back echoes and a soft reverb tail
-        if g.tail > 0.0 {
-            let src: Vec<f32> = b[..(0.12 * RATE as f32) as usize].to_vec();
-            let mut lp = 0.0f32;
-            let echo: Vec<f32> = src
-                .iter()
-                .map(|v| {
-                    lp += (v - lp) * lp_k(900.0);
-                    lp
-                })
-                .collect();
-            for (at, gain) in [(0.085f32, 0.32f32), (0.19, 0.2), (0.33, 0.12), (0.52, 0.07)] {
-                let at = at * self.rng.range(0.9, 1.1);
-                Synth::mix(&mut b, &echo, at, gain * g.tail);
-            }
-            let mut lp = 0.0f32;
-            let start = (0.03 * RATE as f32) as usize;
-            for i in start..b.len() {
-                let t = Self::t(i - start);
-                lp += (self.noise() - lp) * lp_k(700.0);
-                b[i] += lp * 0.5 * g.tail * (-t * 4.5).exp() * (t / 0.05).min(1.0);
-            }
-        }
-        Synth::saturate(&mut b, 1.3);
-        Synth::normalize(&mut b, g.gain);
-        b
-    }
-    /// Gunfire heard from far away: no crack, just a low boom and a long tail.
-    fn far(&mut self) -> Vec<f32> {
-        let mut b = Self::buf(1.2);
-        let (mut lp, mut lp2) = (0.0f32, 0.0f32);
-        for (i, s) in b.iter_mut().enumerate() {
-            let t = Self::t(i);
-            lp += (self.noise() - lp) * lp_k(500.0);
-            lp2 += (lp - lp2) * lp_k(300.0);
-            let env = (t / 0.004).min(1.0) * ((-t * 9.0).exp() + 0.25 * (-t * 3.0).exp());
-            *s = lp2 * env * 5.0 + (t * 70.0 * TAU).sin() * (-t * 14.0).exp() * 0.5;
-        }
-        Synth::normalize(&mut b, 0.8);
-        b
-    }
-    fn explosion(&mut self) -> Vec<f32> {
-        let mut b = Self::buf(2.4);
-        let (mut lp, mut lp2) = (0.0f32, 0.0f32);
-        let mut ph = 0.0f32;
-        for (i, s) in b.iter_mut().enumerate() {
-            let t = Self::t(i);
-            let env = if t < 0.012 {
-                t / 0.012
-            } else {
-                (-(t - 0.012) * 2.4).exp()
-            };
-            let n = self.noise();
-            lp += (n - lp) * lp_k(1400.0 * (-t * 2.0).exp() + 120.0);
-            lp2 += (lp - lp2) * lp_k(600.0);
-            ph += (48.0 - t * 14.0).max(25.0) / RATE as f32;
-            let rumble = (ph * TAU).sin() * (-t * 1.6).exp();
-            let crack = if t < 0.004 { n * 1.5 } else { 0.0 };
-            *s = lp2 * 4.0 * env + rumble * 0.9 + crack;
-        }
-        // debris rattling down
-        for _ in 0..14 {
-            let at = self.rng.range(0.25, 1.4);
-            let f = self.rng.range(900.0, 2600.0);
-            let m = self.metal(0.04, f, 90.0);
-            Synth::mix(&mut b, &m, at, self.rng.range(0.03, 0.09));
-        }
-        Synth::saturate(&mut b, 1.5);
-        Synth::normalize(&mut b, 0.95);
-        b
-    }
-    fn tone(&mut self, len: f32, f0: f32, f1: f32, decay: f32, square: bool) -> Vec<f32> {
-        let mut b = Self::buf(len);
-        let mut ph = 0.0f32;
-        for (i, s) in b.iter_mut().enumerate() {
-            let t = Self::t(i);
-            let f = f0 + (f1 - f0) * (t / len);
-            ph += f / RATE as f32;
-            let w = (ph * TAU).sin();
-            let w = if square { w.signum() * 0.5 } else { w };
-            let attack = (t / 0.003).min(1.0);
-            *s = w * (-t * decay).exp() * attack * 0.6;
+            let c = self.clack(&[1650.0, 2900.0, 4300.0, 6100.0], 25.0, 0.06, 1.0);
+            let at = 0.022 + self.rng.range(0.0, 0.01);
+            Synth::mix(&mut b, &c, at, g.mech * 0.35);
         }
         b
     }
-    fn noise_burst(&mut self, len: f32, cutoff: f32, decay: f32, gain: f32) -> Vec<f32> {
-        let mut b = Self::buf(len);
-        let mut lp = 0.0;
-        let k = lp_k(cutoff);
-        for (i, s) in b.iter_mut().enumerate() {
-            let t = Self::t(i);
-            lp += (self.noise() - lp) * k;
-            *s = lp * (-t * decay).exp() * (t / 0.002).min(1.0) * gain;
-        }
-        b
-    }
-    fn step(&mut self) -> Vec<f32> {
-        let f = self.rng.range(700.0, 1100.0);
-        let mut b = self.noise_burst(0.1, f, 40.0, 2.2);
-        let grit = self.noise_burst(0.05, 4000.0, 70.0, 0.25);
-        Synth::mix(&mut b, &grit, 0.01, 1.0);
-        Synth::normalize(&mut b, 0.7);
-        b
-    }
-    fn whoosh(&mut self, len: f32, peak: f32, cutoff: f32) -> Vec<f32> {
-        let mut b = Self::buf(len);
-        let mut lp = 0.0;
-        let k = lp_k(cutoff);
-        for (i, s) in b.iter_mut().enumerate() {
-            let t = Self::t(i);
-            let x = t / len;
-            let env = (-((x - peak) * (x - peak)) * 18.0).exp();
-            lp += (self.noise() - lp) * k;
-            *s = lp * env * 2.0;
-        }
-        Synth::normalize(&mut b, 0.8);
-        b
-    }
-    /// Bullet fly-by: a quick swelling hiss with a doppler drop.
-    fn whiz(&mut self) -> Vec<f32> {
-        let len = 0.22;
-        let mut b = Self::buf(len);
-        let (mut lp, mut hp) = (0.0f32, 0.0f32);
-        let mut ph = 0.0f32;
-        for (i, s) in b.iter_mut().enumerate() {
-            let t = Self::t(i);
-            let x = t / len;
-            let env = (-((x - 0.3) * (x - 0.3)) * 30.0).exp();
-            let n = self.noise();
-            lp += (n - lp) * lp_k(5000.0 - x * 3000.0);
-            hp += (lp - hp) * lp_k(1200.0);
-            ph += (2400.0 - x * 1500.0) / RATE as f32;
-            let crack = if (0.055..0.058).contains(&t) {
-                n * 2.0
-            } else {
-                0.0
-            };
-            *s = ((lp - hp) * 3.0 + (ph * TAU).sin() * 0.25) * env + crack;
-        }
-        Synth::normalize(&mut b, 0.8);
-        b
-    }
-    fn heli(&mut self) -> Vec<f32> {
-        let mut b = Self::buf(0.6);
-        let mut lp = 0.0;
-        for (i, s) in b.iter_mut().enumerate() {
-            let t = Self::t(i);
-            let blade = ((t * 10.0).fract() * TAU).cos().max(0.0).powi(6);
-            lp += (self.noise() - lp) * lp_k(400.0);
-            *s = lp * (0.25 + blade * 1.5) * 2.0 + (t * 70.0 * TAU).sin() * 0.15;
-        }
-        Synth::normalize(&mut b, 0.8);
-        b
-    }
-    fn chord(&mut self, notes: &[(f32, f32)], len: f32, decay: f32, square: bool) -> Vec<f32> {
-        let mut out = Vec::new();
-        for (at, f) in notes {
-            let t = self.tone(len, *f, *f, decay, square);
-            Synth::mix(&mut out, &t, *at, 0.6);
-        }
-        Synth::normalize(&mut out, 0.7);
+
+    fn shot(&mut self, g: Gun) -> Vec<[f32; 2]> {
+        let dry = self.shot_dry(g);
+        let sp = Space {
+            wet: TOWN.wet * g.wet,
+            ..TOWN
+        };
+        let mut out = spatialize(&dry, sp, 0.6 + g.wet * 0.5, &mut self.rng);
+        fade_out(&mut out, 0.2);
+        normalize(&mut out, 0.98);
         out
     }
 
-    fn make(&mut self, s: Sfx) -> Vec<f32> {
-        let g = |decay, bright, thump, thump_gain, mech, tail, gain| Gun {
-            decay,
-            bright,
-            thump,
-            thump_gain,
-            mech,
-            tail,
-            gain,
+    /// Gunfire heard from far away: no crack, the highs lost on the way, mostly echo.
+    fn far(&mut self) -> Vec<[f32; 2]> {
+        let mut dry = self.shot_dry(gun_params(WeaponId::Ak47));
+        filter(
+            &mut dry,
+            &[(Kind::Low, 900.0, 0.7), (Kind::Low, 1400.0, 0.7)],
+        );
+        let mut pre = Self::buf(0.02);
+        pre.extend(dry);
+        let sp = Space {
+            wet: 0.6,
+            air: 1400.0,
+            ..TOWN
+        };
+        let mut out = spatialize(&pre, sp, 1.3, &mut self.rng);
+        fade_out(&mut out, 0.3);
+        normalize(&mut out, 0.85);
+        out
+    }
+
+    fn explosion(&mut self) -> Vec<[f32; 2]> {
+        let mut b = Self::buf(2.2);
+        // blast front
+        let n = Synth::n_wave(0.0025);
+        Synth::mix(&mut b, &n, 0.0, 2.0);
+        // roar: noise whose brightness falls as the fireball cools
+        let mut lp = Biquad::default();
+        let mut lp2 = Biquad::default();
+        for i in 0..b.len() {
+            let t = Self::t(i);
+            if i % 32 == 0 {
+                let f = 180.0 + 5200.0 * (-t / 0.18).exp();
+                lp.set(Kind::Low, f, 0.8);
+                lp2.set(Kind::Low, f * 1.3, 0.6);
+            }
+            let env = (t / 0.004).min(1.0) * ((-t / 0.22).exp() * 0.8 + (-t / 0.9).exp() * 0.35);
+            b[i] += lp2.run(lp.run(self.noise())) * env * 3.0;
+        }
+        // deep boom: a short thump and a long rumble of low noise
+        Synth::norm(&mut b, 1.0);
+        let thump = Synth::drop(0.4, 110.0, 40.0, 0.04, 0.09);
+        Synth::mix(&mut b, &thump, 0.002, 0.8);
+        let mut sub = self.burst(
+            2.0,
+            &[(Kind::Low, 120.0, 0.7), (Kind::Low, 160.0, 0.7)],
+            0.008,
+            0.5,
+        );
+        Synth::norm(&mut sub, 1.0);
+        Synth::mix(&mut b, &sub, 0.0, 0.9);
+        Synth::norm(&mut b, 1.0);
+        Synth::saturate(&mut b, 1.6);
+        Synth::norm(&mut b, 1.0);
+        // crackle and debris raining down
+        for _ in 0..40 {
+            let at = 0.05 + self.rng.f32().powi(2) * 1.6;
+            let f = self.rng.range(1500.0, 5000.0);
+            let c = self.burst(0.02, &[(Kind::Band, f, 2.0)], 0.0002, 0.004);
+            Synth::mix(&mut b, &c, at, self.rng.range(0.05, 0.2));
+        }
+        for _ in 0..10 {
+            let at = self.rng.range(0.35, 1.8);
+            let f = self.rng.range(700.0, 2000.0);
+            let c = self.clack(&[f, f * 1.7, f * 2.6], 12.0, 0.08, 1.0);
+            Synth::mix(&mut b, &c, at, self.rng.range(0.03, 0.08));
+        }
+        let mut out = spatialize(&b, VALLEY, 1.8, &mut self.rng);
+        fade_out(&mut out, 0.6);
+        normalize(&mut out, 1.0);
+        out
+    }
+
+    fn step(&mut self) -> Vec<f32> {
+        // heel then toe: a dull thud and gritty scuff
+        let mut b = Vec::new();
+        let grit_f = self.rng.range(800.0, 1400.0);
+        for (at, g) in [(0.0f32, 1.0f32), (self.rng.range(0.035, 0.055), 0.55)] {
+            let thud = Synth::drop(0.06, 160.0, 80.0, 0.01, 0.018);
+            let grit = self.burst(
+                0.07,
+                &[(Kind::Band, grit_f, 1.2), (Kind::Low, 3500.0, 0.7)],
+                0.001,
+                0.015,
+            );
+            Synth::mix(&mut b, &thud, at, 0.5 * g);
+            Synth::mix(&mut b, &grit, at, 1.4 * g);
+        }
+        Synth::norm(&mut b, 0.7);
+        b
+    }
+
+    /// Bullet fly-by from one side: a snap and a falling hiss.
+    fn whiz(&mut self, side: f32) -> Vec<[f32; 2]> {
+        let len = 0.24;
+        let mut b = Self::buf(len);
+        let snap = Synth::n_wave(0.0003);
+        Synth::mix(&mut b, &snap, 0.03, 1.2);
+        let mut bp = Biquad::default();
+        for i in 0..b.len() {
+            let t = Self::t(i);
+            let x = t / len;
+            if i % 32 == 0 {
+                bp.set(Kind::Band, 6500.0 - 4000.0 * x, 2.5);
+            }
+            let env = (-((x - 0.2) * (x - 0.2)) * 40.0).exp();
+            b[i] += bp.run(self.noise()) * env * 2.5;
+        }
+        Synth::norm(&mut b, 0.8);
+        let mut out = pan(&b, side);
+        normalize(&mut out, 0.8);
+        out
+    }
+
+    /// Jet flying over: a roar sweeping down in pitch as it passes.
+    fn jet(&mut self) -> Vec<[f32; 2]> {
+        let len = 3.0;
+        let n = (len * SR) as usize;
+        let mut l = vec![0.0f32; n];
+        let mut r = vec![0.0f32; n];
+        let (mut bp, mut lp) = (Biquad::default(), Biquad::default());
+        let mut ph = 0.0f32;
+        for i in 0..n {
+            let t = Self::t(i);
+            let x = t / len;
+            if i % 32 == 0 {
+                let f = 2200.0 - 1600.0 / (1.0 + (-(x - 0.45) * 14.0).exp());
+                bp.set(Kind::Band, f, 1.2);
+                lp.set(Kind::Low, f * 0.4, 0.7);
+            }
+            let env = (-((x - 0.45) * (x - 0.45)) * 9.0).exp();
+            let nse = self.noise();
+            ph += (3200.0 - 1800.0 * x) / SR;
+            let v = (bp.run(nse) * 1.5 + lp.run(nse) * 2.0 + (ph * TAU).sin() * 0.04) * env;
+            // passes from left to right
+            let p = (x * 2.0 - 1.0).clamp(-1.0, 1.0);
+            let a = (p + 1.0) * PI / 4.0;
+            l[i] = v * a.cos();
+            r[i] = v * a.sin();
+        }
+        let mut out: Vec<[f32; 2]> = l.into_iter().zip(r).map(|(a, b)| [a, b]).collect();
+        fade_out(&mut out, 0.3);
+        normalize(&mut out, 0.85);
+        out
+    }
+
+    /// Helicopter rotor: one seamless second (ten blade slaps) to loop.
+    fn heli(&mut self) -> Vec<[f32; 2]> {
+        let period = 1.0;
+        let xf = 0.15;
+        let n = ((period + xf) * SR) as usize;
+        let mut b = vec![0.0f32; n];
+        let (mut wash, mut slap_f) = (
+            Biquad::new(Kind::Low, 500.0, 0.7),
+            Biquad::new(Kind::Band, 260.0, 1.2),
+        );
+        let mut slap_lp = Biquad::new(Kind::Low, 1200.0, 0.7);
+        let mut ph = 0.0f32;
+        for (i, v) in b.iter_mut().enumerate() {
+            let t = Self::t(i);
+            let blade = ((t * 10.0).fract() * TAU).cos().max(0.0).powi(10);
+            let nse = self.noise();
+            ph += 1900.0 / SR;
+            *v = wash.run(nse) * 1.2
+                + slap_lp.run(slap_f.run(nse) * blade) * 7.0
+                + (t * 20.0 * TAU).sin() * blade * 0.6
+                + (ph * TAU).sin() * 0.015;
+        }
+        // crossfade the tail into the head so the loop has no seam
+        let p = (period * SR) as usize;
+        let x = n - p;
+        let mut out: Vec<f32> = b[..p].to_vec();
+        for i in 0..x {
+            let k = i as f32 / x as f32;
+            out[i] = b[i] * k + b[p + i] * (1.0 - k);
+        }
+        Synth::norm(&mut out, 0.8);
+        mono(&out)
+    }
+
+    /// A short "ugh": a buzzing voice through the formants of an "uh" vowel.
+    fn hurt(&mut self) -> Vec<f32> {
+        let len = 0.28;
+        let f0 = self.rng.range(130.0, 175.0);
+        let mut b = Self::buf(len);
+        let mut ph = 0.0f32;
+        let mut formants = [
+            Biquad::new(Kind::Band, 650.0, 5.0),
+            Biquad::new(Kind::Band, 1150.0, 7.0),
+            Biquad::new(Kind::Band, 2450.0, 9.0),
+        ];
+        for (i, s) in b.iter_mut().enumerate() {
+            let t = Self::t(i);
+            let f = f0 * (1.15 - 0.35 * t / len) * (1.0 + 0.01 * (t * 33.0).sin());
+            ph = (ph + f / SR).fract();
+            let glottal = 1.0 - 2.0 * ph + self.noise() * 0.15;
+            let mut y = 0.0;
+            for (k, fm) in formants.iter_mut().enumerate() {
+                y += fm.run(glottal) * [1.0, 0.6, 0.25][k];
+            }
+            let env = (t / 0.025).min(1.0) * (-(t / len) * 3.0).exp();
+            *s = y * env;
+        }
+        let thud = Synth::drop(0.1, 140.0, 70.0, 0.02, 0.03);
+        let g = Synth::peak(&b) * 0.6;
+        Synth::mix(&mut b, &thud, 0.0, g);
+        Synth::norm(&mut b, 0.7);
+        b
+    }
+
+    fn tone(len: f32, f: f32, decay: f32, harmonics: &[f32]) -> Vec<f32> {
+        (0..(len * SR) as usize)
+            .map(|i| {
+                let t = Self::t(i);
+                let mut v = 0.0;
+                for (k, h) in harmonics.iter().enumerate() {
+                    v += (t * f * (k + 1) as f32 * TAU).sin() * h;
+                }
+                v * (t / 0.004).min(1.0) * (-t * decay).exp()
+            })
+            .collect()
+    }
+
+    fn chord(notes: &[(f32, f32)], len: f32, decay: f32) -> Vec<f32> {
+        let mut out = Vec::new();
+        for (at, f) in notes {
+            let t = Synth::tone(len, *f, decay, &[1.0, 0.35, 0.12]);
+            Synth::mix(&mut out, &t, *at, 0.6);
+        }
+        Synth::norm(&mut out, 0.6);
+        out
+    }
+
+    /// A bell-like ring (headshot ding).
+    fn bell(f: f32, len: f32) -> Vec<f32> {
+        let partials = [(1.0f32, 1.0f32), (2.76, 0.5), (5.4, 0.25), (8.93, 0.12)];
+        (0..(len * SR) as usize)
+            .map(|i| {
+                let t = Self::t(i);
+                let mut v = 0.0;
+                for (k, (p, g)) in partials.iter().enumerate() {
+                    v += (t * f * p * TAU).sin() * g * (-t * (7.0 + k as f32 * 6.0)).exp();
+                }
+                v * (t / 0.001).min(1.0)
+            })
+            .collect()
+    }
+
+    fn make(&mut self, s: Sfx, variant: usize) -> Vec<[f32; 2]> {
+        let mut out = self.make_raw(s, variant);
+        // the rotor loop must stay seamless; everything else ends softly
+        if s != Sfx::Heli {
+            fade_out(&mut out, 0.01);
+        }
+        out
+    }
+
+    fn make_raw(&mut self, s: Sfx, variant: usize) -> Vec<[f32; 2]> {
+        let room = |b: Vec<f32>, rng: &mut Rng| {
+            let mut o = spatialize(&b, NEAR, 0.25, rng);
+            fade_out(&mut o, 0.1);
+            o
         };
         match s {
-            Sfx::Rifle => self.shot(g(22.0, 5200.0, 95.0, 0.9, 0.25, 0.7, 0.9)),
-            Sfx::Smg => self.shot(g(32.0, 6500.0, 140.0, 0.6, 0.3, 0.45, 0.78)),
-            Sfx::Lmg => self.shot(g(18.0, 4200.0, 80.0, 1.1, 0.3, 0.8, 0.95)),
-            Sfx::Shotgun => self.shot(g(11.0, 3200.0, 62.0, 1.4, 0.0, 0.9, 1.0)),
-            Sfx::Sniper => self.shot(g(9.0, 3800.0, 55.0, 1.5, 0.0, 1.0, 1.0)),
-            Sfx::Pistol => self.shot(g(38.0, 7000.0, 170.0, 0.5, 0.35, 0.35, 0.7)),
+            Sfx::Gun(w) => self.shot(gun_params(w)),
+            Sfx::HeliGun => self.shot(Gun {
+                body: 200.0,
+                boom: 0.08,
+                punch_gain: 1.2,
+                mech: 0.0,
+                wet: 1.3,
+                ..gun_params(WeaponId::M249)
+            }),
             Sfx::Far => self.far(),
             Sfx::Explosion => self.explosion(),
             Sfx::Hit => {
-                let mut b = self.metal(0.05, 3100.0, 90.0);
-                let tick = self.noise_burst(0.01, 9000.0, 300.0, 1.0);
-                Synth::mix(&mut b, &tick, 0.0, 0.8);
-                Synth::normalize(&mut b, 0.6);
-                b
+                // hitmarker: a crisp, dry tick
+                let mut b = self.clack(&[3200.0, 5100.0], 30.0, 0.05, 1.0);
+                let tick = self.burst(0.01, &[(Kind::High, 6000.0, 0.7)], 0.0001, 0.002);
+                Synth::mix(&mut b, &tick, 0.0, 1.5);
+                Synth::norm(&mut b, 0.6);
+                mono(&b)
             }
             Sfx::HitHead => {
-                let mut b = self.metal(0.35, 1650.0, 9.0);
-                let tick = self.metal(0.05, 3100.0, 90.0);
-                Synth::mix(&mut b, &tick, 0.0, 0.7);
-                Synth::normalize(&mut b, 0.7);
-                b
+                let mut b = Synth::bell(1650.0, 0.45);
+                let tick = self.clack(&[3200.0, 5100.0], 30.0, 0.05, 1.0);
+                Synth::mix(&mut b, &tick, 0.0, 0.6);
+                Synth::norm(&mut b, 0.7);
+                mono(&b)
             }
             Sfx::Kill => {
-                let mut b = self.chord(&[(0.0, 1320.0), (0.06, 1760.0)], 0.2, 14.0, false);
-                let thud = self.noise_burst(0.12, 400.0, 30.0, 1.0);
-                Synth::mix(&mut b, &thud, 0.0, 0.6);
-                Synth::normalize(&mut b, 0.65);
-                b
+                let mut b = Synth::chord(&[(0.0, 1320.0), (0.07, 1760.0)], 0.25, 12.0);
+                let thud = Synth::drop(0.12, 160.0, 70.0, 0.02, 0.04);
+                Synth::mix(&mut b, &thud, 0.0, 0.5);
+                Synth::norm(&mut b, 0.6);
+                mono(&b)
             }
-            Sfx::Step => self.step(),
+            Sfx::Step => {
+                let b = self.step();
+                mono(&b)
+            }
             Sfx::Land => {
-                let mut b = self.noise_burst(0.18, 450.0, 22.0, 2.0);
-                let clank = self.metal(0.06, 900.0, 50.0);
-                Synth::mix(&mut b, &clank, 0.01, 0.15);
-                Synth::normalize(&mut b, 0.75);
-                b
+                let mut b = Synth::drop(0.2, 120.0, 55.0, 0.03, 0.06);
+                let grit = self.burst(0.15, &[(Kind::Band, 1800.0, 0.8)], 0.002, 0.03);
+                Synth::mix(&mut b, &grit, 0.0, 1.2);
+                for k in 0..3 {
+                    let f = self.rng.range(1200.0, 2600.0);
+                    let c = self.clack(&[f, f * 1.6], 15.0, 0.05, 1.0);
+                    Synth::mix(&mut b, &c, 0.01 + k as f32 * 0.03, 0.12);
+                }
+                Synth::norm(&mut b, 0.75);
+                room(b, &mut self.rng)
             }
             Sfx::MagOut => {
-                let mut b = self.metal(0.07, 1300.0, 55.0);
-                let slide = self.noise_burst(0.08, 2500.0, 35.0, 0.6);
-                Synth::mix(&mut b, &slide, 0.02, 1.0);
-                Synth::normalize(&mut b, 0.6);
-                b
+                // release click, then the magazine sliding out
+                let mut b = self.clack(&[2300.0, 3700.0, 5200.0], 30.0, 0.04, 1.0);
+                let mut slide = Self::buf(0.12);
+                let mut bp = Biquad::default();
+                for i in 0..slide.len() {
+                    let t = Self::t(i);
+                    if i % 32 == 0 {
+                        bp.set(Kind::Band, 900.0 + t * 18000.0, 2.0);
+                    }
+                    slide[i] = bp.run(self.noise()) * (t / 0.01).min(1.0) * (-t / 0.05).exp();
+                }
+                Synth::mix(&mut b, &slide, 0.025, 2.5);
+                Synth::norm(&mut b, 0.6);
+                room(b, &mut self.rng)
             }
             Sfx::MagIn => {
-                let mut b = self.metal(0.06, 1700.0, 60.0);
-                let snap = self.metal(0.05, 2600.0, 90.0);
-                Synth::mix(&mut b, &snap, 0.035, 0.9);
-                Synth::normalize(&mut b, 0.7);
-                b
+                // magazine seated: a dull thud and a sharp latch
+                let mut b = self.burst(0.08, &[(Kind::Low, 500.0, 0.8)], 0.001, 0.02);
+                Synth::norm(&mut b, 0.8);
+                let latch = self.clack(&[1250.0, 2450.0, 3950.0, 5600.0], 35.0, 0.08, 1.0);
+                Synth::mix(&mut b, &latch, 0.012, 0.9);
+                Synth::norm(&mut b, 0.7);
+                room(b, &mut self.rng)
             }
             Sfx::Bolt => {
-                let mut b = self.metal(0.05, 2200.0, 80.0);
-                let back = self.metal(0.06, 1500.0, 60.0);
-                Synth::mix(&mut b, &back, 0.09, 1.0);
-                Synth::normalize(&mut b, 0.7);
-                b
+                // charging handle back, spring, slamming forward
+                let mut b = self.clack(&[1800.0, 3100.0, 4700.0], 25.0, 0.05, 0.7);
+                let spring = self.burst(0.08, &[(Kind::Band, 3500.0, 3.0)], 0.005, 0.03);
+                Synth::mix(&mut b, &spring, 0.03, 0.4);
+                let fwd = self.clack(&[1300.0, 2200.0, 3600.0, 5200.0], 14.0, 0.08, 1.0);
+                Synth::mix(&mut b, &fwd, 0.1, 1.0);
+                let thud = self.burst(0.05, &[(Kind::Low, 400.0, 0.8)], 0.001, 0.012);
+                Synth::mix(&mut b, &thud, 0.1, 1.5);
+                Synth::norm(&mut b, 0.75);
+                room(b, &mut self.rng)
             }
             Sfx::Pump => {
-                let mut b = self.noise_burst(0.07, 1800.0, 40.0, 1.0);
-                let a = self.metal(0.05, 1200.0, 70.0);
-                let c = self.metal(0.06, 1600.0, 70.0);
-                Synth::mix(&mut b, &a, 0.0, 0.8);
-                Synth::mix(&mut b, &c, 0.13, 1.0);
-                Synth::normalize(&mut b, 0.75);
-                b
+                let mut b = self.burst(0.09, &[(Kind::Band, 1500.0, 1.5)], 0.01, 0.04);
+                Synth::norm(&mut b, 0.5);
+                let back = self.clack(&[900.0, 1700.0, 2900.0], 20.0, 0.07, 1.0);
+                let fwd = self.clack(&[1100.0, 2100.0, 3400.0], 22.0, 0.08, 1.0);
+                Synth::mix(&mut b, &back, 0.06, 0.9);
+                let slide = self.burst(0.08, &[(Kind::Band, 1800.0, 1.5)], 0.01, 0.04);
+                Synth::mix(&mut b, &slide, 0.14, 0.5);
+                Synth::mix(&mut b, &fwd, 0.21, 1.0);
+                Synth::norm(&mut b, 0.8);
+                room(b, &mut self.rng)
             }
             Sfx::ShellIn => {
-                let mut b = self.metal(0.05, 1100.0, 70.0);
-                let push = self.noise_burst(0.04, 1500.0, 60.0, 0.6);
-                Synth::mix(&mut b, &push, 0.01, 1.0);
-                Synth::normalize(&mut b, 0.5);
-                b
+                let mut b = self.clack(&[1500.0, 2700.0], 18.0, 0.05, 1.0);
+                let push = self.burst(0.06, &[(Kind::Band, 1200.0, 1.2)], 0.004, 0.02);
+                Synth::mix(&mut b, &push, 0.01, 0.8);
+                Synth::norm(&mut b, 0.5);
+                room(b, &mut self.rng)
             }
             Sfx::Shell => {
-                // brass bouncing: two or three tinkles
+                // brass bouncing: bright high-Q rings, each bounce softer
                 let mut b = Vec::new();
                 let mut at = 0.0;
                 for k in 0..3 {
-                    let f = self.rng.range(3600.0, 4600.0);
-                    let m = self.metal(0.08, f, 45.0);
-                    Synth::mix(&mut b, &m, at, 0.7 / (1.0 + k as f32));
-                    at += self.rng.range(0.06, 0.11);
+                    let f = self.rng.range(4000.0, 5200.0);
+                    let c = self.clack(&[f, f * 1.83, f * 2.41], 90.0, 0.18, 1.0);
+                    Synth::mix(&mut b, &c, at, 0.7 / (1.0 + k as f32 * 1.2));
+                    at += self.rng.range(0.07, 0.12) / (1.0 + k as f32 * 0.3);
                 }
-                Synth::normalize(&mut b, 0.35);
-                b
+                Synth::norm(&mut b, 0.35);
+                room(b, &mut self.rng)
             }
             Sfx::Raise => {
-                let mut b = self.noise_burst(0.12, 1800.0, 25.0, 0.8);
-                let c = self.metal(0.05, 1900.0, 80.0);
-                Synth::mix(&mut b, &c, 0.08, 0.9);
-                Synth::normalize(&mut b, 0.5);
-                b
+                let mut b = self.burst(0.14, &[(Kind::Band, 2500.0, 0.8)], 0.03, 0.05);
+                Synth::norm(&mut b, 0.4);
+                let c = self.clack(&[1900.0, 3300.0], 25.0, 0.05, 1.0);
+                Synth::mix(&mut b, &c, 0.09, 0.7);
+                Synth::norm(&mut b, 0.5);
+                room(b, &mut self.rng)
             }
             Sfx::Empty => {
-                let mut b = self.metal(0.04, 2400.0, 120.0);
-                Synth::normalize(&mut b, 0.6);
-                b
+                let mut b = self.clack(&[2600.0, 4900.0, 7200.0], 40.0, 0.04, 0.6);
+                Synth::norm(&mut b, 0.6);
+                mono(&b)
             }
-            Sfx::Knife => self.whoosh(0.25, 0.4, 3000.0),
-            Sfx::KnifeHit => {
-                let mut b = self.noise_burst(0.14, 600.0, 26.0, 2.0);
-                let w = self.whoosh(0.12, 0.2, 3500.0);
-                Synth::mix(&mut b, &w, 0.0, 0.5);
-                Synth::normalize(&mut b, 0.8);
-                b
+            Sfx::Knife | Sfx::KnifeHit => {
+                let len = 0.22;
+                let mut b = Self::buf(len);
+                let mut bp = Biquad::default();
+                for i in 0..b.len() {
+                    let t = Self::t(i);
+                    let x = t / len;
+                    if i % 32 == 0 {
+                        bp.set(Kind::Band, 1200.0 + 3500.0 * x, 1.8);
+                    }
+                    let env = (-((x - 0.45) * (x - 0.45)) * 20.0).exp();
+                    b[i] = bp.run(self.noise()) * env;
+                }
+                Synth::norm(&mut b, 0.6);
+                if s == Sfx::KnifeHit {
+                    let thud = self.burst(0.12, &[(Kind::Low, 500.0, 0.8)], 0.001, 0.03);
+                    let mut thud = thud;
+                    Synth::norm(&mut thud, 1.0);
+                    Synth::mix(&mut b, &thud, 0.09, 0.9);
+                    Synth::norm(&mut b, 0.8);
+                }
+                mono(&b)
             }
             Sfx::Flesh => {
-                let mut b = self.noise_burst(0.09, 700.0, 45.0, 2.0);
-                let pop = self.tone(0.06, 260.0, 120.0, 40.0, false);
-                Synth::mix(&mut b, &pop, 0.0, 0.8);
-                Synth::normalize(&mut b, 0.6);
-                b
+                let mut b = self.burst(0.1, &[(Kind::Low, 650.0, 0.8)], 0.0005, 0.022);
+                Synth::norm(&mut b, 1.0);
+                let pop = Synth::drop(0.08, 190.0, 70.0, 0.015, 0.025);
+                Synth::mix(&mut b, &pop, 0.0, 0.7);
+                let crunch = self.burst(0.03, &[(Kind::Band, 2200.0, 1.0)], 0.0002, 0.006);
+                Synth::mix(&mut b, &crunch, 0.002, 0.8);
+                Synth::norm(&mut b, 0.6);
+                mono(&b)
             }
-            Sfx::Whiz => self.whiz(),
-            Sfx::Beep => self.tone(0.12, 1760.0, 1760.0, 12.0, false),
-            Sfx::Jet => self.whoosh(2.6, 0.5, 600.0),
-            Sfx::Click => self.tone(0.05, 900.0, 600.0, 60.0, false),
+            Sfx::Whiz => self.whiz(if variant % 2 == 0 { -0.7 } else { 0.7 }),
+            Sfx::Beep => mono(&Synth::tone(0.12, 1760.0, 14.0, &[0.7, 0.15])),
+            Sfx::Jet => self.jet(),
+            Sfx::Click => mono(&Synth::tone(0.04, 1100.0, 80.0, &[0.6, 0.2])),
             Sfx::Hurt => {
-                let mut b = self.tone(0.18, 180.0, 90.0, 18.0, false);
-                let thud = self.noise_burst(0.1, 350.0, 30.0, 1.0);
-                Synth::mix(&mut b, &thud, 0.0, 0.7);
-                Synth::normalize(&mut b, 0.7);
-                b
+                let b = self.hurt();
+                mono(&b)
             }
             Sfx::Heli => self.heli(),
-            Sfx::Streak => self.chord(
+            Sfx::Streak => mono(&Synth::chord(
                 &[(0.0, 523.0), (0.09, 659.0), (0.18, 784.0), (0.27, 1046.0)],
-                0.25,
-                8.0,
-                true,
-            ),
-            Sfx::Bomb => self.chord(&[(0.0, 330.0), (0.25, 247.0)], 0.3, 6.0, true),
+                0.3,
+                7.0,
+            )),
+            Sfx::Bomb => mono(&Synth::chord(&[(0.0, 330.0), (0.25, 247.0)], 0.35, 5.0)),
         }
     }
 }
@@ -550,53 +1104,122 @@ impl Synth {
 /// Number of random variants generated per sound.
 fn variants(s: Sfx) -> usize {
     match s {
-        Sfx::Rifle
-        | Sfx::Smg
-        | Sfx::Lmg
-        | Sfx::Pistol
-        | Sfx::Step
-        | Sfx::Whiz
-        | Sfx::Shell
-        | Sfx::Flesh => 3,
-        Sfx::Shotgun | Sfx::Sniper | Sfx::Far | Sfx::Explosion | Sfx::Hit => 2,
+        Sfx::Gun(_) | Sfx::Far | Sfx::Explosion | Sfx::Hit | Sfx::Hurt => 2,
+        Sfx::Step | Sfx::Whiz | Sfx::Shell | Sfx::Flesh => 4,
         _ => 1,
     }
 }
 
-const ALL: &[Sfx] = &[
-    Sfx::Rifle,
-    Sfx::Smg,
-    Sfx::Lmg,
-    Sfx::Shotgun,
-    Sfx::Sniper,
-    Sfx::Pistol,
-    Sfx::Far,
-    Sfx::Explosion,
-    Sfx::Hit,
-    Sfx::HitHead,
-    Sfx::Kill,
-    Sfx::Step,
-    Sfx::Land,
-    Sfx::MagOut,
-    Sfx::MagIn,
-    Sfx::Bolt,
-    Sfx::Pump,
-    Sfx::ShellIn,
-    Sfx::Shell,
-    Sfx::Raise,
-    Sfx::Empty,
-    Sfx::Knife,
-    Sfx::KnifeHit,
-    Sfx::Flesh,
-    Sfx::Whiz,
-    Sfx::Beep,
-    Sfx::Jet,
-    Sfx::Click,
-    Sfx::Streak,
-    Sfx::Hurt,
-    Sfx::Bomb,
-    Sfx::Heli,
-];
+fn all() -> Vec<Sfx> {
+    let mut v: Vec<Sfx> = WeaponId::all().map(Sfx::Gun).collect();
+    v.extend([
+        Sfx::HeliGun,
+        Sfx::Far,
+        Sfx::Explosion,
+        Sfx::Hit,
+        Sfx::HitHead,
+        Sfx::Kill,
+        Sfx::Step,
+        Sfx::Land,
+        Sfx::MagOut,
+        Sfx::MagIn,
+        Sfx::Bolt,
+        Sfx::Pump,
+        Sfx::ShellIn,
+        Sfx::Shell,
+        Sfx::Raise,
+        Sfx::Empty,
+        Sfx::Knife,
+        Sfx::KnifeHit,
+        Sfx::Flesh,
+        Sfx::Whiz,
+        Sfx::Beep,
+        Sfx::Jet,
+        Sfx::Click,
+        Sfx::Streak,
+        Sfx::Hurt,
+        Sfx::Bomb,
+        Sfx::Heli,
+    ]);
+    v
+}
+
+/// Decodes a recording (WAV or Ogg Vorbis, mono or stereo) into 44.1 kHz stereo, or says
+/// why it cannot. Files are checked here because the audio backend aborts on bad data.
+fn decode(data: &[u8]) -> Result<Vec<[f32; 2]>, String> {
+    let mut r = audrey::Reader::new(std::io::Cursor::new(data)).map_err(|e| format!("{e:?}"))?;
+    let d = r.description();
+    let ch = d.channel_count() as usize;
+    if !(1..=2).contains(&ch) {
+        return Err(format!("{ch} channels (need mono or stereo)"));
+    }
+    let rate = d.sample_rate() as f32;
+    if !(8000.0..=192000.0).contains(&rate) {
+        return Err(format!("sample rate {rate}"));
+    }
+    let mut raw = Vec::new();
+    for v in r.samples::<f32>() {
+        raw.push(v.map_err(|e| format!("{e:?}"))?);
+        if raw.len() > 30 * 192000 * 2 {
+            return Err("longer than 30 s".into());
+        }
+    }
+    let frames: Vec<[f32; 2]> = raw
+        .chunks_exact(ch)
+        .map(|f| if ch == 1 { [f[0], f[0]] } else { [f[0], f[1]] })
+        .collect();
+    if frames.is_empty() {
+        return Err("no audio".into());
+    }
+    if rate == SR {
+        return Ok(frames);
+    }
+    // linear resampling to 44.1 kHz
+    let n = (frames.len() as f32 * SR / rate) as usize;
+    Ok((0..n)
+        .map(|i| {
+            let x = i as f32 * rate / SR;
+            let a = frames[(x as usize).min(frames.len() - 1)];
+            let b = frames[(x as usize + 1).min(frames.len() - 1)];
+            let k = x.fract();
+            [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]
+        })
+        .collect())
+}
+
+/// Recorded replacements for a sound: `<name>.wav|ogg`, `<name>_2.wav`, ... found in
+/// `assets/sounds/` next to the game or in the current directory.
+fn recordings(s: Sfx) -> Vec<(String, Vec<u8>)> {
+    let mut dirs = vec![std::path::PathBuf::from("assets/sounds")];
+    if let Some(d) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+    {
+        dirs.insert(0, d.join("assets/sounds"));
+    }
+    let name = s.file_name();
+    for dir in dirs {
+        let mut found = Vec::new();
+        for k in 1..=8 {
+            let stem = if k == 1 {
+                name.clone()
+            } else {
+                format!("{name}_{k}")
+            };
+            for ext in ["ogg", "wav"] {
+                let path = dir.join(format!("{stem}.{ext}"));
+                if let Ok(data) = std::fs::read(&path) {
+                    found.push((path.display().to_string(), data));
+                    break;
+                }
+            }
+        }
+        if !found.is_empty() {
+            return found;
+        }
+    }
+    Vec::new()
+}
 
 pub struct Audio {
     sounds: HashMap<Sfx, Vec<Sound>>,
@@ -612,15 +1235,23 @@ impl Audio {
         let mut sounds: HashMap<Sfx, Vec<Sound>> = HashMap::new();
         if enabled {
             let mut s = Synth { rng: Rng::new(7) };
-            for &k in ALL {
-                if sounds.contains_key(&k) {
-                    continue;
-                }
+            for k in all() {
                 let mut v = Vec::new();
-                for _ in 0..variants(k) {
-                    let samples = s.make(k);
-                    if let Ok(snd) = load_sound_from_bytes(&wav(&samples)).await {
-                        v.push(snd);
+                for (file, data) in recordings(k) {
+                    match decode(&data) {
+                        Ok(pcm) => match load_sound_from_bytes(&wav(&pcm)).await {
+                            Ok(snd) => v.push(snd),
+                            Err(e) => eprintln!("sound {file}: {e:?}"),
+                        },
+                        Err(e) => eprintln!("sound {file}: skipped, {e}"),
+                    }
+                }
+                if v.is_empty() {
+                    for i in 0..variants(k) {
+                        let samples = s.make(k, i);
+                        if let Ok(snd) = load_sound_from_bytes(&wav(&samples)).await {
+                            v.push(snd);
+                        }
                     }
                 }
                 sounds.insert(k, v);
@@ -696,17 +1327,18 @@ impl Audio {
         self.play(s, vol * (0.08 + 0.92 * k * k));
     }
 
-    /// Gunfire with distance: close shots are sharp, far ones turn into a muffled boom.
+    /// Gunfire with distance: close shots are sharp, far ones turn into a muffled boom
+    /// rolling through the streets.
     pub fn play_shot(&self, s: Sfx, pos: Vec3, listener: Vec3, vol: f32) {
         let d = pos.distance(listener);
         let near = (1.0 - d / 60.0).clamp(0.0, 1.0);
         if near > 0.0 {
             self.play(s, vol * near * near);
         }
-        let loud = matches!(s, Sfx::Sniper | Sfx::Lmg | Sfx::Shotgun);
-        if d > 18.0 {
-            let far = ((d - 18.0) / 20.0).clamp(0.0, 1.0) * (1.0 - (d - 140.0).max(0.0) / 120.0);
-            self.play(Sfx::Far, vol * far.max(0.0) * if loud { 0.6 } else { 0.4 });
+        if d > 15.0 {
+            let far = ((d - 15.0) / 20.0).clamp(0.0, 1.0) * (1.0 - (d - 140.0).max(0.0) / 120.0);
+            let loud = if s.loud() { 0.7 } else { 0.45 };
+            self.play(Sfx::Far, vol * far.max(0.0) * loud);
         }
     }
 
@@ -751,18 +1383,87 @@ mod tests {
         let t0 = std::time::Instant::now();
         let mut s = Synth { rng: Rng::new(7) };
         let mut total = 0;
-        for &k in ALL {
-            for _ in 0..variants(k) {
-                let b = s.make(k);
+        for k in all() {
+            for i in 0..variants(k) {
+                let b = s.make(k, i);
                 assert!(!b.is_empty(), "{k:?} is empty");
-                assert!(b.iter().all(|v| v.is_finite()), "{k:?} has NaN");
-                let peak = b.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+                assert!(
+                    b.iter().all(|v| v[0].is_finite() && v[1].is_finite()),
+                    "{k:?} has NaN"
+                );
+                let peak = b
+                    .iter()
+                    .fold(0.0f32, |m, v| m.max(v[0].abs()).max(v[1].abs()));
                 assert!(peak > 0.05 && peak <= 1.0, "{k:?} peak {peak}");
+                // no click at the end
+                let last = b.last().unwrap();
+                assert!(
+                    k == Sfx::Heli || (last[0].abs() < 0.05 && last[1].abs() < 0.05),
+                    "{k:?} ends abruptly"
+                );
                 total += b.len();
             }
         }
-        let secs = total as f32 / RATE as f32;
-        println!("{secs:.1} s of audio in {:?}", t0.elapsed());
-        assert!(t0.elapsed().as_secs_f32() < 3.0);
+        let secs = total as f32 / SR;
+        println!("{secs:.1} s of stereo audio in {:?}", t0.elapsed());
+        let limit = if cfg!(debug_assertions) { 30.0 } else { 3.0 };
+        assert!(t0.elapsed().as_secs_f32() < limit);
+    }
+
+    #[test]
+    fn heli_loop_has_no_seam() {
+        let mut s = Synth { rng: Rng::new(3) };
+        let b = s.make(Sfx::Heli, 0);
+        let jump = (b[0][0] - b[b.len() - 1][0]).abs();
+        let typical = b
+            .windows(2)
+            .map(|w| (w[1][0] - w[0][0]).abs())
+            .fold(0.0, f32::max);
+        assert!(jump <= typical * 1.5, "seam {jump} vs {typical}");
+    }
+
+    #[test]
+    fn recordings_are_checked() {
+        let mut s = Synth { rng: Rng::new(1) };
+        let b = s.make(Sfx::Click, 0);
+        let back = decode(&wav(&b)).unwrap();
+        assert_eq!(back.len(), b.len());
+        assert!(decode(b"not audio").is_err());
+        let mut broken = wav(&b);
+        broken.truncate(30);
+        assert!(decode(&broken).is_err());
+    }
+
+    #[test]
+    fn file_names() {
+        assert_eq!(Sfx::Gun(WeaponId::Ak47).file_name(), "gun_ak47");
+        assert_eq!(Sfx::MagIn.file_name(), "mag_in");
+        assert_eq!(Sfx::Explosion.file_name(), "explosion");
+    }
+}
+
+#[cfg(test)]
+mod dump {
+    use super::*;
+
+    /// `TW_SOUND_DUMP=<dir> cargo test dump_sounds` writes every sound as a WAV to listen to.
+    #[test]
+    fn dump_sounds() {
+        let Ok(dir) = std::env::var("TW_SOUND_DUMP") else {
+            return;
+        };
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Synth { rng: Rng::new(7) };
+        for k in all() {
+            for i in 0..variants(k) {
+                let b = s.make(k, i);
+                let name = if i == 0 {
+                    k.file_name()
+                } else {
+                    format!("{}_{}", k.file_name(), i + 1)
+                };
+                std::fs::write(format!("{dir}/{name}.wav"), wav(&b)).unwrap();
+            }
+        }
     }
 }

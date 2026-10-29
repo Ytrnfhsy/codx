@@ -304,7 +304,7 @@ impl Killcam {
                 self.fx.muzzle(from);
                 if let Some(a) = audio {
                     let sfx = if s.id == 255 {
-                        Sfx::Lmg
+                        Sfx::HeliGun
                     } else {
                         Sfx::for_weapon(s.weapon)
                     };

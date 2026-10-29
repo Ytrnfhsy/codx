@@ -16,6 +16,7 @@ audio = []
 toon_shared = { path = "../shared" }
 toon_server = { path = "../server" }
 macroquad = { version = "0.4.16", default-features = false, features = ["audio"] }
+audrey = { version = "0.3", default-features = false, features = ["wav", "ogg_vorbis"] }
 serde.workspace = true
 serde_json.workspace = true
 bincode.workspace = true

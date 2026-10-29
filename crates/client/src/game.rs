@@ -1007,7 +1007,7 @@ impl GameClient {
             }
             if let Some(a) = audio {
                 let sfx = if shot.id == 255 {
-                    Sfx::Lmg
+                    Sfx::HeliGun
                 } else {
                     Sfx::for_weapon(shot.weapon)
                 };
