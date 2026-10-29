@@ -25,6 +25,8 @@ pub struct Actor {
     pub flags: u8,
     pub phase: f32,
     pub walk: f32,
+    /// 0..1 how far into the sprint pose (smoothed).
+    pub sprint: f32,
     /// Melee swing progress 0..1.
     pub melee: f32,
     /// Seconds into a reload.
@@ -333,7 +335,7 @@ pub fn render_world(
             time: now as f32,
             phase: a.phase,
             walk: a.walk,
-            sprint: a.flags & flags::SPRINT != 0,
+            sprint: a.sprint,
             has_bomb,
             melee: a.melee,
             reload: a.reload,
@@ -818,7 +820,7 @@ pub fn draw_model_gallery(mats: &Materials) {
             // one walks, one sprints
             phase: k as f32 * 0.9,
             walk: if (2..=3).contains(&k) { 1.0 } else { 0.0 },
-            sprint: k == 3,
+            sprint: if k == 3 { 1.0 } else { 0.0 },
             has_bomb: k == 3,
             melee: 0.0,
             reload: None,

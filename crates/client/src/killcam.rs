@@ -114,6 +114,7 @@ impl Recorder {
 struct Track {
     phase: f32,
     walk: f32,
+    sprint: f32,
     last: Option<Vec3>,
     alive: bool,
     melee_t: f64,
@@ -442,6 +443,7 @@ impl Killcam {
             let tr = self.tracks.entry(b.id).or_insert(Track {
                 phase: 0.0,
                 walk: 0.0,
+                sprint: 0.0,
                 last: None,
                 alive,
                 melee_t: -10.0,
@@ -455,7 +457,13 @@ impl Killcam {
             if let Some(m) = moved.filter(|m| *m < 4.0) {
                 if dt > 0.0 {
                     let walk_k = ((m / dt) / 5.2).min(1.4);
-                    tr.walk += (walk_k - tr.walk) * (dt * 10.0).min(1.0);
+                    tr.walk += (walk_k - tr.walk) * (dt * 6.0).min(1.0);
+                    let sprint = if b.flags & flags::SPRINT != 0 {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    tr.sprint += (sprint - tr.sprint) * (dt * 7.0).min(1.0);
                 }
                 tr.phase += m * 2.2;
             }
@@ -514,6 +522,7 @@ impl Killcam {
                 flags: b.flags,
                 phase: tr.phase,
                 walk: tr.walk,
+                sprint: tr.sprint,
                 melee: {
                     let m = (self.pt - tr.melee_t) as f32;
                     if m < 0.4 {

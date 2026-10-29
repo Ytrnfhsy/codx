@@ -12,9 +12,14 @@ use toon_shared::Team;
 
 /// Hips go down this much when crouching (metres).
 pub const CROUCH_DROP: f32 = 0.2;
-/// Walk/run clip cycles per walk-phase cycle (the phase turns 2.2 rad per metre).
-const WALK_CYCLES: f32 = 2.3;
-const RUN_CYCLES: f32 = 1.9;
+/// Gait cycles per walk-phase cycle (the phase turns 2.2 rad per metre). The chibi legs
+/// are short, so matching their stride exactly would play the clips several times too
+/// fast; the feet slide a little instead and the steps stay calm.
+const GAIT_CYCLES: f32 = 0.75;
+/// How much of the clips' up-and-down body bob is kept.
+const BOB: f32 = 0.5;
+/// How much of the stride's shoulder sway the gun ignores (the arms absorb it).
+const STEADY: f32 = 0.75;
 /// Silhouette width up close (metres).
 pub const OUTLINE: f32 = 0.022;
 
@@ -48,7 +53,8 @@ pub struct SoldierPose {
     pub phase: f32,
     /// 0..1 amount of walking.
     pub walk: f32,
-    pub sprint: bool,
+    /// 0..1 how far into the sprint pose (gun lowered across the body).
+    pub sprint: f32,
     pub has_bomb: bool,
     /// Third-person melee swing 0..1.
     pub melee: f32,
@@ -123,20 +129,33 @@ pub fn add_soldier(m: &mut ToonMesh, p: &SoldierPose) -> Vec3 {
 
     // walk/run cycle over the idle breathing
     let mut local = r.sample(clip::IDLE, p.time + p.look as f32 * 0.37, true);
+    let idle = local.clone();
     let walk = p.walk.clamp(0.0, 1.0);
+    let idle_body = local[ids.body].t;
     if walk > 0.01 && p.stance != Stance::Prone {
-        let (c, k) = if p.sprint {
-            (clip::RUN, RUN_CYCLES)
+        // one gait clock for both clips, so walking blends smoothly into running
+        let gait = (p.phase / TAU * GAIT_CYCLES).fract();
+        let walk_pose = r.sample(clip::WALK, gait * r.clips[clip::WALK].dur, true);
+        let run_pose = r.sample(clip::RUN, gait * r.clips[clip::RUN].dur, true);
+        let run = if p.stance == Stance::Crouch {
+            0.0
         } else {
-            (clip::WALK, WALK_CYCLES)
+            let k = ((p.walk - 0.5) / 0.4).clamp(0.0, 1.0);
+            k * k * (3.0 - 2.0 * k)
         };
-        let t = p.phase / TAU * k * r.clips[c].dur;
-        let mv = r.sample(c, t, true);
-        for (a, b) in local.iter_mut().zip(&mv) {
-            a.t = a.t.lerp(b.t, walk);
-            a.r = a.r.slerp(b.r, walk);
+        for ((a, w), rn) in local.iter_mut().zip(&walk_pose).zip(&run_pose) {
+            let t = w.t.lerp(rn.t, run);
+            let q = w.r.slerp(rn.r, run);
+            a.t = a.t.lerp(t, walk);
+            a.r = a.r.slerp(q, walk);
         }
     }
+    // soften the bob: a jumpy body makes the whole soldier look jittery
+    let bob = local[ids.body].t.y - idle_body.y;
+    local[ids.body].t.y = idle_body.y + bob * BOB;
+    // how far the stride moves the shoulders away from standing still
+    let mid = |g: &[Xf]| (g[ids.upper_arm[0]].t + g[ids.upper_arm[1]].t) * 0.5;
+    let sway = mid(&r.globals(&local)) - mid(&r.globals(&idle));
 
     let mut root = trs(p.pos, p.yaw, 0.0, 0.0);
     let mut lean = 0.0;
@@ -174,7 +193,7 @@ pub fn add_soldier(m: &mut ToonMesh, p: &SoldierPose) -> Vec3 {
     }
 
     // aim: the spine and head follow the pitch
-    let aim_pitch = if p.sprint { -0.7 } else { p.pitch };
+    let aim_pitch = p.pitch + (-0.7 - p.pitch) * p.sprint;
     let (reload_k, mag_drop) = match p.reload {
         Some(t) => {
             let k = (t / 0.25).min(1.0);
@@ -213,11 +232,13 @@ pub fn add_soldier(m: &mut ToonMesh, p: &SoldierPose) -> Vec3 {
     );
 
     // gun at the shoulders, pitched with the aim
-    let shoulders = world.transform_point3((g[ids.upper_arm[0]].t + g[ids.upper_arm[1]].t) * 0.5);
+    // the gun stays steady while the body bobs under it; the arms take up the difference
+    let shoulders_model = mid(&g) - sway * STEADY;
+    let shoulders = world.transform_point3(shoulders_model);
     let melee_push = (p.melee * PI).sin() * 0.35;
     let gun_base = trs(shoulders, p.yaw, aim_pitch, 0.0)
         * Mat4::from_translation(vec3(0.12, -0.13, -0.2 - melee_push))
-        * Mat4::from_rotation_y(if p.sprint { 0.7 } else { 0.0 })
+        * Mat4::from_rotation_y(0.7 * p.sprint)
         * Mat4::from_rotation_z(0.5 * reload_k)
         * Mat4::from_scale(Vec3::splat(1.2));
     let mag_off = vec3(0.0, -mag_drop, 0.0);
@@ -362,7 +383,7 @@ mod tests {
                     time: 1.0,
                     phase: 0.5 + k as f32,
                     walk: 1.0,
-                    sprint: false,
+                    sprint: 0.0,
                     has_bomb: false,
                     melee: 0.0,
                     reload: None,
@@ -405,7 +426,7 @@ mod fit {
                 time: 0.0,
                 phase: 0.0,
                 walk: 0.0,
-                sprint: false,
+                sprint: 0.0,
                 has_bomb: false,
                 melee: 0.0,
                 reload: None,
@@ -424,6 +445,66 @@ mod fit {
                 (top - head).abs() < 0.08,
                 "{stance:?}: model {top}, hitbox {head}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod smooth {
+    use super::*;
+
+    /// At walking and sprinting speed the clips play at most about twice as fast as
+    /// authored, and the gun moves smoothly from frame to frame.
+    #[test]
+    fn running_is_calm() {
+        let r = rig();
+        for (speed, sprint) in [(5.2f32, 0.0f32), (7.6, 1.0)] {
+            let phase_rate = speed * 2.2;
+            let loops = phase_rate / TAU * GAIT_CYCLES;
+            let authored = 1.0 / r.clips[clip::RUN].dur;
+            assert!(
+                loops / authored < 2.0,
+                "speed {speed}: {:.2}x",
+                loops / authored
+            );
+
+            let dt = 1.0 / 60.0;
+            let mut prev: Vec<Vec3> = Vec::new();
+            let mut worst = 0.0f32;
+            for f in 0..120 {
+                let t = f as f32 * dt;
+                let mut m = ToonMesh::new();
+                let pose = SoldierPose {
+                    pos: Vec3::ZERO,
+                    yaw: 0.0,
+                    pitch: 0.0,
+                    stance: Stance::Stand,
+                    team: Team::Allies,
+                    weapon: WeaponId::M4,
+                    look: 0,
+                    time: t,
+                    phase: t * phase_rate,
+                    walk: speed / 5.2,
+                    sprint,
+                    has_bomb: false,
+                    melee: 0.0,
+                    reload: None,
+                    outline: OUTLINE,
+                };
+                let muzzle = add_soldier(&mut m, &pose);
+                prev.push(muzzle);
+                if prev.len() >= 3 {
+                    let n = prev.len();
+                    // change of velocity between frames (jerkiness), metres per frame
+                    let acc = (prev[n - 1] - prev[n - 2]) - (prev[n - 2] - prev[n - 3]);
+                    worst = worst.max(acc.length());
+                }
+            }
+            println!(
+                "speed {speed}: {:.2}x authored, gun jerk {worst:.4} m",
+                loops / authored
+            );
+            assert!(worst < 0.01, "gun jerk {worst}");
         }
     }
 }

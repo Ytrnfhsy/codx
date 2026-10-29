@@ -35,6 +35,8 @@ pub struct Remote {
     pub alive: bool,
     pub phase: f32,
     pub walk: f32,
+    /// 0..1 how far into the sprint pose (smoothed).
+    pub sprint: f32,
     pub death_time: Option<f64>,
     pub muzzle: Vec3,
     pub melee_t: f64,
@@ -910,6 +912,7 @@ impl GameClient {
                 alive: p.alive,
                 phase: 0.0,
                 walk: 0.0,
+                sprint: 0.0,
                 death_time: None,
                 muzzle: Vec3::from_array(p.pos),
                 melee_t: -10.0,
@@ -1165,6 +1168,7 @@ impl GameClient {
                 flags: r.flags,
                 phase: r.phase,
                 walk: r.walk,
+                sprint: r.sprint,
                 melee: if now - r.melee_t < 0.4 {
                     ((now - r.melee_t) as f32 / 0.4).clamp(0.0, 1.0)
                 } else {
@@ -1957,7 +1961,13 @@ impl GameClient {
             }
             if !teleport && dt > 0.0 {
                 let speed = moved / dt;
-                r.walk += ((speed / walk_speed).min(1.4) - r.walk) * (dt * 10.0).min(1.0);
+                r.walk += ((speed / walk_speed).min(1.4) - r.walk) * (dt * 6.0).min(1.0);
+                let sprint = if r.flags & flags::SPRINT != 0 {
+                    1.0
+                } else {
+                    0.0
+                };
+                r.sprint += (sprint - r.sprint) * (dt * 7.0).min(1.0);
                 r.phase += moved * 2.2;
                 if r.alive
                     && !r.silent
