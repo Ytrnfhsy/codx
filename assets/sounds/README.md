@@ -8,6 +8,9 @@ variants that are picked at random go into `<name>_2.ogg`, `<name>_3.ogg`, … (
 
 Only use recordings you are allowed to ship with the game, for example CC0 packs.
 
+Built in: `gun_ak47.wav` and `gun_ak47_2.wav` (a recorded AK-47 shot and a slightly deeper copy)
+are compiled into the game; files with the same names placed next to the game replace them.
+
 | File | Sound |
 |---|---|
 | `gun_m4` | M4A1 shot (close) |

@@ -335,3 +335,68 @@ fn smoke_grenade_makes_a_cloud_that_fades() {
     run(&mut g, SMOKE_TIME);
     assert!(g.smokes.is_empty(), "the cloud is gone");
 }
+
+#[test]
+fn respawns_are_spread_out_and_away_from_enemies() {
+    use toon_shared::weapons::Cause;
+    for map in [MapId::Wreck, MapId::Site, MapId::Depot] {
+        let (mut g, me) = setup(map, Mode::Tdm);
+        toon_server::admin::exec(&mut g, "bots 0");
+        let other = g
+            .connect(
+                "127.0.0.1:5001".parse().unwrap(),
+                "Другий",
+                "",
+                toon_shared::consts::PROTOCOL_VERSION,
+            )
+            .unwrap();
+        g.handle(other, C2S::JoinTeam(Some(Team::Axis)));
+        g.handle(other, C2S::SetLoadout(DEFAULT_CLASSES[0].1));
+        for _ in 0..600 {
+            run(&mut g, 0.5);
+            if g.state == MatchState::Playing {
+                break;
+            }
+        }
+        assert_eq!(g.state, MatchState::Playing);
+        // the enemy stands in the middle of the map
+        let c = g.map.center();
+        let enemy = glam::vec3(c.x, 0.0, c.y);
+        let mut spots: Vec<glam::Vec3> = Vec::new();
+        for _ in 0..8 {
+            g.pm(other).unwrap().body.pos = enemy;
+            g.kill(me, Some(other), Cause::World, false);
+            for _ in 0..200 {
+                run(&mut g, 0.1);
+                g.pm(other).unwrap().body.pos = enemy;
+                if g.p(me).unwrap().alive {
+                    break;
+                }
+            }
+            let p = g.p(me).unwrap();
+            assert!(p.alive, "{map:?}: respawned");
+            let at = p.body.pos;
+            assert!(
+                at.distance(enemy) > 12.0,
+                "{map:?}: spawned next to the enemy at {at}"
+            );
+            assert!(at.y < 0.7, "{map:?}: spawned up high at {at}");
+            spots.push(at);
+        }
+        let mut distinct: Vec<glam::Vec3> = Vec::new();
+        for s in &spots {
+            if distinct.iter().all(|d| d.distance(*s) > 3.0) {
+                distinct.push(*s);
+            }
+        }
+        println!(
+            "{map:?}: {} distinct spawns of 8: {spots:?}",
+            distinct.len()
+        );
+        assert!(
+            distinct.len() >= 4,
+            "{map:?}: spawns should vary, got {}",
+            distinct.len()
+        );
+    }
+}

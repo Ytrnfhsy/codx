@@ -265,6 +265,7 @@ impl Game {
             .map(|e| e.0)
             .collect();
         v.attackers.clear();
+        self.recent_deaths.push((vpos, time));
         self.drop_bomb_if_carrier(victim);
         if self.state != MatchState::PostMatch {
             self.drop_weapon(dropped, vpos);

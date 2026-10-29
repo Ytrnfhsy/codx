@@ -1238,8 +1238,25 @@ fn recordings(s: Sfx) -> Vec<(String, Vec<u8>)> {
             return found;
         }
     }
-    Vec::new()
+    BUNDLED
+        .iter()
+        .filter(|(n, _)| *n == name)
+        .map(|(n, d)| (format!("{n} (built in)"), d.to_vec()))
+        .collect()
 }
+
+/// Recordings shipped inside the game (used unless a file in `assets/sounds/` replaces
+/// them).
+const BUNDLED: &[(&str, &[u8])] = &[
+    (
+        "gun_ak47",
+        include_bytes!("../../../assets/sounds/gun_ak47.wav"),
+    ),
+    (
+        "gun_ak47",
+        include_bytes!("../../../assets/sounds/gun_ak47_2.wav"),
+    ),
+];
 
 /// Synthesizes sounds in parallel; each job gets its own seeded generator, so the result
 /// does not depend on the number of threads.
@@ -1497,6 +1514,15 @@ mod tests {
         let out = synthesize(&jobs);
         println!("parallel synthesis: {:?}", t0.elapsed());
         assert_eq!(out.len(), jobs.len());
+    }
+
+    #[test]
+    fn bundled_recordings_decode() {
+        for (name, data) in BUNDLED {
+            let pcm = decode(data).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(pcm.len() > 10_000, "{name}");
+        }
+        assert_eq!(recordings(Sfx::Gun(WeaponId::Ak47)).len(), 2);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use glam::{vec3, Vec3};
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use toon_shared::consts::*;
-use toon_shared::map::{Map, MapId};
+use toon_shared::map::{Map, MapId, Spawn};
 use toon_shared::physics::{body_box, Body, Stance, World};
 use toon_shared::protocol::*;
 use toon_shared::rng::Rng;
@@ -275,6 +275,9 @@ pub struct Game {
     pub tick: u32,
     pub rng: Rng,
     pub grenades: Vec<Grenade>,
+    /// Where and when players died or spawned lately (spawns avoid both).
+    pub recent_deaths: Vec<(Vec3, f64)>,
+    pub recent_spawns: Vec<(Vec3, f64)>,
     /// Smoke clouds: (entity id, centre, time it popped).
     pub smokes: Vec<(u16, Vec3, f64)>,
     pub helis: Vec<Heli>,
@@ -346,6 +349,8 @@ impl Game {
             tick: 0,
             rng: Rng::from_time(),
             grenades: Vec::new(),
+            recent_deaths: Vec::new(),
+            recent_spawns: Vec::new(),
             smokes: Vec::new(),
             helis: Vec::new(),
             pickups: Vec::new(),
@@ -708,18 +713,47 @@ impl Game {
         }
     }
 
-    /// Picks a spawn point: far from enemies, out of their sight, near teammates.
+    /// Picks a spawn point. Rounds and matches start at the team bases; during play anyone
+    /// may appear anywhere on the ground floor: away from enemies and out of their sight,
+    /// not where someone just died, and (in team deathmatch) not far from teammates.
     fn pick_spawn(&mut self, id: u8, side_only: bool) -> (Vec3, f32) {
         let team = self.p(id).map(|p| p.team).unwrap_or(Team::Allies);
-        let side = side_only || self.mode == Mode::Sab || self.state != MatchState::Playing;
-        let cands: Vec<_> = if side && team.is_playing() {
+        let time = self.time;
+        self.recent_deaths.retain(|d| time - d.1 < 12.0);
+        self.recent_spawns.retain(|d| time - d.1 < 4.0);
+        let base = side_only || self.state == MatchState::PreRound || !team.is_playing();
+        let mut cands: Vec<Spawn> = if base && team.is_playing() {
             self.map.spawns[team.index()].clone()
         } else {
             self.map.all_spawns().copied().collect()
         };
+        if !base {
+            let centre = self.map.center();
+            let centre = vec3(centre.x, 0.0, centre.y);
+            for _ in 0..48 {
+                let p = self.nav.random_point(&mut self.rng);
+                // ground floor only (no spawning on roofs or balconies), with room to stand
+                if p.y > 0.6
+                    || !toon_shared::physics::fits(
+                        &self.world,
+                        p + vec3(0.0, 0.05, 0.0),
+                        Stance::Stand,
+                    )
+                {
+                    continue;
+                }
+                let to = centre - p;
+                let yaw = if to.length() > 1.0 {
+                    toon_shared::yaw_of(to)
+                } else {
+                    self.rng.range(-3.1, 3.1)
+                };
+                cands.push(Spawn { pos: p, yaw });
+            }
+        }
         let mut best = (f32::NEG_INFINITY, cands[0]);
         for s in &cands {
-            let mut score = self.rng.range(0.0, 3.0);
+            let mut score = self.rng.range(0.0, 6.0);
             let mut min_enemy = 60.0f32;
             let mut min_friend = 60.0f32;
             for p in self.players.iter().flatten() {
@@ -734,23 +768,52 @@ impl Game {
                     min_friend = min_friend.min(d);
                 } else {
                     min_enemy = min_enemy.min(d);
-                    if d < 45.0
+                    if d < 12.0 {
+                        score -= 100.0;
+                    }
+                    if d < 55.0
                         && self
                             .world
                             .line_of_sight(p.eye(), s.pos + vec3(0.0, 1.5, 0.0))
                     {
-                        score -= 40.0;
+                        score -= 60.0;
                     }
                 }
             }
-            score += min_enemy.min(40.0);
-            if !side {
-                score -= min_friend.min(40.0) * 0.25;
+            // beyond ~28 m every spot is equally safe: let chance and teammates decide
+            score += min_enemy.min(28.0);
+            for (dp, _) in &self.recent_deaths {
+                if dp.distance(s.pos) < 10.0 {
+                    score -= 25.0;
+                }
+            }
+            for (sp, _) in &self.recent_spawns {
+                if sp.distance(s.pos) < 3.0 {
+                    score -= 30.0;
+                }
+            }
+            if !base {
+                match self.mode {
+                    // near the team, but not on top of it
+                    Mode::Tdm if min_friend < 60.0 => {
+                        score -= (min_friend - 15.0).max(0.0) * 0.3;
+                    }
+                    // Sabotage: stay on your own half of the map
+                    Mode::Sab if team.is_playing() => {
+                        let home = self.map.spawns[team.index()][0].pos;
+                        let away = self.map.spawns[team.enemy().index()][0].pos;
+                        if s.pos.distance(home) > s.pos.distance(away) {
+                            score -= 40.0;
+                        }
+                    }
+                    _ => {}
+                }
             }
             if score > best.0 {
                 best = (score, *s);
             }
         }
+        self.recent_spawns.push((best.1.pos, time));
         (best.1.pos + vec3(0.0, 0.02, 0.0), best.1.yaw)
     }
 

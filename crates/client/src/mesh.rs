@@ -11,6 +11,9 @@ use macroquad::prelude::*;
 
 /// Vertices per submitted chunk (macroquad batches up to its draw-call capacity).
 const CHUNK_VERTS: usize = 8000;
+/// Indices per chunk: below the draw call's index capacity (36000, set in `main.rs`), or
+/// macroquad silently drops the triangles that do not fit.
+const CHUNK_INDICES: usize = 30000;
 
 pub const LIGHT_DIR: Vec3 = Vec3::new(0.42, 0.82, 0.38);
 
@@ -139,11 +142,17 @@ impl MeshBuilder {
         self.chunks.iter().all(|c| c.verts.is_empty())
     }
 
+    /// A chunk with room for `n` more vertices (and their indices: generated shapes use at
+    /// most 3 per vertex).
     fn chunk_for(&mut self, n: usize) -> &mut Chunk {
+        self.chunk_with(n, n * 3)
+    }
+
+    fn chunk_with(&mut self, n: usize, ni: usize) -> &mut Chunk {
         let need_new = match self
             .chunks
             .iter()
-            .position(|c| c.verts.len() + n <= CHUNK_VERTS)
+            .position(|c| c.verts.len() + n <= CHUNK_VERTS && c.idx.len() + ni <= CHUNK_INDICES)
         {
             Some(i) => return &mut self.chunks[i],
             None => true,
@@ -360,8 +369,8 @@ impl MeshBuilder {
     /// Adds ready-made vertices and triangles (skinned characters), split across chunks
     /// when they do not fit into one.
     pub fn add_indexed(&mut self, verts: &[Vertex], idx: &[u16]) {
-        if verts.len() <= CHUNK_VERTS {
-            let c = self.chunk_for(verts.len());
+        if verts.len() <= CHUNK_VERTS && idx.len() <= CHUNK_INDICES {
+            let c = self.chunk_with(verts.len(), idx.len());
             let base = c.verts.len() as u16;
             c.verts.extend_from_slice(verts);
             c.idx.extend(idx.iter().map(|i| base + i));
@@ -370,7 +379,8 @@ impl MeshBuilder {
         let mut remap = vec![u16::MAX; verts.len()];
         self.chunks.push(Chunk::default());
         for tri in idx.chunks_exact(3) {
-            if self.chunks.last().unwrap().verts.len() + 3 > CHUNK_VERTS {
+            let last = self.chunks.last().unwrap();
+            if last.verts.len() + 3 > CHUNK_VERTS || last.idx.len() + 3 > CHUNK_INDICES {
                 self.chunks.push(Chunk::default());
                 remap.fill(u16::MAX);
             }
@@ -829,4 +839,30 @@ pub fn trs(t: Vec3, yaw: f32, pitch: f32, roll: f32) -> Mat4 {
         * Mat4::from_rotation_y(yaw)
         * Mat4::from_rotation_x(pitch)
         * Mat4::from_rotation_z(roll)
+}
+
+#[cfg(test)]
+mod chunk_tests {
+    use super::*;
+
+    #[test]
+    fn chunks_stay_within_the_draw_call_limits() {
+        let mut m = MeshBuilder::new();
+        let v = Vertex {
+            position: Vec3::ZERO,
+            uv: Vec2::ZERO,
+            color: [255; 4],
+            normal: Vec4::ZERO,
+        };
+        // index-heavy meshes like the characters (about 5 indices per vertex)
+        let verts = vec![v; 1800];
+        let idx: Vec<u16> = (0..9000).map(|i| (i % 1800) as u16).collect();
+        for _ in 0..12 {
+            m.add_indexed(&verts, &idx);
+            m.add_box(&Mat4::IDENTITY, Vec3::ONE, [1, 2, 3]);
+        }
+        for c in &m.chunks {
+            assert!(c.verts.len() <= CHUNK_VERTS && c.idx.len() <= CHUNK_INDICES);
+        }
+    }
 }
