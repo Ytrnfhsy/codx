@@ -142,6 +142,7 @@ pub struct GameClient {
     pub stamina: f32,
     pub sprinting: bool,
     pub grenades: u8,
+    pub smokes: u8,
     pub cooking: Option<f64>,
     pub melee_until: f64,
     pub melee_ready: f64,
@@ -388,6 +389,7 @@ impl GameClient {
             stamina: Tuning::default().movement.sprint_time,
             sprinting: false,
             grenades: 0,
+            smokes: 0,
             cooking: None,
             melee_until: 0.0,
             melee_ready: 0.0,
@@ -456,7 +458,7 @@ impl GameClient {
             crate::ui::MUTED,
         );
         g.push_chat(
-            "G — граната, V — ніж, F — дія, 5 — кілстрік, T/Y — чат, Tab — рахунок, M — клас"
+            "G — граната, Q — дим, V — ніж, F — дія, 5 — кілстрік, T/Y — чат, Tab — рахунок, M — клас"
                 .into(),
             crate::ui::MUTED,
         );
@@ -581,6 +583,7 @@ impl GameClient {
                 ];
                 self.slot = 0;
                 self.grenades = loadout.grenades();
+                self.smokes = 1;
                 self.reload_until = None;
                 self.switch_until = now + 0.3;
                 self.switch_dur = 0.3;
@@ -968,15 +971,29 @@ impl GameClient {
         }
         if now - self.last_throw > 0.6 {
             self.grenades = me.grenades;
+            self.smokes = me.smokes;
         }
         self.me = me;
         self.bomb = s.bomb;
         self.ents = s.ents;
         let mut present = Vec::new();
         for e in &self.ents {
-            if let EntSnap::Weapon { id, .. } = e {
-                self.pickup_seen.entry(*id).or_insert(now);
-                present.push(*id);
+            match e {
+                EntSnap::Weapon { id, .. } => {
+                    self.pickup_seen.entry(*id).or_insert(now);
+                    present.push(*id);
+                }
+                // a smoke cloud just popped: the hiss
+                EntSnap::Smoke { id, pos, .. } => {
+                    if !self.pickup_seen.contains_key(id) {
+                        self.pickup_seen.insert(*id, now);
+                        if let Some(a) = audio.as_ref() {
+                            a.play_at(Sfx::Smoke, Vec3::from_array(*pos), self.eye(), 0.8, 50.0);
+                        }
+                    }
+                    present.push(*id);
+                }
+                _ => {}
             }
         }
         self.pickup_seen.retain(|id, _| present.contains(id));
@@ -1651,6 +1668,7 @@ impl GameClient {
             if self.is_protected() {
                 if trig_pressed
                     || pressed(KeyCode::G)
+                    || pressed(KeyCode::Q)
                     || pressed(KeyCode::V)
                     || pressed(KeyCode::Key5)
                     || pressed(KeyCode::Key4)
@@ -1726,6 +1744,7 @@ impl GameClient {
                             origin: (self.eye() + d * 0.3).to_array(),
                             dir: d.to_array(),
                             cook: (now - start) as f32,
+                            smoke: false,
                         });
                         self.grenades = self.grenades.saturating_sub(1);
                         self.last_throw = now;
@@ -1734,6 +1753,32 @@ impl GameClient {
                             a.play(Sfx::Knife, 0.4);
                         }
                     }
+                }
+            }
+            // smoke grenade (Q): thrown at once, no cooking
+            if !shielded
+                && pressed(KeyCode::Q)
+                && self.smokes > 0
+                && self.cooking.is_none()
+                && now >= self.throw_until
+            {
+                let aim = self.aim_dir();
+                let pitch =
+                    aim.y.clamp(-1.0, 1.0).asin() + self.tuning.grenade.throw_arc.to_radians();
+                let flat = vec3(aim.x, 0.0, aim.z).normalize_or_zero();
+                let d = (flat * pitch.cos() + vec3(0.0, pitch.sin(), 0.0)).normalize();
+                self.net.send(C2S::Grenade {
+                    origin: (self.eye() + d * 0.3).to_array(),
+                    dir: d.to_array(),
+                    cook: 0.0,
+                    smoke: true,
+                });
+                self.smokes -= 1;
+                self.reload_until = None;
+                self.last_throw = now;
+                self.throw_until = now + 0.5;
+                if let Some(a) = audio {
+                    a.play(Sfx::Knife, 0.4);
                 }
             }
             if !shielded && pressed(KeyCode::V) && now >= self.melee_ready {

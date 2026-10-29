@@ -155,14 +155,13 @@ impl Game {
             None => {
                 // pick up
                 let pos = self.sab.pos;
-                let owner = self.sab.owner;
+                // a bomb on the ground belongs to whoever grabs it first, whichever team
+                // carried it before
                 let picker = self
                     .players
                     .iter()
                     .flatten()
-                    .filter(|p| {
-                        p.alive && p.team.is_playing() && (owner.is_none() || owner == Some(p.team))
-                    })
+                    .filter(|p| p.alive && p.team.is_playing())
                     .filter(|p| p.body.pos.distance(pos) < SAB_PICKUP_RADIUS)
                     .map(|p| (p.id, p.team, p.name.clone()))
                     .next();

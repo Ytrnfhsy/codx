@@ -230,7 +230,7 @@ fn spawn_protection_rules() {
         (p.weapon().id, p.eye(), p.weapon().mag)
     };
     g.fire(human, w, eye, &[glam::Vec3::NEG_Z]);
-    g.throw_grenade(human, eye, glam::Vec3::NEG_Z, 0.0);
+    g.throw_grenade(human, eye, glam::Vec3::NEG_Z, 0.0, false);
     let p = g.p(human).unwrap();
     assert_eq!(p.weapon().mag, mag, "a protected player fired");
     assert_eq!(p.shots_fired, 0);

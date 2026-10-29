@@ -50,6 +50,8 @@ pub enum C2S {
         origin: V3,
         dir: V3,
         cook: f32,
+        /// A smoke grenade instead of a frag.
+        smoke: bool,
     },
     Melee,
     UseKillstreak {
@@ -120,6 +122,7 @@ pub struct MeSnap {
     /// Weapons in both slots (they change when you pick one up).
     pub weapons: [WeaponId; 2],
     pub grenades: u8,
+    pub smokes: u8,
     pub streak: u16,
     pub rewards: Vec<Killstreak>,
     pub respawn_in: f32,
@@ -138,6 +141,13 @@ pub enum EntSnap {
     Grenade {
         id: u16,
         pos: V3,
+        smoke: bool,
+    },
+    /// A smoke cloud; `age` in seconds (its size follows `consts::smoke_radius`).
+    Smoke {
+        id: u16,
+        pos: V3,
+        age: f32,
     },
     Heli {
         id: u16,

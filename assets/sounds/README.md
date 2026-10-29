@@ -28,6 +28,7 @@ Only use recordings you are allowed to ship with the game, for example CC0 packs
 | `heli_gun` | helicopter door gun |
 | `far` | any gunfire far away (muffled, mostly echo) |
 | `explosion` | grenade / airstrike / bomb |
+| `smoke` | smoke grenade popping and hissing |
 | `hit` | hitmarker tick |
 | `hit_head` | headshot ding |
 | `kill` | kill confirmation |

@@ -385,6 +385,60 @@ pub fn add_grenade(m: &mut ToonMesh, pos: Vec3, t: f32) {
     );
 }
 
+/// Smoke grenade: a grey can with a white band.
+pub fn add_smoke_grenade(m: &mut ToonMesh, pos: Vec3, t: f32) {
+    let base = trs(pos, t * 5.0, t * 7.0, 0.0);
+    m.boxed(&base, vec3(0.07, 0.12, 0.07), [120, 126, 132], 0.012);
+    m.boxed(&base, vec3(0.075, 0.025, 0.075), [235, 235, 230], 0.0);
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 0.14, 0.0))),
+        vec3(0.03, 0.03, 0.03),
+        METAL,
+        0.01,
+    );
+}
+
+/// A cartoon smoke cloud: a heap of soft grey puffs that swell, drift and thin out.
+/// Opaque on purpose: it must really hide whoever is inside or behind it.
+pub fn add_smoke_cloud(m: &mut ToonMesh, centre: Vec3, age: f32, id: u16, now: f32) {
+    let r = toon_shared::consts::smoke_radius(age);
+    if r < 0.05 {
+        return;
+    }
+    let prev = (m.detail, m.ink);
+    m.detail = 5;
+    // a soft grey line around each puff gives the cartoon-cloud look
+    m.ink = Some([150, 156, 166]);
+    let mut rng = toon_shared::rng::Rng::new(id as u64 * 7919 + 13);
+    for k in 0..24 {
+        // puffs spread through the cloud, flattened a little, never below the ground
+        let dir = vec3(
+            rng.range(-1.0, 1.0),
+            rng.range(-0.5, 0.9),
+            rng.range(-1.0, 1.0),
+        );
+        let dir = dir.normalize_or_zero() * rng.range(0.25, 0.7);
+        let drift = vec3(
+            (now * 0.21 + k as f32).sin(),
+            (now * 0.17 + k as f32 * 1.7).sin() * 0.5,
+            (now * 0.19 + k as f32 * 2.3).cos(),
+        ) * 0.1
+            * r;
+        let mut c = centre + dir * r + drift;
+        let pr = r * rng.range(0.3, 0.45) * (1.0 + 0.06 * (now * 0.9 + k as f32).sin());
+        c.y =
+            c.y.max(centre.y - toon_shared::consts::SMOKE_LIFT + pr * 0.6);
+        let g = rng.range(222.0, 242.0) as u8;
+        m.sphere(
+            &Mat4::from_translation(c),
+            pr,
+            [g, g, g.saturating_add(4)],
+            0.05,
+        );
+    }
+    (m.detail, m.ink) = prev;
+}
+
 pub fn add_bomb(m: &mut ToonMesh, pos: Vec3, t: f32, planted: bool) {
     let base = trs(
         pos + vec3(0.0, 0.22, 0.0),

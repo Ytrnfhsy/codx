@@ -164,7 +164,7 @@ fn grenade_landing(g: &mut Game, id: u8) -> f32 {
         p.grenades = 1;
         p.protected_until = 0.0;
     }
-    g.throw_grenade(id, eye, dir, 0.0);
+    g.throw_grenade(id, eye, dir, 0.0, false);
     assert_eq!(g.grenades.len(), 1, "grenade was not thrown");
     let mut last = start;
     while let Some(gr) = g.grenades.first() {
@@ -258,4 +258,80 @@ fn dropped_weapons_can_be_picked_up_and_scavenged() {
     g.tick(TICK_DT);
     assert_eq!(g.p(me).unwrap().weapons[0].reserve, ammo);
     assert!(g.pickups.is_empty(), "an emptied gun disappears");
+}
+
+#[test]
+fn either_team_can_pick_up_a_dropped_bomb() {
+    let (mut g, me) = setup(MapId::Depot, Mode::Sab);
+    toon_server::admin::exec(&mut g, "bots 0");
+    let other = g
+        .connect(
+            "127.0.0.1:5001".parse().unwrap(),
+            "Другий",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(other, C2S::JoinTeam(Some(Team::Axis)));
+    g.handle(other, C2S::SetLoadout(DEFAULT_CLASSES[0].1));
+    // wait for the round to start
+    for _ in 0..600 {
+        run(&mut g, 0.5);
+        if g.state == MatchState::Playing {
+            break;
+        }
+    }
+    assert_eq!(g.state, MatchState::Playing);
+    // the bomb was carried by the other team and dropped
+    g.sab.carrier = None;
+    g.sab.owner = Some(Team::Axis);
+    g.sab.dropped_since = g.time;
+    let p = g.pm(me).unwrap();
+    p.alive = true;
+    let at = p.body.pos;
+    g.sab.pos = at;
+    run(&mut g, 0.2);
+    assert_eq!(
+        g.sab.carrier,
+        Some(me),
+        "an allied player picks up the axis bomb"
+    );
+    assert_eq!(g.sab.owner, Some(Team::Allies));
+}
+
+#[test]
+fn smoke_grenade_makes_a_cloud_that_fades() {
+    use toon_shared::consts::{SMOKE_FUSE, SMOKE_TIME};
+    let (mut g, me) = setup(MapId::Depot, Mode::Tdm);
+    toon_server::admin::exec(&mut g, "bots 0");
+    run(&mut g, 1.0);
+    let p = g.pm(me).unwrap();
+    p.alive = true;
+    p.protected_until = 0.0;
+    assert_eq!(p.smokes, 1, "one smoke per life");
+    let frags = p.grenades;
+    let eye = p.eye();
+    let throw = C2S::Grenade {
+        origin: eye.to_array(),
+        dir: [0.0, 0.3, -1.0],
+        cook: 0.0,
+        smoke: true,
+    };
+    g.handle(me, throw.clone());
+    g.handle(me, throw);
+    assert_eq!(g.grenades.len(), 1, "only one smoke to throw");
+    assert_eq!(g.pm(me).unwrap().grenades, frags, "frags are untouched");
+    run(&mut g, SMOKE_FUSE + 0.5);
+    assert!(g.grenades.is_empty());
+    assert_eq!(g.smokes.len(), 1, "the cloud popped");
+    run(&mut g, 2.5);
+    let clouds = g.smoke_clouds();
+    assert!(clouds[0].1 > 4.0, "the cloud has grown: {}", clouds[0].1);
+    // it hides what is behind it
+    let c = clouds[0].0;
+    let a = c + glam::vec3(-12.0, 0.2, 0.0);
+    let b = c + glam::vec3(12.0, 0.2, 0.0);
+    assert!(toon_shared::ray::smoke_blocks(a, b, &clouds));
+    run(&mut g, SMOKE_TIME);
+    assert!(g.smokes.is_empty(), "the cloud is gone");
 }

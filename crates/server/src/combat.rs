@@ -277,6 +277,7 @@ impl Game {
                 pos: vpos + vec3(0.0, 0.4, 0.0),
                 vel: vec3(0.0, 1.0, 0.0),
                 explode_at: time + 2.5,
+                smoke: false,
             });
         }
 
@@ -415,7 +416,7 @@ impl Game {
         p.shot_budget = p.shot_budget.min(1.0);
     }
 
-    pub fn throw_grenade(&mut self, id: u8, origin: Vec3, dir: Vec3, cook: f32) {
+    pub fn throw_grenade(&mut self, id: u8, origin: Vec3, dir: Vec3, cook: f32, smoke: bool) {
         if !self.combat_allowed() {
             return;
         }
@@ -423,15 +424,20 @@ impl Game {
         let Some(p) = self.players[id as usize].as_mut() else {
             return;
         };
+        let left = if smoke { p.smokes } else { p.grenades };
         if !p.alive
-            || p.grenades == 0
+            || left == 0
             || !dir.is_finite()
             || dir.length_squared() < 0.1
             || time < p.protected_until
         {
             return;
         }
-        p.grenades -= 1;
+        if smoke {
+            p.smokes -= 1;
+        } else {
+            p.grenades -= 1;
+        }
         let eye = p.eye();
         let origin = if origin.is_finite() && origin.distance(eye) < 1.2 {
             origin
@@ -440,8 +446,11 @@ impl Game {
         };
         let gt = &self.tuning.grenade;
         let vel = dir.normalize() * gt.throw_speed + p.body.vel * gt.inherit_velocity;
-        let fuse = gt.fuse;
-        let cook = cook.clamp(0.0, (fuse - 0.3).max(0.0));
+        let (fuse, cook) = if smoke {
+            (SMOKE_FUSE, 0.0)
+        } else {
+            (gt.fuse, cook.clamp(0.0, (gt.fuse - 0.3).max(0.0)))
+        };
         let gid = self.new_ent_id();
         self.grenades.push(Grenade {
             id: gid,
@@ -449,6 +458,7 @@ impl Game {
             pos: origin,
             vel,
             explode_at: time + (fuse - cook) as f64,
+            smoke,
         });
     }
 
@@ -474,12 +484,17 @@ impl Game {
                 }
             }
             if self.time >= g.explode_at {
-                boom.push((g.pos, g.owner));
+                boom.push((g.pos, g.owner, g.smoke, g.id));
             }
         }
         let now = self.time;
         self.grenades.retain(|g| now < g.explode_at);
-        for (pos, owner) in boom {
+        for (pos, owner, smoke, gid) in boom {
+            if smoke {
+                self.smokes
+                    .push((gid, pos + vec3(0.0, SMOKE_LIFT, 0.0), now));
+                continue;
+            }
             let (r, dmg) = (self.tuning.grenade.radius, self.tuning.grenade.damage);
             self.explode(
                 pos + vec3(0.0, 0.2, 0.0),

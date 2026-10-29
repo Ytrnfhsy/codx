@@ -254,8 +254,16 @@ pub fn render_world(
     // entities
     for e in ents {
         match e {
-            EntSnap::Grenade { id, pos } => {
-                models::add_grenade(&mut m, Vec3::from_array(*pos), now as f32 + *id as f32)
+            EntSnap::Grenade { id, pos, smoke } => {
+                let t = now as f32 + *id as f32;
+                if *smoke {
+                    models::add_smoke_grenade(&mut m, Vec3::from_array(*pos), t)
+                } else {
+                    models::add_grenade(&mut m, Vec3::from_array(*pos), t)
+                }
+            }
+            EntSnap::Smoke { id, pos, age } => {
+                models::add_smoke_cloud(&mut m, Vec3::from_array(*pos), *age, *id, now as f32)
             }
             EntSnap::Heli { pos, yaw, team, .. } => {
                 models::add_heli(&mut m, Vec3::from_array(*pos), *yaw, *team, now as f32)
@@ -322,6 +330,16 @@ pub fn render_world(
         None => g.live_actors(),
     };
     let mut muzzles = Vec::with_capacity(actors.len());
+    let clouds: Vec<(Vec3, f32)> = ents
+        .iter()
+        .filter_map(|e| match e {
+            EntSnap::Smoke { pos, age, .. } => Some((
+                Vec3::from_array(*pos),
+                toon_shared::consts::smoke_radius(*age),
+            )),
+            _ => None,
+        })
+        .collect();
     for a in &actors {
         let has_bomb = a.flags & flags::HAS_BOMB != 0;
         let pose = SoldierPose {
@@ -364,8 +382,11 @@ pub fn render_world(
                 true,
             );
         }
-        if kc.is_none() {
-            let head = a.pos + vec3(0.0, a.stance.height() + 0.45, 0.0);
+        let head = a.pos + vec3(0.0, a.stance.height() + 0.45, 0.0);
+        // no enemy names through smoke
+        let hidden = a.team != my_team
+            && toon_shared::ray::smoke_blocks(view.pos, head - vec3(0.0, 0.5, 0.0), &clouds);
+        if kc.is_none() && !hidden {
             let friendly = a.team == my_team;
             let name = g.name_of(a.id).unwrap_or("?").to_string();
             tags.push(NameTag {
@@ -828,6 +849,15 @@ pub fn draw_model_gallery(mats: &Materials) {
         };
         soldier::add_soldier(&mut m, &pose);
     }
+    // a smoke cloud and a smoke grenade
+    models::add_smoke_cloud(
+        &mut m,
+        vec3(-4.2, toon_shared::consts::SMOKE_LIFT, 3.5),
+        6.0,
+        1,
+        0.0,
+    );
+    models::add_smoke_grenade(&mut m, vec3(-1.6, 0.15, -4.0), 0.3);
     // a fallen soldier: a ragdoll simulated for a moment on flat ground
     let mut flat = toon_shared::maps::build(toon_shared::map::MapId::Wreck);
     flat.boxes.retain(|b| b.max.y <= 0.01);

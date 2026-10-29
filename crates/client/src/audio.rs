@@ -30,6 +30,8 @@ pub enum Sfx {
     /// Muffled gunfire far away.
     Far,
     Explosion,
+    /// A smoke grenade popping and hissing.
+    Smoke,
     /// Hitmarker tick.
     Hit,
     /// Headshot "ding".
@@ -234,93 +236,102 @@ fn filter(b: &mut [f32], chain: &[(Kind, f32, f32)]) {
     }
 }
 
-/// Freeverb-style comb filter with a damped feedback loop.
-struct Comb {
-    buf: Vec<f32>,
-    i: usize,
-    store: f32,
-}
-
-impl Comb {
-    fn run(&mut self, x: f32, feedback: f32, damp: f32) -> f32 {
-        let out = self.buf[self.i];
-        self.store = out * (1.0 - damp) + self.store * damp;
-        self.buf[self.i] = x + self.store * feedback;
-        self.i = (self.i + 1) % self.buf.len();
-        out
-    }
-}
-
-struct Allpass {
-    buf: Vec<f32>,
-    i: usize,
-}
-
-impl Allpass {
-    fn run(&mut self, x: f32) -> f32 {
-        let b = self.buf[self.i];
-        self.buf[self.i] = x + b * 0.5;
-        self.i = (self.i + 1) % self.buf.len();
-        b - x
-    }
-}
-
-/// How a place sounds: reflections off nearby walls and the reverb tail.
+/// How a place sounds. The reverb is a convolution with velvet noise — sparse random
+/// clicks that fade away — split into a low band that rings long and a high band that dies
+/// fast. Unlike comb-filter reverbs it has no resonances, so nothing sounds like a pipe.
 #[derive(Clone, Copy)]
 struct Space {
-    /// Early reflections: (delay s, gain), alternating left and right.
-    taps: &'static [(f32, f32)],
-    /// Reverb size 0..1 (longer tail) and damping 0..1 (duller tail).
-    room: f32,
-    damp: f32,
+    /// Gap before the first reflection (s).
+    predelay: f32,
+    /// Reflections per second at first (sparse, distinct walls) and later (diffuse).
+    early: f32,
+    density: f32,
+    /// How long the early, sparse part lasts (s).
+    early_len: f32,
+    /// Decay to -60 dB of the lows and of the highs (s).
+    rt_low: f32,
+    rt_high: f32,
+    /// Level of the reverb against the direct sound.
     wet: f32,
-    /// Low-pass on reflections and tail (air absorbs the highs).
+    /// Low-pass on the reverb (air absorbs the highs).
     air: f32,
 }
 
-/// A town street: walls a few to a few dozen metres away.
+/// A town street: houses all around, hard walls.
 const TOWN: Space = Space {
-    taps: &[
-        (0.021, 0.30),
-        (0.037, 0.26),
-        (0.058, 0.22),
-        (0.083, 0.20),
-        (0.121, 0.15),
-        (0.167, 0.12),
-        (0.243, 0.08),
-        (0.351, 0.05),
-    ],
-    room: 0.84,
-    damp: 0.55,
-    wet: 0.24,
-    air: 3800.0,
+    predelay: 0.012,
+    early: 220.0,
+    density: 1100.0,
+    early_len: 0.09,
+    rt_low: 1.2,
+    rt_high: 0.45,
+    wet: 0.5,
+    air: 5000.0,
 };
 
 /// Explosions: the blast rolls around the whole map.
 const VALLEY: Space = Space {
-    taps: &[
-        (0.045, 0.35),
-        (0.092, 0.30),
-        (0.160, 0.26),
-        (0.260, 0.20),
-        (0.390, 0.15),
-        (0.580, 0.10),
-        (0.820, 0.06),
-    ],
-    room: 0.92,
-    damp: 0.45,
-    wet: 0.32,
-    air: 2200.0,
+    predelay: 0.03,
+    early: 120.0,
+    density: 900.0,
+    early_len: 0.2,
+    rt_low: 2.4,
+    rt_high: 0.8,
+    wet: 0.6,
+    air: 3000.0,
 };
 
 /// Close handling sounds: a hint of space only.
 const NEAR: Space = Space {
-    taps: &[(0.011, 0.12), (0.019, 0.1), (0.031, 0.06)],
-    room: 0.4,
-    damp: 0.85,
-    wet: 0.04,
-    air: 6000.0,
+    predelay: 0.003,
+    early: 600.0,
+    density: 1500.0,
+    early_len: 0.02,
+    rt_low: 0.2,
+    rt_high: 0.1,
+    wet: 0.18,
+    air: 7000.0,
 };
+
+/// Velvet-noise impulse response: (offset in samples, gain), energy normalized to 1.
+fn velvet(sp: &Space, rt: f32, rng: &mut Rng) -> Vec<(usize, f32)> {
+    let len = rt * 1.1;
+    let mut taps = Vec::new();
+    let mut t = sp.predelay;
+    while t < sp.predelay + len {
+        let dens = if t < sp.predelay + sp.early_len {
+            sp.early
+        } else {
+            sp.density
+        };
+        let period = 1.0 / dens;
+        let at = t + rng.f32() * period;
+        let sign = if rng.f32() < 0.5 { -1.0 } else { 1.0 };
+        // the first reflections are a bit louder: those are the nearest walls
+        let g = (-6.9 * (at - sp.predelay) / rt).exp() * if dens == sp.early { 1.8 } else { 1.0 };
+        taps.push(((at * SR) as usize, sign * g * rng.range(0.6, 1.0)));
+        t += period;
+    }
+    let e: f32 = taps.iter().map(|t| t.1 * t.1).sum::<f32>().sqrt().max(1e-6);
+    for t in &mut taps {
+        t.1 /= e;
+    }
+    taps
+}
+
+/// Sparse convolution of `x` with velvet taps, added into one channel of `out`.
+fn convolve(out: &mut [[f32; 2]], ch: usize, x: &[f32], taps: &[(usize, f32)], gain: f32) {
+    for &(off, g) in taps {
+        let g = g * gain;
+        if off >= out.len() {
+            continue;
+        }
+        let n = x.len().min(out.len() - off);
+        for (o, v) in out[off..off + n].iter_mut().zip(&x[..n]) {
+            o[ch] += v * g;
+        }
+    }
+}
 
 /// Places a mono dry sound into a space; returns stereo with `tail` seconds of decay.
 fn spatialize(dry: &[f32], sp: Space, tail: f32, rng: &mut Rng) -> Vec<[f32; 2]> {
@@ -329,81 +340,58 @@ fn spatialize(dry: &[f32], sp: Space, tail: f32, rng: &mut Rng) -> Vec<[f32; 2]>
     for (i, v) in dry.iter().enumerate() {
         out[i] = [*v, *v];
     }
-    // early reflections: walls give back a dull, smeared copy (each tap is spread over a
-    // few milliseconds, so it sounds like a wall and not like a click), panned alternately
-    let mut refl = dry.to_vec();
-    filter(
-        &mut refl,
-        &[
-            (Kind::Low, sp.air * 0.6, 0.6),
-            (Kind::Low, sp.air * 0.6, 0.6),
-        ],
-    );
-    let mut diff = [
-        Allpass {
-            buf: vec![0.0; 113],
-            i: 0,
-        },
-        Allpass {
-            buf: vec![0.0; 173],
-            i: 0,
-        },
-        Allpass {
-            buf: vec![0.0; 241],
-            i: 0,
-        },
-    ];
-    let refl: Vec<f32> = refl
+    // only the audible part of the dry sound feeds the reverb (keeps this fast)
+    let peak = dry.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let end = dry
         .iter()
-        .map(|v| diff.iter_mut().fold(*v, |x, a| a.run(x)))
-        .collect();
-    for (k, (d, g)) in sp.taps.iter().enumerate() {
-        let off = ((d * rng.range(0.92, 1.08)) * SR) as usize;
-        let (gl, gr) = if k % 2 == 0 {
-            (g * 1.0, g * 0.45)
-        } else {
-            (g * 0.45, g * 1.0)
-        };
-        for (i, v) in refl.iter().enumerate() {
-            if let Some(o) = out.get_mut(off + i) {
-                o[0] += v * gl;
-                o[1] += v * gr;
-            }
+        .rposition(|v| v.abs() > peak * 0.002)
+        .map_or(0, |i| i + 1)
+        // a long rumble is diffuse already: its start is enough to excite the room
+        .min((0.35 * SR) as usize);
+    let mut low = dry[..end].to_vec();
+    filter(
+        &mut low,
+        &[(Kind::Low, 900.0, 0.7), (Kind::Low, 900.0, 0.7)],
+    );
+    let mut high: Vec<f32> = dry[..end].iter().zip(&low).map(|(d, l)| d - l).collect();
+    filter(&mut high, &[(Kind::Low, sp.air, 0.7)]);
+    // the highs of a shot die within milliseconds: trim them on their own
+    let hp = high.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let hend = high
+        .iter()
+        .rposition(|v| v.abs() > hp * 0.003)
+        .map_or(0, |i| i + 1);
+    high.truncate(hend);
+    // the lows need no fine time resolution: reverberate them at an eighth of the rate
+    const DEC: usize = 8;
+    let low_d: Vec<f32> = low.iter().step_by(DEC).copied().collect();
+    let nd = n / DEC + 2;
+    let mut wet = vec![[0.0f32; 2]; n];
+    let mut wet_d = vec![[0.0f32; 2]; nd];
+    for ch in 0..2 {
+        let lo: Vec<(usize, f32)> = velvet(&sp, sp.rt_low, rng)
+            .into_iter()
+            .map(|(o, g)| (o / DEC, g))
+            .collect();
+        let hi = velvet(&sp, sp.rt_high, rng);
+        convolve(&mut wet_d, ch, &low_d, &lo, 1.0);
+        convolve(&mut wet, ch, &high, &hi, 1.0);
+    }
+    for ch in 0..2 {
+        let mut smooth = Biquad::new(Kind::Low, 1100.0, 0.7);
+        for (i, w) in wet.iter_mut().enumerate() {
+            let x = i as f32 / DEC as f32;
+            let k = x.fract();
+            let a = wet_d[x as usize][ch];
+            let b = wet_d[(x as usize + 1).min(nd - 1)][ch];
+            w[ch] += smooth.run(a + (b - a) * k);
         }
     }
-    // Freeverb tail
-    const COMBS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
-    const ALLPASS: [usize; 4] = [556, 441, 341, 225];
-    let feedback = sp.room * 0.28 + 0.7;
-    let damp = sp.damp * 0.4;
-    for (ch, spread) in [(0usize, 0usize), (1, 23)] {
-        let mut combs: Vec<Comb> = COMBS
-            .iter()
-            .map(|l| Comb {
-                buf: vec![0.0; l + spread],
-                i: 0,
-                store: 0.0,
-            })
-            .collect();
-        let mut aps: Vec<Allpass> = ALLPASS
-            .iter()
-            .map(|l| Allpass {
-                buf: vec![0.0; l + spread],
-                i: 0,
-            })
-            .collect();
-        let mut tone = Biquad::new(Kind::Low, sp.air, 0.6);
-        let mut hp = Biquad::new(Kind::High, 90.0, 0.7);
-        for i in 0..n {
-            let x = refl.get(i).copied().unwrap_or(0.0) * 0.015;
-            let mut y = 0.0;
-            for c in combs.iter_mut() {
-                y += c.run(x, feedback, damp);
-            }
-            for a in aps.iter_mut() {
-                y = a.run(y);
-            }
-            out[i][ch] += hp.run(tone.run(y)) * sp.wet * 3.0;
+    // the rumble below 80 Hz would only make the tail boomy
+    for ch in 0..2 {
+        let mut hp = Biquad::new(Kind::High, 80.0, 0.7);
+        for (o, w) in out.iter_mut().zip(&wet) {
+            o[ch] += hp.run(w[ch]) * sp.wet;
         }
     }
     out
@@ -613,7 +601,7 @@ impl Synth {
             &[
                 (Kind::High, g.body * 0.6, 0.7),
                 (Kind::Low, g.bright, 0.7),
-                (Kind::Peak(6.0), 2800.0, 1.2),
+                (Kind::Peak(3.0), 2800.0, 0.9),
             ],
             0.0002,
             g.snap,
@@ -621,7 +609,11 @@ impl Synth {
         Synth::mix(&mut b, &bright, at, 3.0);
         let boom = self.burst(
             0.4,
-            &[(Kind::Band, g.body, 1.1), (Kind::Low, g.body * 4.0, 0.7)],
+            // a broad hump around the body frequency (a narrow band-pass rings like a tube)
+            &[
+                (Kind::High, g.body * 0.45, 0.6),
+                (Kind::Low, g.body * 3.0, 0.6),
+            ],
             0.0006,
             g.boom,
         );
@@ -636,9 +628,9 @@ impl Synth {
         Synth::norm(&mut b, 1.0);
         // the action cycling
         if g.mech > 0.0 {
-            let c = self.clack(&[1650.0, 2900.0, 4300.0, 6100.0], 25.0, 0.06, 1.0);
+            let c = self.clack(&[1650.0, 2900.0, 4300.0, 6100.0], 12.0, 0.05, 1.0);
             let at = 0.022 + self.rng.range(0.0, 0.01);
-            Synth::mix(&mut b, &c, at, g.mech * 0.35);
+            Synth::mix(&mut b, &c, at, g.mech * 0.25);
         }
         b
     }
@@ -906,6 +898,12 @@ impl Synth {
         let mut out = self.make_raw(s, variant);
         // the rotor loop must stay seamless; everything else ends softly
         if s != Sfx::Heli {
+            // drop the silent end, then fade what is left
+            let end = out
+                .iter()
+                .rposition(|v| v[0].abs().max(v[1].abs()) > 2e-4)
+                .map_or(1, |i| i + 1);
+            out.truncate(end.max(1));
             fade_out(&mut out, 0.01);
         }
         out
@@ -929,6 +927,27 @@ impl Synth {
             }),
             Sfx::Far => self.far(),
             Sfx::Explosion => self.explosion(),
+            Sfx::Smoke => {
+                // a dull pop, then gas rushing out for a couple of seconds
+                let mut b = self.burst(0.08, &[(Kind::Low, 700.0, 0.7)], 0.001, 0.02);
+                Synth::norm(&mut b, 0.8);
+                let len = 2.6;
+                let mut hiss = Self::buf(len);
+                let mut bp = Biquad::default();
+                for i in 0..hiss.len() {
+                    let t = Self::t(i);
+                    if i % 64 == 0 {
+                        bp.set(Kind::Band, 3800.0 - 1600.0 * (t / len), 0.9);
+                    }
+                    let env = (t / 0.12).min(1.0) * (1.0 - t / len).powf(1.5);
+                    hiss[i] = bp.run(self.noise()) * env;
+                }
+                Synth::norm(&mut hiss, 0.5);
+                Synth::mix(&mut b, &hiss, 0.03, 1.0);
+                let mut o = spatialize(&b, NEAR, 0.3, &mut self.rng);
+                normalize(&mut o, 0.75);
+                o
+            }
             Sfx::Hit => {
                 // hitmarker: a crisp, dry tick
                 let mut b = self.clack(&[3200.0, 5100.0], 30.0, 0.05, 1.0);
@@ -1116,6 +1135,7 @@ fn all() -> Vec<Sfx> {
         Sfx::HeliGun,
         Sfx::Far,
         Sfx::Explosion,
+        Sfx::Smoke,
         Sfx::Hit,
         Sfx::HitHead,
         Sfx::Kill,
@@ -1221,6 +1241,38 @@ fn recordings(s: Sfx) -> Vec<(String, Vec<u8>)> {
     Vec::new()
 }
 
+/// Synthesizes sounds in parallel; each job gets its own seeded generator, so the result
+/// does not depend on the number of threads.
+fn synthesize(jobs: &[(Sfx, usize)]) -> Vec<(Sfx, Vec<[f32; 2]>)> {
+    let threads = std::thread::available_parallelism()
+        .map_or(2, |n| n.get())
+        .clamp(1, 8);
+    // round robin, so the few heavy sounds (explosions) land on different threads
+    std::thread::scope(|sc| {
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                sc.spawn(move || {
+                    jobs.iter()
+                        .enumerate()
+                        .skip(t)
+                        .step_by(threads)
+                        .map(|(j, &(k, i))| {
+                            let mut s = Synth {
+                                rng: Rng::new(7 + j as u64 * 7919),
+                            };
+                            (k, s.make(k, i))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
+    })
+}
+
 pub struct Audio {
     sounds: HashMap<Sfx, Vec<Sound>>,
     pub volume: f32,
@@ -1234,7 +1286,8 @@ impl Audio {
     pub async fn load(volume: f32, enabled: bool) -> Audio {
         let mut sounds: HashMap<Sfx, Vec<Sound>> = HashMap::new();
         if enabled {
-            let mut s = Synth { rng: Rng::new(7) };
+            // recordings first; everything else is synthesized on all CPU cores
+            let mut jobs = Vec::new();
             for k in all() {
                 let mut v = Vec::new();
                 for (file, data) in recordings(k) {
@@ -1247,14 +1300,14 @@ impl Audio {
                     }
                 }
                 if v.is_empty() {
-                    for i in 0..variants(k) {
-                        let samples = s.make(k, i);
-                        if let Ok(snd) = load_sound_from_bytes(&wav(&samples)).await {
-                            v.push(snd);
-                        }
-                    }
+                    jobs.extend((0..variants(k)).map(|i| (k, i)));
                 }
                 sounds.insert(k, v);
+            }
+            for (k, pcm) in synthesize(&jobs) {
+                if let Ok(snd) = load_sound_from_bytes(&wav(&pcm)).await {
+                    sounds.entry(k).or_default().push(snd);
+                }
             }
         }
         Audio {
@@ -1432,6 +1485,18 @@ mod tests {
         let mut broken = wav(&b);
         broken.truncate(30);
         assert!(decode(&broken).is_err());
+    }
+
+    #[test]
+    fn parallel_synthesis_is_quick() {
+        let jobs: Vec<(Sfx, usize)> = all()
+            .into_iter()
+            .flat_map(|k| (0..variants(k)).map(move |i| (k, i)))
+            .collect();
+        let t0 = std::time::Instant::now();
+        let out = synthesize(&jobs);
+        println!("parallel synthesis: {:?}", t0.elapsed());
+        assert_eq!(out.len(), jobs.len());
     }
 
     #[test]

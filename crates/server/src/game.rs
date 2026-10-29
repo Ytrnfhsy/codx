@@ -53,6 +53,7 @@ pub struct Player {
     pub next_loadout: Option<Loadout>,
     pub weapons: [WState; 2],
     pub grenades: u8,
+    pub smokes: u8,
     pub shot_budget: f32,
     pub reload_end: Option<f64>,
     pub switch_end: f64,
@@ -121,6 +122,7 @@ impl Player {
                 },
             ],
             grenades: 0,
+            smokes: 0,
             shot_budget: 1.0,
             reload_end: None,
             switch_end: 0.0,
@@ -214,6 +216,8 @@ pub struct Grenade {
     pub pos: Vec3,
     pub vel: Vec3,
     pub explode_at: f64,
+    /// Pops a smoke cloud instead of exploding.
+    pub smoke: bool,
 }
 
 pub struct Heli {
@@ -271,6 +275,8 @@ pub struct Game {
     pub tick: u32,
     pub rng: Rng,
     pub grenades: Vec<Grenade>,
+    /// Smoke clouds: (entity id, centre, time it popped).
+    pub smokes: Vec<(u16, Vec3, f64)>,
     pub helis: Vec<Heli>,
     pub pickups: Vec<crate::pickups::Pickup>,
     pub blasts: Vec<PendingBlast>,
@@ -291,6 +297,19 @@ pub struct Game {
 }
 
 impl Game {
+    /// Smoke clouds as (centre, current radius), for line-of-sight checks.
+    pub fn smoke_clouds(&self) -> Vec<(Vec3, f32)> {
+        self.smokes
+            .iter()
+            .map(|&(_, c, born)| {
+                (
+                    c,
+                    toon_shared::consts::smoke_radius((self.time - born) as f32),
+                )
+            })
+            .collect()
+    }
+
     pub fn new(cfg: ServerConfig) -> Game {
         let (map_id, mode) = cfg.rotation[0].resolve();
         let map = maps::build(map_id);
@@ -327,6 +346,7 @@ impl Game {
             tick: 0,
             rng: Rng::from_time(),
             grenades: Vec::new(),
+            smokes: Vec::new(),
             helis: Vec::new(),
             pickups: Vec::new(),
             blasts: Vec::new(),
@@ -778,6 +798,7 @@ impl Game {
             },
         ];
         p.grenades = l.grenades();
+        p.smokes = 1;
         p.reload_end = None;
         p.switch_end = time + 0.3;
         p.shot_budget = 1.0;
@@ -848,9 +869,18 @@ impl Game {
             }
             C2S::Reload => self.start_reload(id),
             C2S::Switch(slot) => self.switch_weapon(id, slot),
-            C2S::Grenade { origin, dir, cook } => {
-                self.throw_grenade(id, Vec3::from_array(origin), Vec3::from_array(dir), cook)
-            }
+            C2S::Grenade {
+                origin,
+                dir,
+                cook,
+                smoke,
+            } => self.throw_grenade(
+                id,
+                Vec3::from_array(origin),
+                Vec3::from_array(dir),
+                cook,
+                smoke,
+            ),
             C2S::Melee => self.melee(id),
             C2S::PickUp(ent) => self.pick_up(id, ent),
             C2S::UseKillstreak { target } => self.use_killstreak(id, target),
@@ -1067,6 +1097,7 @@ impl Game {
         self.state_end = self.time + pre;
         self.overtime = false;
         self.grenades.clear();
+        self.smokes.clear();
         self.helis.clear();
         self.pickups.clear();
         self.blasts.clear();
@@ -1150,6 +1181,7 @@ impl Game {
         self.scores = [0, 0];
         self.overtime = false;
         self.grenades.clear();
+        self.smokes.clear();
         self.helis.clear();
         self.pickups.clear();
         self.blasts.clear();
@@ -1331,6 +1363,9 @@ impl Game {
         }
 
         self.update_grenades(dt);
+        let now = self.time;
+        self.smokes
+            .retain(|s| ((now - s.2) as f32) < toon_shared::consts::SMOKE_TIME);
         self.update_blasts();
         self.update_helis(dt);
 
@@ -1422,6 +1457,7 @@ impl Game {
                 ],
                 weapons: [p.weapons[0].id, p.weapons[1].id],
                 grenades: p.grenades,
+                smokes: p.smokes,
                 streak: p.streak as u16,
                 rewards: p.rewards.clone(),
                 respawn_in: (p.respawn_at - self.time).max(0.0) as f32,
@@ -1437,6 +1473,14 @@ impl Game {
             ents.push(EntSnap::Grenade {
                 id: g.id,
                 pos: g.pos.to_array(),
+                smoke: g.smoke,
+            });
+        }
+        for &(id, pos, born) in &self.smokes {
+            ents.push(EntSnap::Smoke {
+                id,
+                pos: pos.to_array(),
+                age: (self.time - born) as f32,
             });
         }
         for pk in &self.pickups {

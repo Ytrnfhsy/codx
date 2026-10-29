@@ -4,6 +4,7 @@ use crate::game::Game;
 use glam::{vec2, vec3, Vec2, Vec3};
 use toon_shared::physics::{MoveInput, Stance};
 use toon_shared::protocol::{flags, MatchState};
+use toon_shared::ray::smoke_blocks;
 use toon_shared::rng::Rng;
 use toon_shared::weapons::{Perk3, WeaponClass};
 use toon_shared::{look_dir, wrap_angle, yaw_basis, yaw_of, Mode, Team};
@@ -253,12 +254,15 @@ impl Game {
         let reserve = me.weapon().reserve;
         let reloading = me.reload_end.is_some();
         let grenades = me.grenades;
+        let smokes = me.smokes;
+        let team_now = me.team;
         let vel = me.body.vel;
         let protected_me = me.protected_until > time;
         let skill = (self.cfg.bot_skill + bot.skill_offset).clamp(0.0, 1.0);
         let sk = SkillProfile::new(skill);
         let walk_speed = self.tuning.movement.walk_speed;
 
+        let clouds = self.smoke_clouds();
         // ---- perception: enemies are noticed gradually, only inside the field of view
         if time - bot.last_percept >= 0.1 {
             let pdt = (time - bot.last_percept).min(0.5) as f32;
@@ -282,7 +286,9 @@ impl Game {
                     .unwrap_or(false);
                 let in_view = d < sk.max_sight && (facing > sk.fov_cos || d < 2.5);
                 let los = in_view
-                    && (self.world.line_of_sight(eye, o.eye()) || self.world.line_of_sight(eye, c));
+                    && ((self.world.line_of_sight(eye, o.eye())
+                        && !smoke_blocks(eye, o.eye(), &clouds))
+                        || (self.world.line_of_sight(eye, c) && !smoke_blocks(eye, c, &clouds)));
                 // sounds outside the view make the bot turn around
                 let moving = vec2(o.body.vel.x, o.body.vel.z).length() > 2.0
                     && o.body.stance == Stance::Stand;
@@ -497,8 +503,21 @@ impl Game {
                     let theta = 0.5 * s.asin();
                     let dir = flat.normalize() * theta.cos() + vec3(0.0, theta.sin(), 0.0);
                     let dir = cone(&mut self.rng, dir, lerp(0.15, 0.03, skill));
-                    self.throw_grenade(id, eye, dir, 0.8);
+                    self.throw_grenade(id, eye, dir, 0.8, false);
                 }
+            }
+        }
+
+        // the bomb carrier covers the last stretch to the enemy site with smoke
+        if self.mode == Mode::Sab && self.sab.carrier == Some(id) && smokes > 0 && !protected_me {
+            let site = self.map.sites[team_now.enemy().index()];
+            let to = site - pos;
+            let d = vec3(to.x, 0.0, to.z).length();
+            if d > 7.0 && d < 24.0 && self.rng.chance(0.03) {
+                let flat = vec3(to.x, 0.0, to.z).normalize_or_zero();
+                // drop it about halfway, on a low arc
+                let dir = (flat + vec3(0.0, 0.35, 0.0)).normalize();
+                self.throw_grenade(id, eye, dir, 0.0, true);
             }
         }
 
@@ -678,7 +697,8 @@ impl Game {
                     return (Some(cpos), false, false);
                 }
                 None => {
-                    if s.owner.is_none() || s.owner == Some(team) || !id.is_multiple_of(3) {
+                    // a loose bomb is anyone's: most bots race for it, a few hold home
+                    if s.owner.is_none() || !id.is_multiple_of(3) {
                         let close = pos.distance(s.pos) < 20.0;
                         return (Some(s.pos), false, close);
                     }

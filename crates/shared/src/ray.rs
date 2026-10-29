@@ -226,3 +226,40 @@ mod tests {
         assert_eq!(z, HitZone::Head);
     }
 }
+
+/// Does any smoke cloud (centre, radius) cut the segment from `a` to `b`?
+pub fn smoke_blocks(a: Vec3, b: Vec3, clouds: &[(Vec3, f32)]) -> bool {
+    let d = b - a;
+    let len = d.length();
+    if len < 1e-4 {
+        return false;
+    }
+    let d = d / len;
+    clouds.iter().any(|&(c, r)| {
+        // a thin edge of the cloud does not hide anyone: only count a real crossing
+        let r = r * 0.85;
+        r > 0.3 && ray_sphere(a, d, c, r).is_some_and(|t| t < len)
+    })
+}
+
+#[cfg(test)]
+mod smoke_tests {
+    use super::*;
+    use crate::consts::*;
+    use glam::vec3;
+
+    #[test]
+    fn smoke_hides_what_is_behind_it() {
+        let cloud = [(vec3(0.0, 1.4, 0.0), smoke_radius(5.0))];
+        let a = vec3(-10.0, 1.6, 0.0);
+        assert!(smoke_blocks(a, vec3(10.0, 1.6, 0.0), &cloud));
+        assert!(!smoke_blocks(a, vec3(-10.0, 1.6, 12.0), &cloud));
+        assert!(
+            smoke_blocks(vec3(0.5, 1.5, 0.0), vec3(9.0, 1.5, 0.0), &cloud),
+            "inside"
+        );
+        assert_eq!(smoke_radius(-1.0), 0.0);
+        assert_eq!(smoke_radius(SMOKE_TIME + 1.0), 0.0);
+        assert!(smoke_radius(0.3) < smoke_radius(SMOKE_GROW));
+    }
+}

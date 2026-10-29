@@ -418,7 +418,7 @@ impl Killcam {
         self.ents = fb.ents.clone();
         // grenades fly smoothly
         for e in &mut self.ents {
-            if let EntSnap::Grenade { id, pos } = e {
+            if let EntSnap::Grenade { id, pos, .. } = e {
                 if let Some(EntSnap::Grenade { pos: pa, .. }) = fa
                     .ents
                     .iter()

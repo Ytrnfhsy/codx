@@ -9,7 +9,7 @@ pub const INTERP_DELAY: f32 = 0.1;
 pub const MAX_REWIND: f32 = 0.35;
 
 pub const DEFAULT_PORT: u16 = 27015;
-pub const PROTOCOL_VERSION: u16 = 12;
+pub const PROTOCOL_VERSION: u16 = 13;
 /// Prefix of a connectionless server info query.
 pub const QUERY_MAGIC: &[u8; 4] = b"TWQ?";
 pub const QUERY_REPLY_MAGIC: &[u8; 4] = b"TWQ!";
@@ -56,3 +56,22 @@ pub const SCORE_HEADSHOT_BONUS: i32 = 5;
 pub const SCORE_ASSIST: i32 = 2;
 pub const SCORE_PLANT: i32 = 25;
 pub const SCORE_DEFUSE: i32 = 25;
+
+/// Smoke grenades: fuse, how long the cloud lasts, its full radius and how fast it swells.
+pub const SMOKE_FUSE: f32 = 1.6;
+pub const SMOKE_TIME: f32 = 18.0;
+pub const SMOKE_RADIUS: f32 = 5.0;
+pub const SMOKE_GROW: f32 = 2.5;
+/// The cloud's centre sits this high above where the grenade came to rest.
+pub const SMOKE_LIFT: f32 = 1.4;
+
+/// Radius of a smoke cloud `age` seconds after it popped: swells, holds, then thins out.
+pub fn smoke_radius(age: f32) -> f32 {
+    if !(0.0..SMOKE_TIME).contains(&age) {
+        return 0.0;
+    }
+    let grow = (age / SMOKE_GROW).min(1.0);
+    let grow = 1.0 - (1.0 - grow) * (1.0 - grow);
+    let fade = ((SMOKE_TIME - age) / 3.0).min(1.0);
+    SMOKE_RADIUS * grow * fade.sqrt()
+}

@@ -525,6 +525,13 @@ impl GameClient {
             }
         }
         for e in &self.ents {
+            if let EntSnap::Smoke { pos, age, .. } = e {
+                let p = to_map(Vec3::from_array(*pos));
+                let r = toon_shared::consts::smoke_radius(*age) * scale;
+                draw_circle(p.x, p.y, r, Color::new(0.85, 0.86, 0.88, 0.75));
+            }
+        }
+        for e in &self.ents {
             if let EntSnap::Heli { pos, team, .. } = e {
                 let p = to_map(Vec3::from_array(*pos));
                 draw_rectangle(
@@ -807,6 +814,19 @@ impl GameClient {
                 Color::from_rgba(90, 140, 70, 255),
             );
             draw_circle_lines(x + 200.0 + i as f32 * 22.0, y + 30.0, 8.0, 2.0, BLACK);
+        }
+        // smoke grenades: grey cans after the frags
+        for i in 0..self.smokes {
+            let sx = x + 200.0 + (self.grenades + i) as f32 * 22.0;
+            draw_rectangle(
+                sx - 6.0,
+                y + 21.0,
+                12.0,
+                18.0,
+                Color::from_rgba(150, 156, 162, 255),
+            );
+            draw_rectangle(sx - 6.0, y + 28.0, 12.0, 4.0, WHITE);
+            draw_rectangle_lines(sx - 6.0, y + 21.0, 12.0, 18.0, 2.0, BLACK);
         }
         if let Some(start) = self.cooking {
             let left = (self.tuning.grenade.fuse as f64 - (self.now - start)).max(0.0);
