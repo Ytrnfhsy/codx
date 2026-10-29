@@ -68,6 +68,7 @@ pub const HELP: &str = "Команди:
   kill <id|ім'я>             — вбити гравця
   bots <n>                   — заповнювати сервер ботами до n гравців
   givestreak <id|ім'я> <uav|airstrike|heli> — видати кілстрік
+  givebomb <id|ім'я> — дати бомбу гравцю (Саботаж)
   tune [movement|weapons|<зброя>]           — показати параметри руху/зброї
   tune <шлях> <значення>     — змінити: tune movement.sprint_speed 8; tune m249.rpm 850
   tune reset [movement|<зброя>|all]         — повернути заводські значення
@@ -378,6 +379,30 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             }
             g.send(id, S2C::StreakReady(streak));
             format!("Видано: {}", streak.name())
+        }
+        "givebomb" => {
+            let Some(who) = args.next() else {
+                return "Використання: givebomb <id|ім'я>".into();
+            };
+            if g.mode != toon_shared::Mode::Sab {
+                return "Бомба є лише в режимі Саботаж".into();
+            }
+            if g.sab.planted_at.is_some() {
+                return "Бомбу вже закладено".into();
+            }
+            let Some(id) = find_player(g, who) else {
+                return format!("Гравця «{who}» не знайдено");
+            };
+            let Some((team, alive, pos)) = g.p(id).map(|p| (p.team, p.alive, p.body.pos)) else {
+                return format!("Гравця «{who}» не знайдено");
+            };
+            if !alive || !team.is_playing() {
+                return "Гравець має бути живим і в команді".into();
+            }
+            g.sab.carrier = Some(id);
+            g.sab.owner = Some(team);
+            g.sab.pos = pos;
+            "Бомбу видано".into()
         }
         "tune" => tune(g, rest),
         "set" => {

@@ -344,6 +344,7 @@ docker run -d --name toon -p 27015:27015/udp -p 27015:27015/tcp \
 | `bots <n>` / `addbot` / `kickbots` | боти |
 | `tune …` | тонке налаштування руху і кожної зброї (див. розділ вище) |
 | `givestreak <id\|ім'я> <uav\|airstrike\|heli>` | видати кілстрік |
+| `givebomb <id\|ім'я>` | дати бомбу живому гравцю (Саботаж) |
 | `set <ключ> <значення>` | `scorelimit`, `timelimit`, `sabtime`, `rounds`, `bombtimer`, `planttime`, `defusetime`, `ff`, `autobalance`, `maxplayers`, `password`, `name`, `motd`, `botskill` |
 | `save` | зберегти поточні налаштування в конфіг |
 

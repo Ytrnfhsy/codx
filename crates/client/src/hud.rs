@@ -257,13 +257,37 @@ impl GameClient {
                 .find(|r| r.id == self.my_id)
                 .map(|r| r.ping)
                 .unwrap_or(0);
-            ui.text(
-                &format!("{fps:.0} FPS  {ping} мс"),
-                w - 140.0,
-                h - 8.0,
-                14,
-                MUTED,
+            // a badge at the top centre, coloured by how smooth the game runs
+            let fps_c = if fps >= 55.0 {
+                GOOD
+            } else if fps >= 30.0 {
+                ACCENT
+            } else {
+                BAD
+            };
+            let fps_s = format!("{fps:.0} FPS");
+            let ping_s = format!("  {ping} мс");
+            let (fw, pw) = (ui.width(&fps_s, 20, true), ui.width(&ping_s, 16, true));
+            let bw = fw + pw + 20.0;
+            let bx = (w - bw) / 2.0;
+            draw_rectangle(bx, 6.0, bw, 30.0, Color::new(0.0, 0.0, 0.0, 0.55));
+            draw_rectangle_lines(
+                bx,
+                6.0,
+                bw,
+                30.0,
+                2.0,
+                Color::new(fps_c.r, fps_c.g, fps_c.b, 0.8),
             );
+            ui.shadowed(&fps_s, bx + 10.0, 28.0, 20, fps_c);
+            let ping_c = if ping < 80 {
+                TEXT
+            } else if ping < 150 {
+                ACCENT
+            } else {
+                BAD
+            };
+            ui.shadowed(&ping_s, bx + 10.0 + fw, 27.0, 16, ping_c);
         }
 
         // match end / scoreboard
@@ -780,7 +804,64 @@ impl GameClient {
         }
     }
 
+    /// The bomb you carry, shown next to the weapon panel (pulses so it is hard to miss).
+    fn draw_bomb_badge(&self, ui: &Ui) {
+        let carrying = self.alive
+            && self
+                .bomb
+                .as_ref()
+                .is_some_and(|b| b.carrier == Some(self.my_id) && b.planted_at.is_none());
+        if !carrying {
+            return;
+        }
+        let (w, h) = (screen_width(), screen_height());
+        let (s, x, y) = (84.0, w - 310.0 - 84.0 - 12.0, h - 130.0);
+        let pulse = 0.5 + 0.5 * (self.now * 4.0).sin() as f32;
+        draw_rectangle(x, y, s, s + 22.0, Color::new(0.0, 0.0, 0.0, 0.45));
+        draw_rectangle_lines(
+            x,
+            y,
+            s,
+            s + 22.0,
+            2.0 + pulse * 2.0,
+            Color::new(1.0, 0.35 + pulse * 0.3, 0.25, 0.9),
+        );
+        // three red sticks taped together, a timer and a wire
+        let (bx, by) = (x + 14.0, y + 18.0);
+        for k in 0..3 {
+            let sx = bx + k as f32 * 19.0;
+            draw_rectangle(sx, by, 16.0, 46.0, Color::from_rgba(214, 60, 48, 255));
+            draw_rectangle_lines(sx, by, 16.0, 46.0, 2.0, BLACK);
+        }
+        draw_rectangle(
+            bx - 2.0,
+            by + 17.0,
+            59.0,
+            9.0,
+            Color::from_rgba(60, 60, 66, 255),
+        );
+        draw_rectangle(
+            bx + 14.0,
+            by + 6.0,
+            27.0,
+            16.0,
+            Color::from_rgba(30, 32, 36, 255),
+        );
+        draw_rectangle_lines(bx + 14.0, by + 6.0, 27.0, 16.0, 2.0, BLACK);
+        let led = if pulse > 0.5 {
+            Color::from_rgba(255, 70, 50, 255)
+        } else {
+            Color::from_rgba(120, 30, 25, 255)
+        };
+        draw_circle(bx + 27.5, by + 14.0, 3.5, led);
+        draw_line(bx + 41.0, by + 10.0, bx + 54.0, by - 6.0, 2.0, ACCENT);
+        let label = "БОМБА";
+        let lw = ui.width(label, 16, true);
+        ui.shadowed(label, x + (s - lw) / 2.0, y + s + 14.0, 16, ACCENT);
+    }
+
     fn draw_weapon_panel(&self, ui: &Ui) {
+        self.draw_bomb_badge(ui);
         let (w, h) = (screen_width(), screen_height());
         let (wid, mag, res) = self.weapons[self.slot as usize & 1];
         let def = wid.def();
