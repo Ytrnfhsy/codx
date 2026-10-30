@@ -334,7 +334,7 @@ impl Body {
             };
             approach(hv, wish, rate * dt)
         } else {
-            approach(hv, wish, t.air_accel * dt)
+            air_move(hv, wish, inp, t, dt)
         };
         self.vel.x = new_hv.x;
         self.vel.z = new_hv.z;
@@ -460,6 +460,40 @@ impl Body {
     }
 }
 
+/// How fast along the keys' direction the strafe push still works (m/s).
+const AIR_STRAFE_CAP: f32 = 0.8;
+
+/// Steering in the air, CoD4/Quake style: the keys only push along their own direction,
+/// up to the wanted speed *along that direction*, and nothing brakes. So holding A or D
+/// while turning the mouse the same way keeps adding a little sideways push to a velocity
+/// that points elsewhere — a strafe jump gains some speed, up to `strafe_jump` × sprint.
+fn air_move(hv: Vec3, wish: Vec3, inp: &MoveInput, t: &MoveTuning, dt: f32) -> Vec3 {
+    let wish_speed = wish.length();
+    if wish_speed < 1e-4 {
+        return hv;
+    }
+    let dir = wish / wish_speed;
+    // the strafe push: strong, but only while the velocity barely points along the keys
+    let along = hv.dot(dir);
+    let mut v = hv + dir * (AIR_STRAFE_CAP - along).clamp(0.0, t.air_strafe_accel * dt);
+    // plain steering, gentle: it turns the jump but does not speed it up
+    let lim = v.length().max(wish_speed);
+    let along = v.dot(dir);
+    v += dir * (wish_speed - along).clamp(0.0, t.air_accel * dt);
+    if v.length() > lim {
+        v *= lim / v.length();
+    }
+    let or1 = |v: f32| if v > 0.0 { v } else { 1.0 };
+    let cap = (t.sprint_speed * or1(inp.sprint_mult) * or1(inp.speed_mult) * t.strafe_jump)
+        .max(hv.length());
+    let len = v.length();
+    if len > cap {
+        v * (cap / len)
+    } else {
+        v
+    }
+}
+
 fn approach(cur: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
     let diff = target - cur;
     let len = diff.length();
@@ -479,6 +513,49 @@ mod tests {
 
     fn mt() -> MoveTuning {
         MoveTuning::default()
+    }
+
+    /// One jump's worth of air time (0.66 s), sprinting forward at the start.
+    fn jump_speed_after(strafe: f32, turn_rate: f32) -> f32 {
+        let t = mt();
+        let mut yaw = 0.0f32;
+        let (f, _) = yaw_basis(yaw);
+        let mut hv = f * t.sprint_speed;
+        let dt = 1.0 / 60.0;
+        for _ in 0..40 {
+            yaw += turn_rate * dt;
+            let (fwd, right) = yaw_basis(yaw);
+            let inp = MoveInput {
+                forward: 0.0,
+                right: strafe,
+                yaw,
+                sprint: true,
+                ..Default::default()
+            };
+            let wish = (fwd * 0.0 + right * strafe) * t.walk_speed * t.strafe_mult;
+            hv = air_move(hv, wish, &inp, &t, dt);
+        }
+        hv.length()
+    }
+
+    #[test]
+    fn strafe_jump_gains_a_little_speed() {
+        let t = mt();
+        // no keys: momentum is kept, nothing brakes in the air
+        let plain = jump_speed_after(0.0, 0.0);
+        assert!((plain - t.sprint_speed).abs() < 1e-3, "{plain}");
+        // holding D while turning right (yaw goes down) speeds up
+        let strafe = jump_speed_after(1.0, -3.0);
+        assert!(strafe > plain + 0.5, "{strafe} vs {plain}");
+        // never past the cap, which stays inside the server's movement check
+        let cap = t.sprint_speed * t.strafe_jump;
+        assert!(strafe <= cap + 1e-3, "{strafe} > {cap}");
+        assert!(cap < t.sprint_speed * 1.2);
+        // just holding D, or turning the wrong way, gives next to nothing
+        for turn in [0.0, 2.5] {
+            let v = jump_speed_after(1.0, turn);
+            assert!(v < plain + 0.1, "{turn}: {v}");
+        }
     }
 
     #[test]
