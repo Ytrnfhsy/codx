@@ -8,8 +8,18 @@ variants that are picked at random go into `<name>_2.ogg`, `<name>_3.ogg`, … (
 
 Only use recordings you are allowed to ship with the game, for example CC0 packs.
 
-Built in: `gun_ak47.wav` and `gun_ak47_2.wav` (a recorded AK-47 shot and a slightly deeper copy)
-are compiled into the game; files with the same names placed next to the game replace them.
+Built in (compiled into the game; files with the same names placed next to the game
+replace them): recorded shots for the M4A1 (5 takes), AK-47 (3), MP5 (5), P90 (3), M249 (2),
+RPD (3), R700 (5), M40A3 (3, the R700 takes a touch deeper), M9, USP .45 and Desert Eagle,
+and the weapons' own reload sounds listed below. The G3, AK-74u and both shotguns, and
+every other sound, are still synthesized. `tools/cut_sounds.py` rebuilds the files from the
+original pack (free recordings from Pixabay and QuickSounds.com).
+
+Reload sounds can be given per weapon: `mag_out_<gun>`, `mag_in_<gun>`, `bolt_<gun>` (the
+gun names as in the `gun_*` files). A weapon without its own falls back to `mag_out`,
+`mag_in`, `bolt`. Built in: AK-47 and AK-74u (magazine in, charging handle), MP5 (all three,
+two magazine-in takes), P90 (all three), M249 and RPD (all three, two bolt takes), USP
+(slide).
 
 | File | Sound |
 |---|---|

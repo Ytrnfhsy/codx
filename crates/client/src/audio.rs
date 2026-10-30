@@ -66,6 +66,11 @@ pub enum Sfx {
     Whistle,
     /// Drone rotors (looped).
     Drone,
+    /// A weapon's own reload sounds, where recordings exist (`mag_out_ak47`, …); the
+    /// generic `MagOut`/`MagIn`/`Bolt` play for the rest.
+    MagOutOf(WeaponId),
+    MagInOf(WeaponId),
+    BoltOf(WeaponId),
 }
 
 impl Sfx {
@@ -73,10 +78,34 @@ impl Sfx {
         Sfx::Gun(w)
     }
 
+    /// This reload sound as made by weapon `w` (falls back to the generic one when the
+    /// weapon has no recording of its own).
+    pub fn of(self, w: WeaponId) -> Sfx {
+        match self {
+            Sfx::MagOut => Sfx::MagOutOf(w),
+            Sfx::MagIn => Sfx::MagInOf(w),
+            Sfx::Bolt => Sfx::BoltOf(w),
+            other => other,
+        }
+    }
+
+    /// What to play when this sound has nothing loaded.
+    fn fallback(self) -> Option<Sfx> {
+        match self {
+            Sfx::MagOutOf(_) => Some(Sfx::MagOut),
+            Sfx::MagInOf(_) => Some(Sfx::MagIn),
+            Sfx::BoltOf(_) => Some(Sfx::Bolt),
+            _ => None,
+        }
+    }
+
     /// File name stem for a recorded replacement in `assets/sounds/`.
     pub fn file_name(self) -> String {
         match self {
-            Sfx::Gun(w) => format!("gun_{}", format!("{w:?}").to_lowercase()),
+            Sfx::Gun(w) => format!("gun_{}", weapon_stem(w)),
+            Sfx::MagOutOf(w) => format!("mag_out_{}", weapon_stem(w)),
+            Sfx::MagInOf(w) => format!("mag_in_{}", weapon_stem(w)),
+            Sfx::BoltOf(w) => format!("bolt_{}", weapon_stem(w)),
             Sfx::HeliGun => "heli_gun".into(),
             Sfx::HitHead => "hit_head".into(),
             Sfx::MagOut => "mag_out".into(),
@@ -100,7 +129,12 @@ impl Sfx {
     }
 }
 
-/// Reload sound cues: (fraction of the reload, sound).
+fn weapon_stem(w: WeaponId) -> String {
+    format!("{w:?}").to_lowercase()
+}
+
+/// Reload sound cues: (fraction of the reload, sound). Play them with `Sfx::of` so each
+/// weapon uses its own recordings.
 pub fn reload_cues(class: WeaponClass) -> &'static [(f32, Sfx)] {
     match class {
         WeaponClass::Shotgun => &[
@@ -949,6 +983,10 @@ impl Synth {
             o
         };
         match s {
+            // recordings only (never asked for: they have no synthesized variants)
+            Sfx::MagOutOf(_) => self.make(Sfx::MagOut, variant),
+            Sfx::MagInOf(_) => self.make(Sfx::MagIn, variant),
+            Sfx::BoltOf(_) => self.make(Sfx::Bolt, variant),
             Sfx::Gun(w) => self.shot(gun_params(w)),
             Sfx::HeliGun => self.shot(Gun {
                 body: 200.0,
@@ -1176,6 +1214,8 @@ fn variants(s: Sfx) -> usize {
     match s {
         Sfx::Gun(_) | Sfx::Far | Sfx::Explosion | Sfx::Hit | Sfx::Hurt => 2,
         Sfx::Step | Sfx::Whiz | Sfx::Shell | Sfx::Flesh => 4,
+        // recordings only; without one the generic sound plays
+        Sfx::MagOutOf(_) | Sfx::MagInOf(_) | Sfx::BoltOf(_) => 0,
         _ => 1,
     }
 }
@@ -1214,6 +1254,9 @@ fn all() -> Vec<Sfx> {
         Sfx::Whistle,
         Sfx::Drone,
     ]);
+    for w in WeaponId::all() {
+        v.extend([Sfx::MagOutOf(w), Sfx::MagInOf(w), Sfx::BoltOf(w)]);
+    }
     v
 }
 
@@ -1299,8 +1342,44 @@ fn recordings(s: Sfx) -> Vec<(String, Vec<u8>)> {
 }
 
 /// Recordings shipped inside the game (used unless a file in `assets/sounds/` replaces
-/// them).
+/// them): (sound name, file contents), variants of a sound in order.
 const BUNDLED: &[(&str, &[u8])] = &[
+    (
+        "bolt_ak47",
+        include_bytes!("../../../assets/sounds/bolt_ak47.ogg"),
+    ),
+    (
+        "bolt_ak74u",
+        include_bytes!("../../../assets/sounds/bolt_ak74u.ogg"),
+    ),
+    (
+        "bolt_m249",
+        include_bytes!("../../../assets/sounds/bolt_m249.ogg"),
+    ),
+    (
+        "bolt_m249",
+        include_bytes!("../../../assets/sounds/bolt_m249_2.ogg"),
+    ),
+    (
+        "bolt_mp5",
+        include_bytes!("../../../assets/sounds/bolt_mp5.ogg"),
+    ),
+    (
+        "bolt_p90",
+        include_bytes!("../../../assets/sounds/bolt_p90.ogg"),
+    ),
+    (
+        "bolt_rpd",
+        include_bytes!("../../../assets/sounds/bolt_rpd.ogg"),
+    ),
+    (
+        "bolt_rpd",
+        include_bytes!("../../../assets/sounds/bolt_rpd_2.ogg"),
+    ),
+    (
+        "bolt_usp",
+        include_bytes!("../../../assets/sounds/bolt_usp.ogg"),
+    ),
     (
         "gun_ak47",
         include_bytes!("../../../assets/sounds/gun_ak47.wav"),
@@ -1308,6 +1387,170 @@ const BUNDLED: &[(&str, &[u8])] = &[
     (
         "gun_ak47",
         include_bytes!("../../../assets/sounds/gun_ak47_2.wav"),
+    ),
+    (
+        "gun_ak47",
+        include_bytes!("../../../assets/sounds/gun_ak47_3.ogg"),
+    ),
+    (
+        "gun_deagle",
+        include_bytes!("../../../assets/sounds/gun_deagle.ogg"),
+    ),
+    (
+        "gun_m249",
+        include_bytes!("../../../assets/sounds/gun_m249.ogg"),
+    ),
+    (
+        "gun_m249",
+        include_bytes!("../../../assets/sounds/gun_m249_2.ogg"),
+    ),
+    (
+        "gun_m4",
+        include_bytes!("../../../assets/sounds/gun_m4.ogg"),
+    ),
+    (
+        "gun_m4",
+        include_bytes!("../../../assets/sounds/gun_m4_2.ogg"),
+    ),
+    (
+        "gun_m4",
+        include_bytes!("../../../assets/sounds/gun_m4_3.ogg"),
+    ),
+    (
+        "gun_m4",
+        include_bytes!("../../../assets/sounds/gun_m4_4.ogg"),
+    ),
+    (
+        "gun_m4",
+        include_bytes!("../../../assets/sounds/gun_m4_5.ogg"),
+    ),
+    (
+        "gun_m40",
+        include_bytes!("../../../assets/sounds/gun_m40.ogg"),
+    ),
+    (
+        "gun_m40",
+        include_bytes!("../../../assets/sounds/gun_m40_2.ogg"),
+    ),
+    (
+        "gun_m40",
+        include_bytes!("../../../assets/sounds/gun_m40_3.ogg"),
+    ),
+    (
+        "gun_m9",
+        include_bytes!("../../../assets/sounds/gun_m9.ogg"),
+    ),
+    (
+        "gun_mp5",
+        include_bytes!("../../../assets/sounds/gun_mp5.ogg"),
+    ),
+    (
+        "gun_mp5",
+        include_bytes!("../../../assets/sounds/gun_mp5_2.ogg"),
+    ),
+    (
+        "gun_mp5",
+        include_bytes!("../../../assets/sounds/gun_mp5_3.ogg"),
+    ),
+    (
+        "gun_mp5",
+        include_bytes!("../../../assets/sounds/gun_mp5_4.ogg"),
+    ),
+    (
+        "gun_mp5",
+        include_bytes!("../../../assets/sounds/gun_mp5_5.ogg"),
+    ),
+    (
+        "gun_p90",
+        include_bytes!("../../../assets/sounds/gun_p90.ogg"),
+    ),
+    (
+        "gun_p90",
+        include_bytes!("../../../assets/sounds/gun_p90_2.ogg"),
+    ),
+    (
+        "gun_p90",
+        include_bytes!("../../../assets/sounds/gun_p90_3.ogg"),
+    ),
+    (
+        "gun_r700",
+        include_bytes!("../../../assets/sounds/gun_r700.ogg"),
+    ),
+    (
+        "gun_r700",
+        include_bytes!("../../../assets/sounds/gun_r700_2.ogg"),
+    ),
+    (
+        "gun_r700",
+        include_bytes!("../../../assets/sounds/gun_r700_3.ogg"),
+    ),
+    (
+        "gun_r700",
+        include_bytes!("../../../assets/sounds/gun_r700_4.ogg"),
+    ),
+    (
+        "gun_r700",
+        include_bytes!("../../../assets/sounds/gun_r700_5.ogg"),
+    ),
+    (
+        "gun_rpd",
+        include_bytes!("../../../assets/sounds/gun_rpd.ogg"),
+    ),
+    (
+        "gun_rpd",
+        include_bytes!("../../../assets/sounds/gun_rpd_2.ogg"),
+    ),
+    (
+        "gun_rpd",
+        include_bytes!("../../../assets/sounds/gun_rpd_3.ogg"),
+    ),
+    (
+        "gun_usp",
+        include_bytes!("../../../assets/sounds/gun_usp.ogg"),
+    ),
+    (
+        "mag_in_ak47",
+        include_bytes!("../../../assets/sounds/mag_in_ak47.ogg"),
+    ),
+    (
+        "mag_in_ak74u",
+        include_bytes!("../../../assets/sounds/mag_in_ak74u.ogg"),
+    ),
+    (
+        "mag_in_m249",
+        include_bytes!("../../../assets/sounds/mag_in_m249.ogg"),
+    ),
+    (
+        "mag_in_mp5",
+        include_bytes!("../../../assets/sounds/mag_in_mp5.ogg"),
+    ),
+    (
+        "mag_in_mp5",
+        include_bytes!("../../../assets/sounds/mag_in_mp5_2.ogg"),
+    ),
+    (
+        "mag_in_p90",
+        include_bytes!("../../../assets/sounds/mag_in_p90.ogg"),
+    ),
+    (
+        "mag_in_rpd",
+        include_bytes!("../../../assets/sounds/mag_in_rpd.ogg"),
+    ),
+    (
+        "mag_out_m249",
+        include_bytes!("../../../assets/sounds/mag_out_m249.ogg"),
+    ),
+    (
+        "mag_out_mp5",
+        include_bytes!("../../../assets/sounds/mag_out_mp5.ogg"),
+    ),
+    (
+        "mag_out_p90",
+        include_bytes!("../../../assets/sounds/mag_out_p90.ogg"),
+    ),
+    (
+        "mag_out_rpd",
+        include_bytes!("../../../assets/sounds/mag_out_rpd.ogg"),
     ),
 ];
 
@@ -1405,6 +1648,11 @@ impl Audio {
             }
             *l = now;
         }
+        let s = match (self.sounds.get(&s), s.fallback()) {
+            (Some(l), Some(f)) if l.is_empty() => f,
+            (None, Some(f)) => f,
+            _ => s,
+        };
         if let Some(list) = self.sounds.get(&s) {
             if list.is_empty() {
                 return;
@@ -1583,19 +1831,43 @@ mod tests {
     }
 
     #[test]
-    fn bundled_recordings_decode() {
-        for (name, data) in BUNDLED {
-            let pcm = decode(data).unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(pcm.len() > 10_000, "{name}");
-        }
-        assert_eq!(recordings(Sfx::Gun(WeaponId::Ak47)).len(), 2);
-    }
-
-    #[test]
     fn file_names() {
         assert_eq!(Sfx::Gun(WeaponId::Ak47).file_name(), "gun_ak47");
         assert_eq!(Sfx::MagIn.file_name(), "mag_in");
         assert_eq!(Sfx::Explosion.file_name(), "explosion");
+        assert_eq!(Sfx::MagIn.of(WeaponId::Mp5).file_name(), "mag_in_mp5");
+        assert_eq!(Sfx::Bolt.of(WeaponId::Usp).file_name(), "bolt_usp");
+        assert_eq!(Sfx::Pump.of(WeaponId::W1200), Sfx::Pump);
+    }
+
+    #[test]
+    fn bundled_recordings_decode() {
+        // every recording shipped in the game must decode (the audio backend aborts on
+        // bad data), and each weapon in the pack has its shots
+        for (name, data) in BUNDLED {
+            let pcm = decode(data).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(pcm.len() > 4410, "{name} too short");
+            assert!(pcm.iter().all(|f| f[0].is_finite() && f[1].is_finite()));
+        }
+        for stem in [
+            "gun_m4", "gun_mp5", "gun_p90", "gun_m249", "gun_rpd", "gun_r700", "gun_m40",
+        ] {
+            assert!(
+                BUNDLED.iter().filter(|(n, _)| *n == stem).count() >= 2,
+                "{stem}"
+            );
+        }
+        for stem in [
+            "mag_in_ak47",
+            "bolt_mp5",
+            "mag_out_p90",
+            "bolt_m249",
+            "mag_in_rpd",
+            "bolt_usp",
+        ] {
+            assert!(BUNDLED.iter().any(|(n, _)| *n == stem), "{stem}");
+        }
+        assert_eq!(recordings(Sfx::Gun(WeaponId::Ak47)).len(), 3);
     }
 }
 

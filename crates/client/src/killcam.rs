@@ -379,7 +379,7 @@ impl Killcam {
         if let (Some(a), Some(p)) = (audio, self.reload_progress(tuning)) {
             let cues = reload_cues(self.weapon.def().class);
             while self.reload_cue < cues.len() && p >= cues[self.reload_cue].0 {
-                a.play(cues[self.reload_cue].1, 0.45);
+                a.play(cues[self.reload_cue].1.of(self.weapon), 0.45);
                 self.reload_cue += 1;
             }
         }
