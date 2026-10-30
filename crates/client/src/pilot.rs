@@ -18,7 +18,7 @@ pub struct Piloting {
     pub pos: Vec3,
     pub yaw: f32,
     pub pitch: f32,
-    /// FPV forward speed.
+    /// FPV speed for the HUD.
     pub speed: f32,
     pub vel: Vec3,
     /// Robot physics.
@@ -29,6 +29,13 @@ pub struct Piloting {
     pub ammo: u8,
     /// Seconds since we took control.
     pub age: f32,
+    /// FPV camera bank (radians), from sliding sideways and turning.
+    pub roll: f32,
+    /// FPV video link quality, 1 = clear; it drops with distance and with buildings
+    /// between the drone and the soldier holding the controller.
+    pub signal: f32,
+    /// Yaw last frame, to bank into turns.
+    last_yaw: f32,
 }
 
 impl Piloting {
@@ -40,11 +47,11 @@ impl Piloting {
             pos,
             yaw: h.yaw,
             pitch: match h.kind {
-                VehicleKind::Fpv => pitch.max(0.0),
+                VehicleKind::Fpv => pitch.clamp(-0.4, 0.4),
                 VehicleKind::Bomber => -1.45,
                 VehicleKind::Nrk => 0.0,
             },
-            speed: FPV_SPEED,
+            speed: 0.0,
             vel: Vec3::ZERO,
             body: Body {
                 pos,
@@ -57,6 +64,9 @@ impl Piloting {
             time_left: h.time_left,
             ammo: h.ammo,
             age: 0.0,
+            roll: 0.0,
+            signal: 1.0,
+            last_yaw: h.yaw,
         }
     }
 
@@ -124,6 +134,7 @@ impl GameClient {
     /// Keys and movement of the vehicle for this frame.
     pub fn update_piloting(&mut self, dt: f32, can_act: bool) {
         let key = |k: KeyCode| can_act && is_key_down(k);
+        let link = self.eye();
         let Some(p) = &mut self.piloting else { return };
         let mut fwd = 0.0;
         let mut right = 0.0;
@@ -140,8 +151,11 @@ impl GameClient {
             right -= 1.0;
         }
         let mut keys = 0;
-        // left mouse button or Space
-        if can_act && (is_mouse_button_down(MouseButton::Left) || is_key_down(KeyCode::Space)) {
+        // left mouse button, or Space where Space does not mean "up"
+        if can_act
+            && (is_mouse_button_down(MouseButton::Left)
+                || (p.kind != VehicleKind::Fpv && is_key_down(KeyCode::Space)))
+        {
             keys |= keys::FIRE;
         }
         if can_act && is_key_pressed(KeyCode::E) {
@@ -152,23 +166,50 @@ impl GameClient {
         let before = p.pos;
         match p.kind {
             VehicleKind::Fpv => {
-                let want = if fwd > 0.0 {
+                let mut up = 0.0;
+                if key(KeyCode::Space) {
+                    up += 1.0;
+                }
+                if key(KeyCode::LeftControl) || key(KeyCode::C) {
+                    up -= 1.0;
+                }
+                let boost = key(KeyCode::LeftShift);
+                if boost {
                     keys |= keys::BOOST;
-                    FPV_BOOST
-                } else if fwd < 0.0 {
-                    keys |= keys::BRAKE;
-                    FPV_SLOW
-                } else {
-                    FPV_SPEED
-                };
-                p.speed += (want - p.speed) * (dt * FPV_ACCEL).min(1.0);
-                let dir = look_dir(p.yaw, p.pitch);
-                let (to, hit) = fpv_step(&self.world, p.pos, dir, p.speed, dt);
+                }
+                let target = fpv_target(p.yaw, p.pitch, fwd, right, up, boost);
+                let vel = fpv_accel(p.vel, target, dt);
+                let (to, left, impact) = fpv_move(&self.world, p.pos, vel, dt);
                 p.pos = to;
-                // touching anything sets the charge off
-                if hit && p.age >= FPV_ARM_TIME {
+                p.vel = left;
+                p.speed = left.length();
+                // a hard crash sets the charge off, a gentle bump just stops it
+                if impact >= FPV_CRASH_SPEED && p.age >= FPV_ARM_TIME {
                     keys |= keys::FIRE;
                 }
+                // bank into slides and turns like a real quad
+                let (_, r) = toon_shared::yaw_basis(p.yaw);
+                let turn = toon_shared::wrap_angle(p.yaw - p.last_yaw) / dt.max(1e-3);
+                p.last_yaw = p.yaw;
+                let want_roll = (p.vel.dot(r) * 0.03 - turn * 0.04).clamp(-0.45, 0.45);
+                p.roll += (want_roll - p.roll) * (dt * 6.0).min(1.0);
+                // the video link: the further and the more walls in between, the worse
+                let d = p.pos - link;
+                let dist = d.length();
+                let mut want = 1.0 - (dist / 160.0).min(1.0) * 0.3;
+                if dist > 0.5 {
+                    let dir = d / dist;
+                    if let Some((t1, _)) = self.world.raycast(link, dir, dist) {
+                        // from the first wall the signal enters to the last one it leaves
+                        let t2 = self
+                            .world
+                            .raycast(p.pos, -dir, dist)
+                            .map_or(0.0, |(t, _)| t);
+                        let solid = (dist - t1 - t2).max(0.0);
+                        want -= 0.3 + (solid * 0.025).min(0.35);
+                    }
+                }
+                p.signal += (want.clamp(0.1, 1.0) - p.signal) * (dt * 2.5).min(1.0);
             }
             VehicleKind::Bomber => {
                 p.pos = bomber_step(p.pos, p.yaw, fwd, right, dt, self.map.min, self.map.max);
@@ -191,7 +232,7 @@ impl GameClient {
                 p.pos = p.body.pos;
             }
         }
-        if dt > 0.0 {
+        if dt > 0.0 && p.kind != VehicleKind::Fpv {
             p.vel = (p.pos - before) / dt;
         }
         // the exit press must reach the server even between two sends
@@ -223,7 +264,13 @@ impl GameClient {
     pub fn pilot_camera(&self) -> Option<(Vec3, f32, f32, Option<f32>)> {
         let p = self.piloting.as_ref()?;
         Some(match p.kind {
-            VehicleKind::Fpv => (p.pos, p.yaw, p.pitch, Some(105.0)),
+            VehicleKind::Fpv => {
+                // a little propeller shake, more at speed
+                let s = 0.002 + p.speed * 0.00015;
+                let t = self.now as f32;
+                let shake = vec2((t * 31.0).sin() + (t * 47.0).sin(), (t * 37.0).cos()) * s;
+                (p.pos, p.yaw + shake.x, p.pitch + shake.y, Some(105.0))
+            }
             VehicleKind::Bomber => (p.pos - vec3(0.0, 1.0, 0.0), p.yaw, p.pitch, Some(80.0)),
             VehicleKind::Nrk => {
                 // over the shoulder, pulled in when a wall is behind
@@ -248,36 +295,7 @@ impl GameClient {
         let dur = p.kind.duration();
         let left = p.time_left / dur;
         match p.kind {
-            VehicleKind::Fpv => {
-                // a cheap video link: scanlines, noise and a vignette that worsen with time
-                let noise = (1.0 - left).clamp(0.0, 1.0);
-                for k in 0..(h as i32 / 4) {
-                    draw_rectangle(0.0, k as f32 * 4.0, w, 1.0, Color::new(0.0, 0.0, 0.0, 0.10));
-                }
-                let n = (40.0 + 260.0 * noise) as i32;
-                for k in 0..n {
-                    let s = ((self.now * 977.0) as i64 + k as i64 * 7919) as f32;
-                    let x = (s * 12.9898).sin().abs().fract() * w;
-                    let y = (s * 78.233).sin().abs().fract() * h;
-                    draw_rectangle(
-                        x,
-                        y,
-                        2.0 + (k % 3) as f32,
-                        1.0,
-                        Color::new(1.0, 1.0, 1.0, 0.25),
-                    );
-                }
-                draw_circle_lines(cx, cy, 18.0, 2.0, Color::new(1.0, 1.0, 1.0, 0.8));
-                draw_line(cx - 30.0, cy, cx - 10.0, cy, 2.0, WHITE);
-                draw_line(cx + 10.0, cy, cx + 30.0, cy, 2.0, WHITE);
-                ui.shadowed(
-                    &format!("{:.0} км/год", p.speed * 3.6),
-                    cx + 40.0,
-                    cy + 6.0,
-                    18,
-                    TEXT,
-                );
-            }
+            VehicleKind::Fpv => self.draw_fpv_video(ui, p, left),
             VehicleKind::Bomber => {
                 // the red ring on the ground is the sight; bombs left under the top band
                 for k in 0..BOMBER_DROPS {
@@ -330,7 +348,9 @@ impl GameClient {
         );
         draw_rectangle(bx + 12.0, 90.0, (bw - 24.0) * left, 4.0, ACCENT);
         let help = match p.kind {
-            VehicleKind::Fpv => "W/S — швидше/повільніше · ЛКМ/Пробіл або E — підірвати",
+            VehicleKind::Fpv => {
+                "W/S — вперед/назад · A/D — вбік · Пробіл/Ctrl — вгору/вниз · Shift — газ · ЛКМ або E — підірвати"
+            }
             VehicleKind::Bomber => {
                 "WASD — летіти · миша — розворот · ЛКМ/Пробіл — скинути · E — вийти"
             }
@@ -338,4 +358,109 @@ impl GameClient {
         };
         ui.centered(help, cx, h - 24.0, 16, TEXT);
     }
+
+    /// The FPV goggles: scanlines and the reticle, plus interference that grows as the
+    /// link weakens (behind buildings, far away, flat battery). Kept light: static, a few
+    /// torn lines, a grey wash and now and then a short dropout, never a blank screen.
+    fn draw_fpv_video(&self, ui: &Ui, p: &Piloting, left: f32) {
+        let (w, h) = (screen_width(), screen_height());
+        let (cx, cy) = (w / 2.0, h / 2.0);
+        let bad = (1.0 - p.signal).clamp(0.0, 1.0);
+        let battery = (1.0 - left).clamp(0.0, 1.0);
+        let frame = (self.now * 24.0) as u64;
+        for k in 0..(h as i32 / 4) {
+            draw_rectangle(0.0, k as f32 * 4.0, w, 1.0, Color::new(0.0, 0.0, 0.0, 0.10));
+        }
+        if bad > 0.05 {
+            draw_rectangle(0.0, 0.0, w, h, Color::new(0.45, 0.45, 0.45, bad * 0.22));
+        }
+        // snow
+        let n = (40.0 + 120.0 * battery + 650.0 * bad) as u64;
+        for k in 0..n {
+            let x = hash(frame * 7919 + k * 2) * w;
+            let y = hash(frame * 7919 + k * 2 + 1) * h;
+            let a = 0.15 + 0.3 * hash(k + frame);
+            draw_rectangle(
+                x,
+                y,
+                2.0 + (k % 3) as f32,
+                1.0,
+                Color::new(1.0, 1.0, 1.0, a),
+            );
+        }
+        // torn lines, and a slow dark band rolling down the picture
+        let tears = (bad * 7.0) as u64;
+        for k in 0..tears {
+            let y = hash(frame * 31 + k * 977) * h;
+            let th = 2.0 + hash(frame + k * 13) * 10.0 * bad;
+            let shift = (hash(frame * 3 + k) - 0.5) * 80.0 * bad;
+            draw_rectangle(shift, y, w, th, Color::new(0.8, 0.8, 0.8, 0.08 + 0.2 * bad));
+        }
+        if bad > 0.2 {
+            let roll_y = ((self.now * 0.35).fract() as f32) * (h + 120.0) - 120.0;
+            draw_rectangle(0.0, roll_y, w, 90.0, Color::new(0.0, 0.0, 0.0, 0.12 * bad));
+        }
+        // a short dropout every now and then on a weak link
+        let blink = (self.now * 6.0) as u64;
+        if bad > 0.35 && hash(blink * 101) < (bad - 0.35) * 0.6 {
+            draw_rectangle(0.0, 0.0, w, h, Color::new(0.5, 0.5, 0.5, 0.35));
+        }
+
+        draw_circle_lines(cx, cy, 18.0, 2.0, Color::new(1.0, 1.0, 1.0, 0.8));
+        draw_line(cx - 30.0, cy, cx - 10.0, cy, 2.0, WHITE);
+        draw_line(cx + 10.0, cy, cx + 30.0, cy, 2.0, WHITE);
+        // horizon: shows the bank and the nose angle
+        let (sr, cr) = (-p.roll).sin_cos();
+        let hy = cy + p.pitch * h * 0.35;
+        let c = Color::new(1.0, 1.0, 1.0, 0.35);
+        for side in [-1.0f32, 1.0] {
+            let (x0, x1) = (side * 60.0, side * 130.0);
+            draw_line(
+                cx + x0 * cr,
+                hy + x0 * sr,
+                cx + x1 * cr,
+                hy + x1 * sr,
+                2.0,
+                c,
+            );
+        }
+        ui.shadowed(
+            &format!("{:.0} км/год", p.speed * 3.6),
+            cx + 40.0,
+            cy + 6.0,
+            18,
+            TEXT,
+        );
+        if p.age < FPV_ARM_TIME {
+            ui.centered("ЗАРЯД ЗВОДИТЬСЯ…", cx, cy + 50.0, 16, TEXT);
+        }
+        // link strength
+        let bars = (p.signal * 5.0).round() as i32;
+        let (bx, by) = (w - 120.0, 140.0);
+        ui.shadowed("СИГНАЛ", bx - 6.0, by - 26.0, 14, TEXT);
+        for k in 0..5 {
+            let bh = 6.0 + k as f32 * 4.0;
+            let on = k < bars;
+            let col = if !on {
+                Color::new(0.3, 0.3, 0.3, 0.6)
+            } else if bars <= 2 {
+                BAD
+            } else {
+                GOOD
+            };
+            draw_rectangle(bx + k as f32 * 10.0, by - bh, 7.0, bh, col);
+        }
+        if p.signal < 0.5 && (self.now * 2.5).fract() < 0.6 {
+            ui.centered("СЛАБКИЙ СИГНАЛ", cx, cy - 60.0, 20, BAD);
+        }
+    }
+}
+
+/// A repeatable pseudo-random number in 0..1.
+fn hash(n: u64) -> f32 {
+    let mut x = n.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    x ^= x >> 29;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 32;
+    (x >> 40) as f32 / (1u64 << 24) as f32
 }

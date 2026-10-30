@@ -153,10 +153,15 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         fovy = 2.0 * ((fovy * 0.5).tan() / zoom).atan();
     }
     let dir = look_dir(yaw, pitch);
+    // the FPV camera banks with the drone
+    let roll = match (&g.piloting, &g.killcam) {
+        (Some(p), None) if g.alive && p.kind == VehicleKind::Fpv => p.roll,
+        _ => 0.0,
+    };
     let cam = Camera3D {
         position: pos,
         target: pos + dir,
-        up: Vec3::Y,
+        up: Quat::from_axis_angle(dir, roll) * Vec3::Y,
         fovy,
         aspect: None,
         projection: Projection::Perspective,

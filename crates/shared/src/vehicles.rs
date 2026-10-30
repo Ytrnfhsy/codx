@@ -44,7 +44,8 @@ impl VehicleKind {
     /// Seconds it lasts.
     pub fn duration(self) -> f32 {
         match self {
-            VehicleKind::Fpv => 20.0,
+            // it may hover a while before the pilot finds a target
+            VehicleKind::Fpv => 30.0,
             VehicleKind::Bomber => 45.0,
             VehicleKind::Nrk => 60.0,
         }
@@ -75,18 +76,30 @@ impl VehicleKind {
 }
 
 // ---- FPV kamikaze drone
-pub const FPV_SPEED: f32 = 22.0;
+// It takes off hovering and flies like a small quadcopter: W pushes it where the camera
+// looks, A/D slide it sideways, Space/Ctrl climb and sink, and with no keys it brakes to a
+// hover. The velocity follows the sticks with some inertia.
+/// Cruise speed with W held.
+pub const FPV_SPEED: f32 = 20.0;
+/// With Shift as well.
 pub const FPV_BOOST: f32 = 32.0;
-pub const FPV_SLOW: f32 = 12.0;
-/// How hard the drone turns towards a new speed (1/s).
-pub const FPV_ACCEL: f32 = 3.0;
+/// Backwards (S), sideways (A/D) and up/down.
+pub const FPV_BACK: f32 = 6.0;
+pub const FPV_STRAFE: f32 = 7.0;
+pub const FPV_CLIMB: f32 = 6.0;
+/// How quickly the velocity follows the sticks (1/s), and how quickly it stops on its own.
+pub const FPV_ACCEL: f32 = 2.6;
+pub const FPV_DRAG: f32 = 2.0;
 pub const FPV_RADIUS: f32 = 0.35;
+/// Running into something at least this fast (m/s, straight at it) sets the charge off;
+/// slower bumps and glancing touches just slide along.
+pub const FPV_CRASH_SPEED: f32 = 9.0;
 pub const FPV_BLAST_RADIUS: f32 = 6.5;
 pub const FPV_BLAST_DAMAGE: f32 = 230.0;
 /// Enemies this close set it off.
 pub const FPV_TRIGGER: f32 = 1.6;
-/// The charge arms this long after take-off; before that bumping into things only stops
-/// the drone (so it does not blow up its own pilot).
+/// The charge arms this long after take-off; before that nothing sets it off (so it does
+/// not blow up its own pilot).
 pub const FPV_ARM_TIME: f32 = 0.7;
 
 // ---- bomber drone
@@ -105,14 +118,52 @@ pub const NRK_SPREAD: f32 = 0.022;
 /// Turret muzzle above `pos`.
 pub const NRK_GUN_Y: f32 = 1.05;
 
-/// Moves the FPV drone along `dir`. Returns the new position and whether it hit something
-/// (it then stops at the obstacle).
-pub fn fpv_step(world: &World, pos: Vec3, dir: Vec3, speed: f32, dt: f32) -> (Vec3, bool) {
-    let len = speed * dt;
-    match world.raycast(pos, dir, len + FPV_RADIUS) {
-        Some((t, _)) => (pos + dir * (t - FPV_RADIUS).max(0.0), true),
-        None => (pos + dir * len, false),
+/// The velocity the FPV drone wants for the held sticks: `fwd`/`right`/`up` are -1..1,
+/// forward is along the camera (`yaw`, `pitch`), sideways and up/down are level.
+pub fn fpv_target(yaw: f32, pitch: f32, fwd: f32, right: f32, up: f32, boost: bool) -> Vec3 {
+    let along = if fwd > 0.0 {
+        fwd * if boost { FPV_BOOST } else { FPV_SPEED }
+    } else {
+        fwd * FPV_BACK
+    };
+    let (_, r) = crate::yaw_basis(yaw);
+    crate::look_dir(yaw, pitch) * along + r * right * FPV_STRAFE + Vec3::Y * up * FPV_CLIMB
+}
+
+/// Velocity after `dt` of chasing `target`: speeds up with the sticks, stops on its own.
+pub fn fpv_accel(vel: Vec3, target: Vec3, dt: f32) -> Vec3 {
+    let k = if target.length_squared() > 0.01 {
+        FPV_ACCEL
+    } else {
+        FPV_DRAG
+    };
+    vel + (target - vel) * (dt * k).min(1.0)
+}
+
+/// Moves the FPV drone by `vel * dt`, one axis at a time so it slides along what it
+/// touches. Returns the new position, the velocity left after any contact and how fast it
+/// ran into something (0 when it touched nothing).
+pub fn fpv_move(world: &World, pos: Vec3, vel: Vec3, dt: f32) -> (Vec3, Vec3, f32) {
+    let mut p = pos;
+    let mut v = vel;
+    let mut impact = 0.0f32;
+    for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+        let s = v.dot(axis);
+        let d = s * dt;
+        if d.abs() < 1e-6 {
+            continue;
+        }
+        let dir = axis * d.signum();
+        match world.raycast(p, dir, d.abs() + FPV_RADIUS) {
+            Some((t, _)) => {
+                p += dir * (t - FPV_RADIUS).max(0.0);
+                impact = impact.max(s.abs());
+                v -= axis * s;
+            }
+            None => p += dir * d.abs(),
+        }
     }
+    (p, v, impact)
 }
 
 /// Moves the bomber drone at its fixed altitude; `forward`/`right` are -1..1 relative to

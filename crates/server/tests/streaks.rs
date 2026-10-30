@@ -190,11 +190,22 @@ fn fpv_cannot_fly_through_walls() {
             pilot: true,
         },
     );
-    // straight down into the ground: it stops at the ground and blows up there
     let v = g.vehicle_hud(me).unwrap();
-    let below = Vec3::from_array(v.pos) - vec3(0.0, 10.0, 0.0);
+    let start = Vec3::from_array(v.pos);
+    assert!(start.y > 2.0, "it takes off above the head");
+    // it hovers until the pilot moves it
+    tick(&mut g, 1.0);
+    assert_eq!(Vec3::from_array(g.vehicle_hud(me).unwrap().pos), start);
+    // straight down: it stops on the ground instead of going through
+    let below = start - vec3(0.0, 10.0, 0.0);
     drive_towards(&mut g, me, below, 0, 1.0);
-    assert!(g.vehicles.is_empty(), "it hit the ground and blew up");
+    let v = g
+        .vehicle_hud(me)
+        .expect("bumping the ground does not end it");
+    assert!(v.pos[1] > 0.2 && v.pos[1] < 1.0, "{:?}", v.pos);
+    // the pilot's crash (FIRE) blows it up there
+    drive_towards(&mut g, me, below, keys::FIRE, 0.2);
+    assert!(g.vehicles.is_empty(), "it blew up");
 }
 
 #[test]

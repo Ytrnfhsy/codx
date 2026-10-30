@@ -82,9 +82,12 @@ impl Game {
         let (pos0, yaw, pitch, eye) = (p.body.pos, p.yaw, p.pitch, p.eye());
         let fwd = look_dir(yaw, 0.0);
         let (pos, pitch) = match kind {
-            // it takes off from above the head, climbing a little, so a wall in front of
-            // the soldier does not end it at once
-            VehicleKind::Fpv => (eye + fwd * 0.3 + vec3(0.0, 0.9, 0.0), pitch.max(0.2)),
+            // it takes off hovering just above the head (lower under a ceiling), looking
+            // roughly level, and waits for the pilot
+            VehicleKind::Fpv => {
+                let (at, _, _) = fpv_move(&self.world, eye, vec3(0.0, 1.2, 0.0) + fwd * 0.4, 1.0);
+                (at, pitch.clamp(-0.4, 0.4))
+            }
             VehicleKind::Bomber => {
                 let min = self.map.min;
                 let max = self.map.max;
@@ -182,20 +185,10 @@ impl Game {
                 if d.y.abs() > reach {
                     to.y = v.pos.y + d.y.signum() * reach;
                 }
-                // it cannot fly through walls: stop and blow up at the first one
-                let seg = to - v.pos;
-                let len = seg.length();
-                if len > 1e-3 {
-                    if let Some((t, _)) = self.world.raycast(v.pos, seg / len, len) {
-                        let at = v.pos + seg / len * (t - 0.05).max(0.0);
-                        v.pos = at;
-                        let age = v.kind.duration() - (v.until - time) as f32;
-                        if age >= FPV_ARM_TIME {
-                            self.end_vehicle(i, End::Detonate(at));
-                        }
-                        return;
-                    }
-                }
+                // it cannot fly through walls: it slides along them like on the pilot's
+                // screen (crashing into one is the pilot's FIRE, sent by their client)
+                let (at, _, _) = fpv_move(&self.world, v.pos, to - v.pos, 1.0);
+                to = at;
             }
             VehicleKind::Bomber => {
                 to = vec3(
