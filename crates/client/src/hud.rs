@@ -377,6 +377,25 @@ impl GameClient {
             let tw = ui.width(&txt, 13, true);
             ui.shadowed(&txt, sp.x - tw / 2.0, sp.y + r + 16.0, 13, c);
         }
+        // a teammate carrying the bomb: an icon over their head, seen through walls, so
+        // everyone knows whom to cover
+        if let (Some(c), None) = (b.carrier, b.planted_at) {
+            let ours = self.remotes.get(&c).filter(|r| r.alive && r.team == me);
+            if let Some(r) = ours {
+                if let Some(sp) = view.project(r.pos + vec3(0.0, 3.0, 0.0)) {
+                    let pulse = 0.5 + 0.5 * (self.now * 4.0).sin() as f32;
+                    draw_bomb_icon(sp.x, sp.y, 1.2, pulse);
+                    let d = r.pos.distance(self.body.pos);
+                    ui.centered(
+                        &format!("ПРИКРИЙ {d:.0}м"),
+                        sp.x,
+                        sp.y - 24.0,
+                        13,
+                        team_color(me),
+                    );
+                }
+            }
+        }
         // the bomb itself when lying around
         if b.carrier.is_none() && b.planted_at.is_none() {
             if let Some(sp) = view.project(Vec3::from_array(b.pos) + vec3(0.0, 1.2, 0.0)) {
@@ -1735,4 +1754,44 @@ fn draw_headshot_icon(cx: f32, cy: f32, h: f32, a: f32) {
     draw_circle_lines(cx, cy, r * 0.75, 1.5, red);
     draw_line(cx - r * 1.2, cy, cx + r * 1.2, cy, 1.5, red);
     draw_line(cx, cy - r * 1.2, cx, cy + r * 1.2, 1.5, red);
+}
+
+/// A small bomb (three red sticks and a blinking timer) centred on `(x, y)`.
+fn draw_bomb_icon(x: f32, y: f32, scale: f32, pulse: f32) {
+    let (w, h) = (30.0 * scale, 22.0 * scale);
+    let (x0, y0) = (x - w / 2.0, y - h / 2.0);
+    draw_rectangle(
+        x0 - 4.0,
+        y0 - 4.0,
+        w + 8.0,
+        h + 8.0,
+        Color::new(0.0, 0.0, 0.0, 0.55),
+    );
+    let sw = w / 3.0;
+    for k in 0..3 {
+        let sx = x0 + k as f32 * sw;
+        draw_rectangle(sx, y0, sw - 1.0, h, Color::from_rgba(214, 60, 48, 255));
+        draw_rectangle_lines(sx, y0, sw - 1.0, h, 1.5, BLACK);
+    }
+    draw_rectangle(
+        x0 - 1.0,
+        y0 + h * 0.4,
+        w + 1.0,
+        h * 0.2,
+        Color::from_rgba(60, 60, 66, 255),
+    );
+    let led = if pulse > 0.5 {
+        Color::from_rgba(255, 70, 50, 255)
+    } else {
+        Color::from_rgba(120, 30, 25, 255)
+    };
+    draw_circle(x, y, 3.0 * scale, led);
+    draw_line(
+        x0 + w,
+        y0 + 3.0,
+        x0 + w + 7.0 * scale,
+        y0 - 6.0 * scale,
+        2.0,
+        ACCENT,
+    );
 }

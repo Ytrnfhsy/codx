@@ -210,6 +210,16 @@ impl Game {
         }
         v.vel = (to - v.pos) / dt;
         v.pos = to;
+        if v.kind == VehicleKind::Fpv && keys & keys::CRASH != 0 {
+            let age = v.kind.duration() - (v.until - time) as f32;
+            let end = if age >= FPV_ARM_TIME {
+                End::Detonate(v.pos)
+            } else {
+                End::Destroyed
+            };
+            self.end_vehicle(i, end);
+            return;
+        }
         if keys & keys::EXIT != 0 {
             let end = if v.kind == VehicleKind::Fpv {
                 End::Detonate(v.pos)

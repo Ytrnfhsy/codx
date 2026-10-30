@@ -183,9 +183,9 @@ impl GameClient {
                 p.pos = to;
                 p.vel = left;
                 p.speed = left.length();
-                // a hard crash sets the charge off, a gentle bump just stops it
-                if impact >= FPV_CRASH_SPEED && p.age >= FPV_ARM_TIME {
-                    keys |= keys::FIRE;
+                // hitting something hard ends it: a blast once armed, a broken drone before
+                if impact >= FPV_CRASH_SPEED {
+                    keys |= keys::CRASH;
                 }
                 // bank into slides and turns like a real quad
                 let (_, r) = toon_shared::yaw_basis(p.yaw);
@@ -235,8 +235,8 @@ impl GameClient {
         if dt > 0.0 && p.kind != VehicleKind::Fpv {
             p.vel = (p.pos - before) / dt;
         }
-        // the exit press must reach the server even between two sends
-        p.keys = (p.keys & keys::EXIT) | keys;
+        // the exit press and a crash must reach the server even between two sends
+        p.keys = (p.keys & (keys::EXIT | keys::CRASH)) | keys;
     }
 
     /// Sends the vehicle state (called at the input rate).
@@ -248,15 +248,15 @@ impl GameClient {
             pitch: p.pitch,
             keys: p.keys,
         });
-        if p.keys & keys::EXIT != 0 {
-            // say it twice, reliably, so leaving is never lost
+        if p.keys & (keys::EXIT | keys::CRASH) != 0 {
+            // say it twice, reliably, so leaving or crashing is never lost
             self.net.send(C2S::Drive {
                 pos: p.pos.to_array(),
                 yaw: p.yaw,
                 pitch: p.pitch,
                 keys: p.keys,
             });
-            p.keys &= !keys::EXIT;
+            p.keys &= !(keys::EXIT | keys::CRASH);
         }
     }
 

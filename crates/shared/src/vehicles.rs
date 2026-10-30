@@ -24,6 +24,8 @@ pub mod keys {
     pub const BOOST: u8 = 4;
     /// FPV: slow down.
     pub const BRAKE: u8 = 8;
+    /// FPV: it ran into something hard (it blows up, or just breaks if not armed yet).
+    pub const CRASH: u8 = 16;
 }
 
 impl VehicleKind {
@@ -91,15 +93,16 @@ pub const FPV_CLIMB: f32 = 6.0;
 pub const FPV_ACCEL: f32 = 2.6;
 pub const FPV_DRAG: f32 = 2.0;
 pub const FPV_RADIUS: f32 = 0.35;
-/// Running into something at least this fast (m/s, straight at it) sets the charge off;
-/// slower bumps and glancing touches just slide along.
-pub const FPV_CRASH_SPEED: f32 = 9.0;
+/// Running into something hard at least this fast (m/s, straight at it) ends the drone:
+/// the charge goes off, or before it is armed the drone just breaks. Only a feather touch
+/// or a glancing scrape slides along.
+pub const FPV_CRASH_SPEED: f32 = 3.0;
 pub const FPV_BLAST_RADIUS: f32 = 6.5;
 pub const FPV_BLAST_DAMAGE: f32 = 230.0;
 /// Enemies this close set it off.
 pub const FPV_TRIGGER: f32 = 1.6;
-/// The charge arms this long after take-off; before that nothing sets it off (so it does
-/// not blow up its own pilot).
+/// The charge arms this long after take-off; before that a crash only breaks the drone
+/// (so it does not blow up its own pilot).
 pub const FPV_ARM_TIME: f32 = 0.7;
 
 // ---- bomber drone

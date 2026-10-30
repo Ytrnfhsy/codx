@@ -203,9 +203,37 @@ fn fpv_cannot_fly_through_walls() {
         .vehicle_hud(me)
         .expect("bumping the ground does not end it");
     assert!(v.pos[1] > 0.2 && v.pos[1] < 1.0, "{:?}", v.pos);
-    // the pilot's crash (FIRE) blows it up there
-    drive_towards(&mut g, me, below, keys::FIRE, 0.2);
+    // the pilot's client reports the crash: it blows up there
+    drive_towards(&mut g, me, below, keys::CRASH, 0.1);
     assert!(g.vehicles.is_empty(), "it blew up");
+}
+
+#[test]
+fn fpv_breaks_without_a_blast_before_it_is_armed() {
+    let (mut g, me, _) = duel();
+    give(&mut g, me, Killstreak::Fpv);
+    g.handle(
+        me,
+        C2S::UseKillstreak {
+            target: None,
+            pilot: true,
+        },
+    );
+    let hp = g.p(me).unwrap().hp;
+    let pos = g.vehicle_hud(me).unwrap().pos;
+    g.handle(
+        me,
+        C2S::Drive {
+            pos,
+            yaw: 0.0,
+            pitch: 0.0,
+            keys: keys::CRASH,
+        },
+    );
+    tick(&mut g, 0.2);
+    assert!(g.vehicles.is_empty(), "it broke");
+    assert!(g.p(me).unwrap().driving.is_none());
+    assert_eq!(g.p(me).unwrap().hp, hp, "no blast");
 }
 
 #[test]
