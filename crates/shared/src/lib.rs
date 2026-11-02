@@ -2,6 +2,7 @@
 //! gameplay constants, weapons, maps, movement physics, raycasts and the network protocol.
 
 pub mod consts;
+pub mod lang;
 pub mod map;
 pub mod maps;
 pub mod maps_extra;
@@ -16,6 +17,7 @@ pub mod vehicles;
 pub mod weapons;
 
 pub use glam::{vec2, vec3, Vec2, Vec3};
+use lang::t;
 
 /// Team of a player. `Spectator` never spawns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -45,9 +47,9 @@ impl Team {
     }
     pub fn name(self) -> &'static str {
         match self {
-            Team::Allies => "Морпіхи",
-            Team::Axis => "Опфор",
-            Team::Spectator => "Глядачі",
+            Team::Allies => t("Морпіхи", "Marines"),
+            Team::Axis => t("Опфор", "OpFor"),
+            Team::Spectator => t("Глядачі", "Spectators"),
         }
     }
     pub fn from_index(i: usize) -> Team {
@@ -71,8 +73,8 @@ pub enum Mode {
 impl Mode {
     pub fn name(self) -> &'static str {
         match self {
-            Mode::Tdm => "Командний бій",
-            Mode::Sab => "Саботаж",
+            Mode::Tdm => t("Командний бій", "Team Deathmatch"),
+            Mode::Sab => t("Саботаж", "Sabotage"),
         }
     }
     pub fn short(self) -> &'static str {

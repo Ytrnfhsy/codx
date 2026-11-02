@@ -16,6 +16,7 @@ use toon_shared::physics::{Body, MoveInput, Stance, World};
 use toon_shared::protocol::*;
 use toon_shared::ray::ray_player;
 use toon_shared::rng::Rng;
+use toon_shared::tr;
 use toon_shared::tuning::{Tuning, WeaponStats};
 use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
 use toon_shared::{look_dir, maps, wrap_angle, yaw_basis, Mode, Team};
@@ -180,6 +181,8 @@ pub struct GameClient {
     pub artillery: Vec<(Vec3, f32, f64)>,
     /// The killstreak vehicle we steer.
     pub piloting: Option<crate::pilot::Piloting>,
+    /// The language the server writes to us in (sent again when changed in the settings).
+    sent_lang: toon_shared::lang::Lang,
     pub fx: Effects,
     pub rcon_pass: String,
     pub spec_pos: Vec3,
@@ -427,6 +430,7 @@ impl GameClient {
             airstrikes: Vec::new(),
             artillery: Vec::new(),
             piloting: None,
+            sent_lang: toon_shared::lang::get(),
             fx: Effects::new(),
             rcon_pass: String::new(),
             spec_pos: spec,
@@ -463,12 +467,19 @@ impl GameClient {
             g.push_chat(format!("[{}] {}", g.server_name, w.motd), crate::ui::ACCENT);
         }
         g.push_chat(
-            "WASD, Shift — біг, C — присід, Ctrl — лежати, ПКМ — приціл, R — перезарядка".into(),
+            toon_shared::lang::t(
+                "WASD, Shift — біг, C — присід, Ctrl — лежати, ПКМ — приціл, R — перезарядка",
+                "WASD, Shift — sprint, C — crouch, Ctrl — prone, RMB — aim, R — reload",
+            )
+            .into(),
             crate::ui::MUTED,
         );
         g.push_chat(
-            "G — граната, Q — дим, V — ніж, F — дія, 5 — кілстрік, T/Y — чат, Tab — рахунок, M — клас"
-                .into(),
+            toon_shared::lang::t(
+                "G — граната, Q — дим, V — ніж, F — дія, 5 — кілстрік, T/Y — чат, Tab — рахунок, M — клас",
+                "G — grenade, Q — smoke, V — knife, F — use, 5 — killstreak, T/Y — chat, Tab — score, M — class",
+            )
+            .into(),
             crate::ui::MUTED,
         );
         let mut audio_dummy = None;
@@ -553,7 +564,7 @@ impl GameClient {
                 settings,
             } => {
                 self.load_map(map, mode, settings);
-                let name = self.map.name;
+                let name = self.map.id.name();
                 self.center_msg(format!("{name} — {}", mode.name()), 4.0, crate::ui::ACCENT);
             }
             S2C::Snapshot(s) => self.on_snapshot(*s, audio),
@@ -774,13 +785,13 @@ impl GameClient {
                 let line = if from.is_empty() {
                     text
                 } else if team_only {
-                    format!("(команда) {from}: {text}")
+                    tr!("(команда) {from}: {text}", "(team) {from}: {text}")
                 } else {
                     format!("{from}: {text}")
                 };
                 let color = if from.is_empty() {
                     crate::ui::MUTED
-                } else if from == "Адмін" {
+                } else if from == "Адмін" || from == "Admin" {
                     crate::ui::ACCENT
                 } else {
                     crate::models::team_color(team)
@@ -790,7 +801,7 @@ impl GameClient {
             S2C::Center { text, secs } => self.center_msg(text, secs as f64, crate::ui::TEXT),
             S2C::StreakReady(k) => {
                 self.center_msg(
-                    format!("{} готовий! Натисни 5", k.name()),
+                    tr!("{} готовий! Натисни 5", "{} ready! Press 5", k.name()),
                     3.0,
                     crate::ui::ACCENT,
                 );
@@ -802,9 +813,9 @@ impl GameClient {
             S2C::StreakUsed { by, team, streak } => {
                 let friendly = team == self.team;
                 let text = if friendly {
-                    format!("{by}: {} — дружній!", streak.name())
+                    tr!("{by}: {} — дружній!", "{by}: {} — friendly!", streak.name())
                 } else {
-                    format!("Ворожий {}!", streak.name().to_lowercase())
+                    tr!("Ворожий {}!", "Enemy {}!", streak.name().to_lowercase())
                 };
                 self.center_msg(
                     text,
@@ -865,7 +876,11 @@ impl GameClient {
                 if self.tuning.movement != t.movement || self.tuning.weapons != t.weapons {
                     if self.have_clock {
                         self.push_chat(
-                            "Сервер оновив налаштування руху/зброї".into(),
+                            toon_shared::lang::t(
+                                "Сервер оновив налаштування руху/зброї",
+                                "The server changed movement/weapon settings",
+                            )
+                            .into(),
                             crate::ui::MUTED,
                         );
                     }
@@ -1435,6 +1450,10 @@ impl GameClient {
 
     /// Per-frame update. `input_enabled` is false while menus are open.
     pub fn update(&mut self, dt: f32, settings: &Settings, audio: Option<&Audio>) {
+        if settings.lang != self.sent_lang {
+            self.sent_lang = settings.lang;
+            self.net.send(C2S::Lang(settings.lang));
+        }
         self.now = get_time();
         let now = self.now;
         // while a replay plays, the live game is silent
@@ -1466,7 +1485,13 @@ impl GameClient {
         self.blows.retain(|_, b| now - b.1 < 3.0);
         self.explosions.retain(|e| now - e.1 < 2.0);
         if self.net.last_recv.elapsed().as_secs_f32() > 10.0 {
-            self.leave = Some("З'єднання з сервером втрачено".into());
+            self.leave = Some(
+                toon_shared::lang::t(
+                    "З'єднання з сервером втрачено",
+                    "Lost connection to the server",
+                )
+                .into(),
+            );
         }
 
         let playing_input = self.overlay == Overlay::None && self.chat_input.is_none();
@@ -1834,7 +1859,14 @@ impl GameClient {
                         target: None,
                         pilot: true,
                     }),
-                    None => self.center_msg("Немає доступних кілстріків", 1.5, crate::ui::MUTED),
+                    None => self.center_msg(
+                        toon_shared::lang::t(
+                            "Немає доступних кілстріків",
+                            "No killstreaks available",
+                        ),
+                        1.5,
+                        crate::ui::MUTED,
+                    ),
                 }
             }
         } else {
@@ -2106,11 +2138,22 @@ impl GameClient {
             if let Some(p) = rest.strip_prefix("login") {
                 self.rcon_pass = p.trim().to_string();
                 self.push_chat(
-                    "[rcon] пароль збережено — тепер: /rcon <команда>".into(),
+                    toon_shared::lang::t(
+                        "[rcon] пароль збережено — тепер: /rcon <команда>",
+                        "[rcon] password saved — now: /rcon <command>",
+                    )
+                    .into(),
                     crate::ui::ACCENT,
                 );
             } else if self.rcon_pass.is_empty() {
-                self.push_chat("[rcon] спершу: /rcon login <пароль>".into(), crate::ui::BAD);
+                self.push_chat(
+                    toon_shared::lang::t(
+                        "[rcon] спершу: /rcon login <пароль>",
+                        "[rcon] first: /rcon login <password>",
+                    )
+                    .into(),
+                    crate::ui::BAD,
+                );
             } else {
                 let cmd = if rest.is_empty() {
                     "help".to_string()
@@ -2130,7 +2173,14 @@ impl GameClient {
         self.has_class = true;
         self.overlay = Overlay::None;
         if self.alive {
-            self.center_msg("Клас зміниться після відродження", 2.0, crate::ui::MUTED);
+            self.center_msg(
+                toon_shared::lang::t(
+                    "Клас зміниться після відродження",
+                    "Your class changes when you respawn",
+                ),
+                2.0,
+                crate::ui::MUTED,
+            );
         }
     }
 

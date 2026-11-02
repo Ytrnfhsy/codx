@@ -9,7 +9,7 @@ pub const INTERP_DELAY: f32 = 0.1;
 pub const MAX_REWIND: f32 = 0.35;
 
 pub const DEFAULT_PORT: u16 = 27015;
-pub const PROTOCOL_VERSION: u16 = 15;
+pub const PROTOCOL_VERSION: u16 = 16;
 /// Version of the game build: the release tag (`TW_VERSION`, set by CI for `v*` tags,
 /// without the `v`); for builds made by hand the nearest `v*` git tag (see build.rs), or
 /// the crate version without git.
@@ -22,10 +22,14 @@ pub const GAME_VERSION: &str = match option_env!("TW_VERSION") {
 };
 /// Start of the server's reject message for a client of another version (the client
 /// then offers to update).
-pub const OUTDATED: &str = "Версія гри не збігається.";
+/// (The Ukrainian one is what 0.2.x clients look for.)
+pub const OUTDATED: crate::lang::Text = ("Версія гри не збігається.", "Game version mismatch.");
 /// Start of the reject message when the server is the older one (nothing to update on
 /// the client).
-pub const SERVER_OUTDATED: &str = "Сервер старіший за твою гру.";
+pub const SERVER_OUTDATED: crate::lang::Text = (
+    "Сервер старіший за твою гру.",
+    "The server is older than your game.",
+);
 /// True for builds published as a release (they look for and install updates).
 pub const RELEASE_BUILD: bool = option_env!("TW_VERSION").is_some();
 /// Prefix of a connectionless server info query.

@@ -7,7 +7,9 @@ use crate::settings::Settings;
 use crate::ui::*;
 use macroquad::prelude::*;
 use toon_shared::consts::*;
+use toon_shared::lang::t;
 use toon_shared::protocol::{flags, EntSnap, MatchState};
+use toon_shared::tr;
 use toon_shared::weapons::{Cause, Killstreak, Perk1, Perk2, Perk3, WeaponId};
 use toon_shared::{wrap_angle, yaw_of, Mode, Team};
 
@@ -85,7 +87,7 @@ impl GameClient {
                 let d = t.pos.distance(view.pos);
                 if d < 60.0 {
                     let label = if t.bomb {
-                        format!("[Б] {}", t.name)
+                        tr!("[Б] {}", "[B] {}", t.name)
                     } else {
                         t.name.clone()
                     };
@@ -148,9 +150,13 @@ impl GameClient {
         if self.alive && self.overlay == Overlay::None {
             if let Some((_, w)) = self.pickup_target {
                 let text = if self.near_objective() {
-                    format!("{} — відійди від бомби, щоб підібрати", w.def().name)
+                    tr!(
+                        "{} — відійди від бомби, щоб підібрати",
+                        "{} — step off the bomb to pick it up",
+                        w.def().name
+                    )
                 } else {
-                    format!("F — підібрати {}", w.def().name)
+                    tr!("F — підібрати {}", "F — pick up {}", w.def().name)
                 };
                 ui.centered(&text, cx, cy + 90.0, 20, TEXT);
             }
@@ -175,12 +181,23 @@ impl GameClient {
 
         // state banners
         match self.state {
-            MatchState::Warmup => {
-                ui.centered("Розминка — очікування гравців", cx, 110.0, 22, MUTED)
-            }
+            MatchState::Warmup => ui.centered(
+                t(
+                    "Розминка — очікування гравців",
+                    "Warmup — waiting for players",
+                ),
+                cx,
+                110.0,
+                22,
+                MUTED,
+            ),
             MatchState::PreRound => {
                 ui.centered(
-                    &format!("Бій почнеться через {}", self.time_left.ceil() as i32),
+                    &tr!(
+                        "Бій почнеться через {}",
+                        "The fight starts in {}",
+                        self.time_left.ceil() as i32
+                    ),
                     cx,
                     h * 0.38,
                     34,
@@ -190,7 +207,13 @@ impl GameClient {
             _ => {}
         }
         if self.overtime {
-            ui.centered("ОВЕРТАЙМ — без відродження", cx, 110.0, 22, BAD);
+            ui.centered(
+                t("ОВЕРТАЙМ — без відродження", "OVERTIME — no respawns"),
+                cx,
+                110.0,
+                22,
+                BAD,
+            );
         }
 
         // own spawn protection
@@ -206,14 +229,21 @@ impl GameClient {
                 draw_rectangle(0.0, h - band, w, band, c);
             }
             ui.centered(
-                &format!("Захист після відродження: {:.1} с", self.me.protected),
+                &tr!(
+                    "Захист після відродження: {:.1} с",
+                    "Spawn protection: {:.1} s",
+                    self.me.protected
+                ),
                 cx,
                 h * 0.78,
                 20,
                 Color::new(0.6, 0.85, 1.0, 1.0),
             );
             ui.centered(
-                "із захистом атакувати не можна · ЛКМ — зняти захист і битися",
+                t(
+                    "із захистом атакувати не можна · ЛКМ — зняти захист і битися",
+                    "you cannot attack while protected · LMB — drop protection and fight",
+                ),
                 cx,
                 h * 0.78 + 22.0,
                 14,
@@ -229,27 +259,44 @@ impl GameClient {
         {
             if let Some((killer, cause, _)) = &self.death_info {
                 let text = if killer.is_empty() {
-                    format!("Ти загинув ({})", cause.name())
+                    tr!("Ти загинув ({})", "You died ({})", cause.name())
                 } else {
-                    format!("Тебе вбив {killer} — {}", cause.name())
+                    tr!(
+                        "Тебе вбив {killer} — {}",
+                        "Killed by {killer} — {}",
+                        cause.name()
+                    )
                 };
                 ui.centered(&text, cx, h * 0.62, 26, TEXT);
             }
             let text = if self.overtime && self.state == MatchState::Playing {
-                "Чекай наступного раунду".to_string()
+                t("Чекай наступного раунду", "Wait for the next round").to_string()
             } else if self.me.respawn_in > 0.0 {
-                format!("Відродження через {:.0}", self.me.respawn_in.ceil())
+                tr!(
+                    "Відродження через {:.0}",
+                    "Respawn in {:.0}",
+                    self.me.respawn_in.ceil()
+                )
             } else if self.has_class {
-                "Клацни ЛКМ, щоб відродитися".to_string()
+                t("Клацни ЛКМ, щоб відродитися", "Click LMB to respawn").to_string()
             } else {
-                "Обери клас (Esc)".to_string()
+                t("Обери клас (Esc)", "Choose a class (Esc)").to_string()
             };
             ui.centered(&text, cx, h * 0.62 + 34.0, 20, ACCENT);
-            ui.centered("Esc — змінити клас/команду", cx, h * 0.62 + 62.0, 16, MUTED);
+            ui.centered(
+                t("Esc — змінити клас/команду", "Esc — change class/team"),
+                cx,
+                h * 0.62 + 62.0,
+                16,
+                MUTED,
+            );
         }
         if self.team == Team::Spectator && self.overlay == Overlay::None {
             ui.centered(
-                "Режим глядача — WASD, Space/C, Shift. Esc — меню",
+                t(
+                    "Режим глядача — WASD, Space/C, Shift. Esc — меню",
+                    "Spectating — WASD, Space/C, Shift. Esc — menu",
+                ),
                 cx,
                 h - 40.0,
                 18,
@@ -274,7 +321,7 @@ impl GameClient {
                 BAD
             };
             let fps_s = format!("{fps:.0} FPS");
-            let ping_s = format!("  {ping} мс");
+            let ping_s = tr!("  {ping} мс", "  {ping} ms");
             let (fw, pw) = (ui.width(&fps_s, 20, true), ui.width(&ping_s, 16, true));
             let bw = fw + pw + 20.0;
             let bx = (w - bw) / 2.0;
@@ -307,9 +354,9 @@ impl GameClient {
                 None => TEXT,
             };
             let title = match winner {
-                Some(t) if t == self.team => "ПЕРЕМОГА!",
-                Some(_) if self.team.is_playing() => "ПОРАЗКА",
-                _ => "МАТЧ ЗАВЕРШЕНО",
+                Some(t) if t == self.team => toon_shared::lang::t("ПЕРЕМОГА!", "VICTORY!"),
+                Some(_) if self.team.is_playing() => t("ПОРАЗКА", "DEFEAT"),
+                _ => t("МАТЧ ЗАВЕРШЕНО", "MATCH OVER"),
             };
             ui.centered(title, cx, 80.0, 48, c);
             ui.centered(&text, cx, 118.0, 22, TEXT);
@@ -356,9 +403,9 @@ impl GameClient {
             };
             let ours = t == me;
             let label = if ours {
-                "ЗАХИСТИТИ"
+                toon_shared::lang::t("ЗАХИСТИТИ", "DEFEND")
             } else {
-                "ПІДІРВАТИ"
+                toon_shared::lang::t("ПІДІРВАТИ", "DESTROY")
             };
             let c = if ours { team_color(me) } else { BAD };
             let planted_here = b.planted_at == Some(t);
@@ -373,7 +420,7 @@ impl GameClient {
             let lw = ui.width(letter, 18, true);
             ui.bold(letter, sp.x - lw / 2.0, sp.y + 7.0, 18, WHITE);
             let d = site.distance(self.body.pos);
-            let txt = format!("{label} {d:.0}м");
+            let txt = tr!("{label} {d:.0}м", "{label} {d:.0}m");
             let tw = ui.width(&txt, 13, true);
             ui.shadowed(&txt, sp.x - tw / 2.0, sp.y + r + 16.0, 13, c);
         }
@@ -387,7 +434,7 @@ impl GameClient {
                     draw_bomb_icon(sp.x, sp.y, 1.2, pulse);
                     let d = r.pos.distance(self.body.pos);
                     ui.centered(
-                        &format!("ПРИКРИЙ {d:.0}м"),
+                        &tr!("ПРИКРИЙ {d:.0}м", "COVER {d:.0}m"),
                         sp.x,
                         sp.y - 24.0,
                         13,
@@ -402,13 +449,19 @@ impl GameClient {
                 draw_circle(sp.x, sp.y - 8.0, 11.0, Color::new(0.0, 0.0, 0.0, 0.7));
                 draw_circle(sp.x, sp.y - 8.0, 8.0, BAD);
                 let d = Vec3::from_array(b.pos).distance(self.body.pos);
-                ui.centered(&format!("бомба {d:.0}м"), sp.x, sp.y + 18.0, 13, ACCENT);
+                ui.centered(
+                    &tr!("бомба {d:.0}м", "bomb {d:.0}m"),
+                    sp.x,
+                    sp.y + 18.0,
+                    13,
+                    ACCENT,
+                );
             }
         }
         // planted timer
         if b.planted_at.is_some() {
             ui.centered(
-                &format!("БОМБА {:.1}", b.timer),
+                &tr!("БОМБА {:.1}", "BOMB {:.1}", b.timer),
                 screen_width() / 2.0,
                 70.0,
                 34,
@@ -434,21 +487,30 @@ impl GameClient {
                 ACCENT,
             );
             let label = if b.planted_at.is_some() {
-                "Знешкодження…"
+                t("Знешкодження…", "Defusing…")
             } else {
-                "Закладання…"
+                t("Закладання…", "Planting…")
             };
             ui.centered(label, w / 2.0, h * 0.7 - 10.0, 18, TEXT);
         } else if self.alive {
             let carrying = b.carrier == Some(self.my_id);
             let enemy_site = self.map.sites[me.enemy().index()];
             if carrying && self.body.pos.distance(enemy_site) < SAB_SITE_RADIUS {
-                ui.centered("Тримай F, щоб закласти бомбу", w / 2.0, h * 0.7, 22, ACCENT);
+                ui.centered(
+                    t("Тримай F, щоб закласти бомбу", "Hold F to plant the bomb"),
+                    w / 2.0,
+                    h * 0.7,
+                    22,
+                    ACCENT,
+                );
             } else if b.planted_at == Some(me)
                 && self.body.pos.distance(Vec3::from_array(b.pos)) < SAB_DEFUSE_RADIUS
             {
                 ui.centered(
-                    "Тримай F, щоб знешкодити бомбу",
+                    t(
+                        "Тримай F, щоб знешкодити бомбу",
+                        "Hold F to defuse the bomb",
+                    ),
                     w / 2.0,
                     h * 0.7,
                     22,
@@ -456,7 +518,10 @@ impl GameClient {
                 );
             } else if carrying {
                 ui.centered(
-                    "У тебе бомба — неси її на ворожу точку!",
+                    t(
+                        "У тебе бомба — неси її на ворожу точку!",
+                        "You have the bomb — take it to the enemy site!",
+                    ),
                     w / 2.0,
                     h - 150.0,
                     18,
@@ -627,10 +692,10 @@ impl GameClient {
         );
         // compass letters around the edge
         for (label, a) in [
-            ("Пн", 0.0f32),
-            ("Сх", -std::f32::consts::FRAC_PI_2),
-            ("Пд", std::f32::consts::PI),
-            ("Зх", std::f32::consts::FRAC_PI_2),
+            (t("Пн", "N"), 0.0f32),
+            (t("Сх", "E"), -std::f32::consts::FRAC_PI_2),
+            (t("Пд", "S"), std::f32::consts::PI),
+            (t("Зх", "W"), std::f32::consts::FRAC_PI_2),
         ] {
             let rel = a - yaw;
             let d = vec2(-rel.sin(), -rel.cos());
@@ -639,7 +704,7 @@ impl GameClient {
             ui.shadowed(label, p.x - tw / 2.0, p.y + 5.0, 12, TEXT);
         }
         if self.me.uav {
-            ui.shadowed("БПЛА", x0 + 6.0, y0 + size - 8.0, 14, GOOD);
+            ui.shadowed(t("БПЛА", "UAV"), x0 + 6.0, y0 + size - 8.0, 14, GOOD);
         }
     }
 
@@ -690,8 +755,8 @@ impl GameClient {
             ui.shadowed(&val.to_string(), x + 2.0, yy + 18.0, 18, *col);
         }
         let t = match self.state {
-            MatchState::Warmup => "Розминка".to_string(),
-            _ if self.overtime => "Овертайм".to_string(),
+            MatchState::Warmup => t("Розминка", "Warmup").to_string(),
+            _ if self.overtime => t("Овертайм", "Overtime").to_string(),
             _ => fmt_time(self.time_left),
         };
         ui.shadowed(
@@ -761,9 +826,9 @@ impl GameClient {
         draw_rectangle(0.0, 0.0, w, bar, black);
         draw_rectangle(0.0, h - bar, w, bar, black);
         let title = if k.final_cam {
-            "ФІНАЛЬНИЙ КІЛКАМ"
+            t("ФІНАЛЬНИЙ КІЛКАМ", "FINAL KILLCAM")
         } else {
-            "КІЛКАМ"
+            t("КІЛКАМ", "KILLCAM")
         };
         // a slow blink on the record dot
         if ((self.now * 2.0) as i64) % 2 == 0 {
@@ -802,12 +867,13 @@ impl GameClient {
         ui.shadowed(&info.victim_name, x, y, 22, team_color(vteam));
         if !k.final_cam {
             let hint = if self.me.respawn_in > 0.0 {
-                format!(
+                tr!(
                     "ЛКМ або Esc — пропустити · відродження через {:.0}",
+                    "LMB or Esc — skip · respawn in {:.0}",
                     self.me.respawn_in.ceil()
                 )
             } else {
-                "ЛКМ або Esc — пропустити".to_string()
+                t("ЛКМ або Esc — пропустити", "LMB or Esc — skip").to_string()
             };
             ui.text(
                 &hint,
@@ -836,9 +902,9 @@ impl GameClient {
         }
         if let Some((text, team)) = &self.chat_input {
             let label = if *team {
-                "Команді: "
+                t("Команді: ", "Team: ")
             } else {
-                "Всім: "
+                t("Всім: ", "All: ")
             };
             draw_rectangle(10.0, h - 176.0, 560.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.6));
             let cursor = if (self.now * 2.0).fract() < 0.5 {
@@ -901,7 +967,7 @@ impl GameClient {
         };
         draw_circle(bx + 27.5, by + 14.0, 3.5, led);
         draw_line(bx + 41.0, by + 10.0, bx + 54.0, by - 6.0, 2.0, ACCENT);
-        let label = "БОМБА";
+        let label = t("БОМБА", "BOMB");
         let lw = ui.width(label, 16, true);
         ui.shadowed(label, x + (s - lw) / 2.0, y + s + 14.0, 16, ACCENT);
     }
@@ -957,11 +1023,23 @@ impl GameClient {
         }
         if let Some(start) = self.cooking {
             let left = (self.tuning.grenade.fuse as f64 - (self.now - start)).max(0.0);
-            ui.centered(&format!("Граната: {left:.1}"), w / 2.0, h * 0.62, 22, BAD);
+            ui.centered(
+                &tr!("Граната: {left:.1}", "Grenade: {left:.1}"),
+                w / 2.0,
+                h * 0.62,
+                22,
+                BAD,
+            );
         }
         // killstreak
         let (next, left) = Killstreak::next_after(self.me.streak as u32);
-        let streak_txt = format!("Серія: {} (до «{}» {})", self.me.streak, next.name(), left);
+        let streak_txt = tr!(
+            "Серія: {} (до «{}» {})",
+            "Streak: {} ({} in {})",
+            self.me.streak,
+            next.name(),
+            left
+        );
         ui.shadowed(&streak_txt, x, y + 92.0, 13, MUTED);
         if let Some(r) = self.me.rewards.last() {
             let t = format!("[5] {}", r.name());
@@ -983,10 +1061,13 @@ impl GameClient {
         };
         ui.shadowed(stance, x - 40.0, y + 60.0, 30, TEXT);
         if self.reload_until.is_some() {
-            ui.centered("Перезарядка…", w / 2.0, h * 0.58, 18, TEXT);
+            ui.centered(t("Перезарядка…", "Reloading…"), w / 2.0, h * 0.58, 18, TEXT);
         } else if mag == 0 && res == 0 {
             ui.centered(
-                "Немає набоїв — 1/2 змінити зброю",
+                t(
+                    "Немає набоїв — 1/2 змінити зброю",
+                    "Out of ammo — 1/2 to switch weapons",
+                ),
                 w / 2.0,
                 h * 0.58,
                 18,
@@ -1003,7 +1084,7 @@ impl GameClient {
         ui.panel(x0, top, pw, 90.0 + rows_per * 24.0);
         ui.bold(&self.server_name, x0 + 16.0, top + 30.0, 20, ACCENT);
         ui.text(
-            &format!("{} · {}", self.map.name, self.mode.name()),
+            &format!("{} · {}", self.map.id.name(), self.mode.name()),
             x0 + 16.0,
             top + 52.0,
             15,
@@ -1021,7 +1102,13 @@ impl GameClient {
                 18,
                 c,
             );
-            ui.text("Очки   В   С   Д   Пінг", x + col_w - 210.0, y, 14, MUTED);
+            ui.text(
+                t("Очки   В   С   Д   Пінг", "Score  K   D   A   Ping"),
+                x + col_w - 210.0,
+                y,
+                14,
+                MUTED,
+            );
             let mut rows: Vec<_> = self.scoreboard.iter().filter(|r| r.team == *team).collect();
             rows.sort_by(|a, b| b.score.cmp(&a.score));
             for (k, r) in rows.iter().enumerate() {
@@ -1042,7 +1129,7 @@ impl GameClient {
                 };
                 ui.text(&name, x, yy, 16, if r.alive { TEXT } else { MUTED });
                 let ping = if r.bot {
-                    "БОТ".to_string()
+                    t("БОТ", "BOT").to_string()
                 } else {
                     r.ping.to_string()
                 };
@@ -1066,7 +1153,7 @@ impl GameClient {
             .collect();
         if !specs.is_empty() {
             ui.text(
-                &format!("Глядачі: {}", specs.join(", ")),
+                &tr!("Глядачі: {}", "Spectators: {}", specs.join(", ")),
                 x0 + 16.0,
                 top + 80.0 + rows_per * 24.0,
                 14,
@@ -1084,12 +1171,18 @@ impl GameClient {
                 let pw = 520.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.2);
                 ui.panel(x, y, pw, 360.0);
-                ui.bold("Обери команду", x + 24.0, y + 44.0, 28, ACCENT);
+                ui.bold(
+                    t("Обери команду", "Choose a team"),
+                    x + 24.0,
+                    y + 44.0,
+                    28,
+                    ACCENT,
+                );
                 ui.text(
                     &format!(
                         "{} · {} · {}",
                         self.server_name,
-                        self.map.name,
+                        self.map.id.name(),
                         self.mode.name()
                     ),
                     x + 24.0,
@@ -1119,11 +1212,17 @@ impl GameClient {
                 ) {
                     self.join_team(Some(Team::Axis));
                 }
-                if ui.button("Автовибір", x + 24.0, y + 220.0, (pw - 60.0) / 2.0, 46.0) {
+                if ui.button(
+                    t("Автовибір", "Auto-assign"),
+                    x + 24.0,
+                    y + 220.0,
+                    (pw - 60.0) / 2.0,
+                    46.0,
+                ) {
                     self.join_team(None);
                 }
                 if ui.button2(
-                    "Глядач",
+                    t("Глядач", "Spectator"),
                     x + 36.0 + (pw - 60.0) / 2.0,
                     y + 220.0,
                     (pw - 60.0) / 2.0,
@@ -1131,7 +1230,13 @@ impl GameClient {
                 ) {
                     self.join_team(Some(Team::Spectator));
                 }
-                if ui.button2("Відключитися", x + 24.0, y + 290.0, pw - 48.0, 44.0) {
+                if ui.button2(
+                    t("Відключитися", "Disconnect"),
+                    x + 24.0,
+                    y + 290.0,
+                    pw - 48.0,
+                    44.0,
+                ) {
                     return Some(HudAction::Leave);
                 }
                 None
@@ -1143,7 +1248,13 @@ impl GameClient {
                 let ph = 520.0;
                 let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
                 ui.panel(x, y, pw, ph);
-                ui.bold("Обери клас", x + 24.0, y + 44.0, 28, ACCENT);
+                ui.bold(
+                    t("Обери клас", "Choose a class"),
+                    x + 24.0,
+                    y + 44.0,
+                    28,
+                    ACCENT,
+                );
                 let list_w = 300.0;
                 let mut hover_class = self.class_choice.min(classes.len() - 1);
                 for (i, (name, _)) in classes.iter().enumerate() {
@@ -1178,23 +1289,23 @@ impl GameClient {
                 ui.bold(name, dx, y + 96.0, 24, TEXT);
                 let lines = [
                     (
-                        format!("Основна: {}", l.primary.def().name),
+                        tr!("Основна: {}", "Primary: {}", l.primary.def().name),
                         l.primary.def().class.name().to_string(),
                     ),
                     (
-                        format!("Додаткова: {}", l.secondary.def().name),
+                        tr!("Додаткова: {}", "Secondary: {}", l.secondary.def().name),
                         l.secondary.def().class.name().to_string(),
                     ),
                     (
-                        format!("Перк 1: {}", l.perk1.name()),
+                        tr!("Перк 1: {}", "Perk 1: {}", l.perk1.name()),
                         l.perk1.desc().to_string(),
                     ),
                     (
-                        format!("Перк 2: {}", l.perk2.name()),
+                        tr!("Перк 2: {}", "Perk 2: {}", l.perk2.name()),
                         l.perk2.desc().to_string(),
                     ),
                     (
-                        format!("Перк 3: {}", l.perk3.name()),
+                        tr!("Перк 3: {}", "Perk 3: {}", l.perk3.name()),
                         l.perk3.desc().to_string(),
                     ),
                 ];
@@ -1204,19 +1315,22 @@ impl GameClient {
                 }
                 let d = self.tuning.weapon(l.primary).clone();
                 let stats = [
-                    ("Урон", d.damage_max / 100.0),
-                    ("Скорострільність", d.rpm / 1000.0),
-                    ("Дальність", d.range_far / 100.0),
+                    (t("Урон", "Damage"), d.damage_max / 100.0),
+                    (t("Скорострільність", "Fire rate"), d.rpm / 1000.0),
+                    (t("Дальність", "Range"), d.range_far / 100.0),
                     (
-                        "Контроль віддачі",
+                        t("Контроль віддачі", "Recoil control"),
                         1.0 - (d.recoil_v * d.recoil_max_ramp / 6.0),
                     ),
-                    ("Мобільність", (d.move_mult - 0.6) / 0.45),
+                    (t("Мобільність", "Mobility"), (d.move_mult - 0.6) / 0.45),
                 ];
                 ui.text(
-                    &format!(
+                    &tr!(
                         "Вага {:.1} кг · приціл {:.2} с · магазин {}",
-                        d.weight, d.ads_time, d.mag
+                        "Weight {:.1} kg · aim {:.2} s · magazine {}",
+                        d.weight,
+                        d.ads_time,
+                        d.mag
                     ),
                     dx,
                     y + 388.0,
@@ -1241,22 +1355,37 @@ impl GameClient {
                         ACCENT,
                     );
                 }
-                if ui.button("В БІЙ", x + pw - 200.0, y + ph - 64.0, 176.0, 46.0) {
+                if ui.button(
+                    t("В БІЙ", "FIGHT"),
+                    x + pw - 200.0,
+                    y + ph - 64.0,
+                    176.0,
+                    46.0,
+                ) {
                     let i = self.class_choice.min(classes.len() - 1);
                     settings.last_class = i;
                     settings.save();
                     self.choose_class(classes[i].1);
                 }
                 if self.class_choice >= 5
-                    && ui.button2("Редагувати", x + pw - 390.0, y + ph - 64.0, 176.0, 46.0)
+                    && ui.button2(
+                        t("Редагувати", "Edit"),
+                        x + pw - 390.0,
+                        y + ph - 64.0,
+                        176.0,
+                        46.0,
+                    )
                 {
                     self.overlay = Overlay::Edit(self.class_choice - 5);
                 }
-                if ui.button2("Команда", x + 24.0, y + ph - 64.0, 140.0, 46.0) {
+                if ui.button2(t("Команда", "Team"), x + 24.0, y + ph - 64.0, 140.0, 46.0) {
                     self.overlay = Overlay::Team;
                 }
                 ui.text(
-                    "Клацни клас двічі або «В БІЙ»",
+                    t(
+                        "Клацни клас двічі або «В БІЙ»",
+                        "Double-click a class or press FIGHT",
+                    ),
                     x + 180.0,
                     y + ph - 34.0,
                     14,
@@ -1270,11 +1399,17 @@ impl GameClient {
                 let ph = 520.0;
                 let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
                 ui.panel(x, y, pw, ph);
-                ui.bold("Редактор класу", x + 24.0, y + 44.0, 26, ACCENT);
+                ui.bold(
+                    t("Редактор класу", "Class editor"),
+                    x + 24.0,
+                    y + 44.0,
+                    26,
+                    ACCENT,
+                );
                 let c = &mut settings.custom[i];
                 ui.field(
                     100 + i as u32,
-                    "Назва",
+                    t("Назва", "Name"),
                     &mut c.name,
                     x + 24.0,
                     y + 90.0,
@@ -1290,7 +1425,7 @@ impl GameClient {
                     list[((i + d).rem_euclid(list.len() as i32)) as usize]
                 };
                 let d = ui.stepper(
-                    "Основна зброя",
+                    t("Основна зброя", "Primary weapon"),
                     &format!(
                         "{} ({})",
                         c.loadout.primary.def().name,
@@ -1304,7 +1439,7 @@ impl GameClient {
                     c.loadout.primary = cyc(&prim, c.loadout.primary, d);
                 }
                 let d = ui.stepper(
-                    "Додаткова зброя",
+                    t("Додаткова зброя", "Secondary weapon"),
                     c.loadout.secondary.def().name,
                     x + 24.0,
                     y + 220.0,
@@ -1314,7 +1449,7 @@ impl GameClient {
                     c.loadout.secondary = cyc(&sec, c.loadout.secondary, d);
                 }
                 let d = ui.stepper(
-                    "Перк 1",
+                    t("Перк 1", "Perk 1"),
                     &format!("{} — {}", c.loadout.perk1.name(), c.loadout.perk1.desc()),
                     x + 24.0,
                     y + 280.0,
@@ -1329,7 +1464,7 @@ impl GameClient {
                         Perk1::ALL[(i + d).rem_euclid(Perk1::ALL.len() as i32) as usize];
                 }
                 let d = ui.stepper(
-                    "Перк 2",
+                    t("Перк 2", "Perk 2"),
                     &format!("{} — {}", c.loadout.perk2.name(), c.loadout.perk2.desc()),
                     x + 24.0,
                     y + 340.0,
@@ -1344,7 +1479,7 @@ impl GameClient {
                         Perk2::ALL[(i + d).rem_euclid(Perk2::ALL.len() as i32) as usize];
                 }
                 let d = ui.stepper(
-                    "Перк 3",
+                    t("Перк 3", "Perk 3"),
                     &format!("{} — {}", c.loadout.perk3.name(), c.loadout.perk3.desc()),
                     x + 24.0,
                     y + 400.0,
@@ -1358,7 +1493,13 @@ impl GameClient {
                     c.loadout.perk3 =
                         Perk3::ALL[(i + d).rem_euclid(Perk3::ALL.len() as i32) as usize];
                 }
-                if ui.button("Зберегти", x + pw - 200.0, y + ph - 60.0, 176.0, 44.0) {
+                if ui.button(
+                    t("Зберегти", "Save"),
+                    x + pw - 200.0,
+                    y + ph - 60.0,
+                    176.0,
+                    44.0,
+                ) {
                     settings.save();
                     self.overlay = Overlay::Class;
                 }
@@ -1369,23 +1510,51 @@ impl GameClient {
                 let pw = 420.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.22);
                 ui.panel(x, y, pw, 460.0);
-                ui.bold("Пауза", x + 24.0, y + 44.0, 28, ACCENT);
-                ui.text("(гра на сервері триває)", x + 24.0, y + 70.0, 14, MUTED);
+                ui.bold(t("Пауза", "Pause"), x + 24.0, y + 44.0, 28, ACCENT);
+                ui.text(
+                    t(
+                        "(гра на сервері триває)",
+                        "(the game on the server goes on)",
+                    ),
+                    x + 24.0,
+                    y + 70.0,
+                    14,
+                    MUTED,
+                );
                 let bw = pw - 48.0;
-                if ui.button("Продовжити", x + 24.0, y + 90.0, bw, 46.0) {
+                if ui.button(t("Продовжити", "Resume"), x + 24.0, y + 90.0, bw, 46.0) {
                     self.overlay = self.after_pause();
                 }
-                if ui.button2("Змінити клас", x + 24.0, y + 146.0, bw, 46.0) {
+                if ui.button2(
+                    t("Змінити клас", "Change class"),
+                    x + 24.0,
+                    y + 146.0,
+                    bw,
+                    46.0,
+                ) {
                     self.overlay = Overlay::Class;
                 }
-                if ui.button2("Змінити команду", x + 24.0, y + 202.0, bw, 46.0) {
+                if ui.button2(
+                    t("Змінити команду", "Change team"),
+                    x + 24.0,
+                    y + 202.0,
+                    bw,
+                    46.0,
+                ) {
                     self.overlay = Overlay::Team;
                 }
-                if ui.button2("Налаштування", x + 24.0, y + 258.0, bw, 46.0) {
+                if ui.button2(t("Налаштування", "Settings"), x + 24.0, y + 258.0, bw, 46.0)
+                {
                     self.overlay = Overlay::Settings;
                 }
-                if ui.button_colored("Відключитися", x + 24.0, y + 392.0, bw, 46.0, BAD)
-                {
+                if ui.button_colored(
+                    t("Відключитися", "Disconnect"),
+                    x + 24.0,
+                    y + 392.0,
+                    bw,
+                    46.0,
+                    BAD,
+                ) {
                     return Some(HudAction::Leave);
                 }
                 None
@@ -1395,23 +1564,49 @@ impl GameClient {
                 let pw = 460.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.28);
                 ui.panel(x, y, pw, 250.0);
-                ui.bold("НРК — наземний робот", x + 24.0, y + 44.0, 26, ACCENT);
+                ui.bold(
+                    t("НРК — наземний робот", "Ground robot"),
+                    x + 24.0,
+                    y + 44.0,
+                    26,
+                    ACCENT,
+                );
                 ui.text(
-                    "Кулемет, броня, 60 секунд. Хто ним керує?",
+                    t(
+                        "Кулемет, броня, 60 секунд. Хто ним керує?",
+                        "Machine gun, armour, 60 seconds. Who drives it?",
+                    ),
                     x + 24.0,
                     y + 72.0,
                     15,
                     MUTED,
                 );
                 let bw = pw - 48.0;
-                if ui.button("Керувати самому", x + 24.0, y + 96.0, bw, 50.0) {
+                if ui.button(
+                    t("Керувати самому", "Drive it myself"),
+                    x + 24.0,
+                    y + 96.0,
+                    bw,
+                    50.0,
+                ) {
                     self.call_robot(true);
                 }
-                if ui.button2("Автономний (воює сам)", x + 24.0, y + 156.0, bw, 50.0)
-                {
+                if ui.button2(
+                    t("Автономний (воює сам)", "Autonomous (fights on its own)"),
+                    x + 24.0,
+                    y + 156.0,
+                    bw,
+                    50.0,
+                ) {
                     self.call_robot(false);
                 }
-                ui.text("Esc — скасувати", x + 24.0, y + 232.0, 14, MUTED);
+                ui.text(
+                    t("Esc — скасувати", "Esc — cancel"),
+                    x + 24.0,
+                    y + 232.0,
+                    14,
+                    MUTED,
+                );
                 None
             }
             Overlay::Settings => {
@@ -1419,9 +1614,15 @@ impl GameClient {
                 let pw = 480.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.18);
                 ui.panel(x, y, pw, 570.0);
-                ui.bold("Налаштування", x + 24.0, y + 44.0, 26, ACCENT);
+                ui.bold(
+                    t("Налаштування", "Settings"),
+                    x + 24.0,
+                    y + 44.0,
+                    26,
+                    ACCENT,
+                );
                 crate::menu::settings_widgets(ui, settings, x + 24.0, y + 90.0, pw - 48.0);
-                if ui.button("Готово", x + pw - 180.0, y + 510.0, 156.0, 44.0) {
+                if ui.button(t("Готово", "Done"), x + pw - 180.0, y + 510.0, 156.0, 44.0) {
                     settings.save();
                     self.overlay = Overlay::Pause;
                 }
@@ -1432,11 +1633,14 @@ impl GameClient {
                 let size = (h - 160.0).min(w - 80.0);
                 let (x0, y0) = ((w - size) / 2.0, 90.0);
                 let what = match self.me.rewards.last() {
-                    Some(Killstreak::Artillery) => "Артилерія",
-                    _ => "Авіаудар",
+                    Some(Killstreak::Artillery) => t("Артилерія", "Artillery"),
+                    _ => t("Авіаудар", "Airstrike"),
                 };
                 ui.centered(
-                    &format!("{what}: клацни ціль на карті (Esc — скасувати)"),
+                    &tr!(
+                        "{what}: клацни ціль на карті (Esc — скасувати)",
+                        "{what}: click a target on the map (Esc — cancel)"
+                    ),
                     w / 2.0,
                     60.0,
                     24,

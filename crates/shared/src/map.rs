@@ -29,6 +29,17 @@ impl MapId {
             MapId::Site => "site",
         }
     }
+    /// The map's name in the current language.
+    pub fn name(self) -> &'static str {
+        use crate::lang::t;
+        match self {
+            MapId::Depot => t("Депо", "Depot"),
+            MapId::Market => t("Ринок", "Market"),
+            MapId::Cargo => t("Вантаж", "Cargo"),
+            MapId::Wreck => t("Аварія", "Wreck"),
+            MapId::Site => t("Будмайданчик", "Building Site"),
+        }
+    }
     pub fn parse(s: &str) -> Option<MapId> {
         let s = s.to_ascii_lowercase();
         MapId::ALL

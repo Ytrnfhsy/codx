@@ -10,6 +10,7 @@ use macroquad::prelude::*;
 use toon_shared::look_dir;
 use toon_shared::physics::{Body, Stance};
 use toon_shared::protocol::{VehicleHud, C2S};
+use toon_shared::tr;
 use toon_shared::vehicles::*;
 
 pub struct Piloting {
@@ -329,7 +330,7 @@ impl GameClient {
         draw_rectangle(bx, 44.0, bw, 58.0, Color::new(0.0, 0.0, 0.0, 0.5));
         ui.shadowed(p.kind.name(), bx + 12.0, 66.0, 18, ACCENT);
         let tc = if left < 0.25 { BAD } else { TEXT };
-        let t = format!("{:.0} с", p.time_left.ceil());
+        let t = tr!("{:.0} с", "{:.0} s", p.time_left.ceil());
         ui.shadowed(&t, bx + bw - 12.0 - ui.width(&t, 18, true), 66.0, 18, tc);
         let hp = (p.hp / p.kind.health()).clamp(0.0, 1.0);
         draw_rectangle(
@@ -349,12 +350,14 @@ impl GameClient {
         draw_rectangle(bx + 12.0, 90.0, (bw - 24.0) * left, 4.0, ACCENT);
         let help = match p.kind {
             VehicleKind::Fpv => {
-                "W/S — вперед/назад · A/D — вбік · Пробіл/Ctrl — вгору/вниз · Shift — газ · ЛКМ або E — підірвати"
+                toon_shared::lang::t("W/S — вперед/назад · A/D — вбік · Пробіл/Ctrl — вгору/вниз · Shift — газ · ЛКМ або E — підірвати",
+                  "W/S — forward/back · A/D — sideways · Space/Ctrl — up/down · Shift — throttle · LMB or E — detonate")
             }
             VehicleKind::Bomber => {
-                "WASD — летіти · миша — розворот · ЛКМ/Пробіл — скинути · E — вийти"
+                toon_shared::lang::t("WASD — летіти · миша — розворот · ЛКМ/Пробіл — скинути · E — вийти",
+                  "WASD — fly · mouse — turn · LMB/Space — drop · E — leave")
             }
-            VehicleKind::Nrk => "WASD — їхати · ЛКМ/Пробіл — кулемет · E — вийти",
+            VehicleKind::Nrk => toon_shared::lang::t("WASD — їхати · ЛКМ/Пробіл — кулемет · E — вийти", "WASD — drive · LMB/Space — machine gun · E — leave"),
         };
         ui.centered(help, cx, h - 24.0, 16, TEXT);
     }
@@ -425,19 +428,31 @@ impl GameClient {
             );
         }
         ui.shadowed(
-            &format!("{:.0} км/год", p.speed * 3.6),
+            &tr!("{:.0} км/год", "{:.0} km/h", p.speed * 3.6),
             cx + 40.0,
             cy + 6.0,
             18,
             TEXT,
         );
         if p.age < FPV_ARM_TIME {
-            ui.centered("ЗАРЯД ЗВОДИТЬСЯ…", cx, cy + 50.0, 16, TEXT);
+            ui.centered(
+                toon_shared::lang::t("ЗАРЯД ЗВОДИТЬСЯ…", "ARMING…"),
+                cx,
+                cy + 50.0,
+                16,
+                TEXT,
+            );
         }
         // link strength
         let bars = (p.signal * 5.0).round() as i32;
         let (bx, by) = (w - 120.0, 140.0);
-        ui.shadowed("СИГНАЛ", bx - 6.0, by - 26.0, 14, TEXT);
+        ui.shadowed(
+            toon_shared::lang::t("СИГНАЛ", "SIGNAL"),
+            bx - 6.0,
+            by - 26.0,
+            14,
+            TEXT,
+        );
         for k in 0..5 {
             let bh = 6.0 + k as f32 * 4.0;
             let on = k < bars;
@@ -451,7 +466,13 @@ impl GameClient {
             draw_rectangle(bx + k as f32 * 10.0, by - bh, 7.0, bh, col);
         }
         if p.signal < 0.5 && (self.now * 2.5).fract() < 0.6 {
-            ui.centered("СЛАБКИЙ СИГНАЛ", cx, cy - 60.0, 20, BAD);
+            ui.centered(
+                toon_shared::lang::t("СЛАБКИЙ СИГНАЛ", "WEAK SIGNAL"),
+                cx,
+                cy - 60.0,
+                20,
+                BAD,
+            );
         }
     }
 }

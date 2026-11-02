@@ -1,9 +1,10 @@
 //! Weapons dropped by killed players. Anyone can swap their current gun for one (press the
 //! use key next to it); walking over the same gun you carry just takes its ammo.
 
-use crate::game::{Game, WState};
+use crate::game::{Dest, Game, WState};
 use glam::{vec3, Vec3};
 use toon_shared::protocol::{EntSnap, S2C};
+use toon_shared::tr;
 
 /// How long a dropped weapon stays on the ground.
 pub const PICKUP_LIFETIME: f64 = 40.0;
@@ -87,13 +88,10 @@ impl Game {
         let name = pk.w.id.def().name;
         self.pickups.remove(i);
         self.drop_weapon(old, pos);
-        self.send(
-            id,
-            S2C::Center {
-                text: format!("Підібрано: {name}"),
-                secs: 1.5,
-            },
-        );
+        self.say(Dest::One(id), || S2C::Center {
+            text: tr!("Підібрано: {name}", "Picked up: {name}"),
+            secs: 1.5,
+        });
     }
 
     /// Expires old pickups and lets players scavenge ammo from guns they already carry.

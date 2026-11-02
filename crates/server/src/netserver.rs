@@ -21,6 +21,8 @@ struct Conn {
     id: Option<u8>,
     last_recv: f64,
     closing: Option<f64>,
+    /// Language announced before `Hello`.
+    lang: toon_shared::lang::Lang,
 }
 
 pub fn info_json(g: &Game) -> serde_json::Value {
@@ -125,6 +127,7 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                             addr,
                             Conn {
                                 chan: Channel::new(),
+                                lang: Default::default(),
                                 id: None,
                                 last_recv: now,
                                 closing: None,
@@ -150,8 +153,14 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                                 if conn.closing.is_some() {
                                     continue;
                                 }
-                                match game.connect_as(addr, &name, &password, version, &client_game)
-                                {
+                                match game.connect_as(
+                                    addr,
+                                    &name,
+                                    &password,
+                                    version,
+                                    &client_game,
+                                    conn.lang,
+                                ) {
                                     Ok(id) => conn.id = Some(id),
                                     Err(reason) => {
                                         println!("[net] відмова {addr}: {reason}");
@@ -160,6 +169,7 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                                     }
                                 }
                             }
+                            (None, C2S::Lang(l)) => conn.lang = l,
                             (None, _) => {}
                             (Some(id), C2S::Disconnect) => {
                                 game.remove_player(id, None);
@@ -278,7 +288,10 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
 
     // shutting down: tell everyone
     for c in conns.values_mut() {
-        c.chan.send_reliable(&S2C::Reject("Сервер вимкнено".into()));
+        let text = toon_shared::lang::with(c.lang, || {
+            toon_shared::lang::t("Сервер вимкнено", "The server shut down")
+        });
+        c.chan.send_reliable(&S2C::Reject(text.into()));
     }
     for _ in 0..3 {
         for (addr, c) in conns.iter_mut() {

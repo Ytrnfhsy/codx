@@ -28,7 +28,7 @@ pub struct HostSettings {
 impl Default for HostSettings {
     fn default() -> Self {
         HostSettings {
-            name: "Мій сервер".into(),
+            name: toon_shared::lang::t("Мій сервер", "My server").into(),
             port: toon_shared::consts::DEFAULT_PORT,
             mode: "tdm".into(),
             map: "depot".into(),
@@ -68,6 +68,8 @@ pub struct Settings {
     pub vsync: bool,
     /// FPS cap when vsync is off (0 = unlimited).
     pub fps_limit: u32,
+    /// Language of the game (the system's one at first start).
+    pub lang: toon_shared::lang::Lang,
     pub custom: Vec<CustomClass>,
     pub last_class: usize,
     pub recent: Vec<String>,
@@ -76,8 +78,23 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
+        // the system's language at first start, also for the default names below
+        let lang = sys_locale::get_locale()
+            .map(|l| toon_shared::lang::Lang::from_locale(&l))
+            .unwrap_or_default();
+        toon_shared::lang::with(lang, || Settings::defaults(lang))
+    }
+}
+
+impl Settings {
+    fn defaults(lang: toon_shared::lang::Lang) -> Self {
+        use toon_shared::lang::t;
         Settings {
-            name: format!("Боєць{}", (std::process::id() % 900) + 100),
+            name: format!(
+                "{}{}",
+                t("Боєць", "Soldier"),
+                (std::process::id() % 900) + 100
+            ),
             address: format!("127.0.0.1:{}", toon_shared::consts::DEFAULT_PORT),
             password: String::new(),
             sensitivity: 2.0,
@@ -93,9 +110,10 @@ impl Default for Settings {
             render_scale: 1.0,
             vsync: true,
             fps_limit: 144,
+            lang,
             custom: (1..=3)
                 .map(|i| CustomClass {
-                    name: format!("Мій клас {i}"),
+                    name: toon_shared::tr!("Мій клас {i}", "My class {i}"),
                     loadout: DEFAULT_CLASSES[(i - 1) % DEFAULT_CLASSES.len()].1,
                 })
                 .collect(),
@@ -109,7 +127,7 @@ impl Default for Settings {
 impl Default for CustomClass {
     fn default() -> Self {
         CustomClass {
-            name: "Клас".into(),
+            name: toon_shared::lang::t("Клас", "Class").into(),
             loadout: DEFAULT_CLASSES[0].1,
         }
     }

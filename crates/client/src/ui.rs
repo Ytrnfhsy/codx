@@ -45,7 +45,7 @@ impl Fonts {
         // the few big headings only need their own letters
         let big: [(u16, &str); 3] = [
             (64, "TOON WARFARE"),
-            (48, "ПЕРЕМОГА!ПОРАЗКАМАТЧ ЗАВЕРШЕНО"),
+            (48, "ПЕРЕМОГА!ПОРАЗКАМАТЧ ЗАВЕРШЕНОVICTORYDEFEATMATCH OVER"),
             (46, "0123456789"),
         ];
         for (size, text) in big {

@@ -4,7 +4,9 @@ use crate::netclient::{Browser, ServerInfo};
 use crate::settings::Settings;
 use crate::ui::*;
 use macroquad::prelude::*;
+use toon_shared::lang::{t, Lang};
 use toon_shared::map::MapId;
+use toon_shared::tr;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Page {
@@ -55,20 +57,65 @@ impl MenuState {
 
 /// Settings controls shared by the main menu and the in-game pause menu.
 pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
-    s.sensitivity = ui.slider("Чутливість миші", s.sensitivity, 0.2, 8.0, x, y, w, "{}");
+    s.sensitivity = ui.slider(
+        t("Чутливість миші", "Mouse sensitivity"),
+        s.sensitivity,
+        0.2,
+        8.0,
+        x,
+        y,
+        w,
+        "{}",
+    );
     s.fov = ui
-        .slider("Поле зору (FOV)", s.fov, 65.0, 110.0, x, y + 56.0, w, "{}°")
+        .slider(
+            t("Поле зору (FOV)", "Field of view (FOV)"),
+            s.fov,
+            65.0,
+            110.0,
+            x,
+            y + 56.0,
+            w,
+            "{}°",
+        )
         .round();
-    s.volume = ui.slider("Гучність", s.volume, 0.0, 1.0, x, y + 112.0, w, "{}");
-    ui.toggle("Інвертувати Y", &mut s.invert_y, x, y + 150.0);
+    s.volume = ui.slider(
+        t("Гучність", "Volume"),
+        s.volume,
+        0.0,
+        1.0,
+        x,
+        y + 112.0,
+        w,
+        "{}",
+    );
+    ui.toggle(
+        t("Інвертувати Y", "Invert Y"),
+        &mut s.invert_y,
+        x,
+        y + 150.0,
+    );
     let col2 = x + w * 0.52;
-    ui.toggle("Тіні", &mut s.shadows, col2, y + 150.0);
-    ui.toggle("FPS і пінг", &mut s.show_fps, x, y + 186.0);
-    ui.toggle("Текстури", &mut s.textures, col2, y + 186.0);
-    ui.toggle("Контури", &mut s.outlines, x, y + 222.0);
-    ui.toggle("Згладжування миші", &mut s.mouse_smoothing, col2, y + 222.0);
+    ui.toggle(t("Тіні", "Shadows"), &mut s.shadows, col2, y + 150.0);
+    ui.toggle(
+        t("FPS і пінг", "FPS and ping"),
+        &mut s.show_fps,
+        x,
+        y + 186.0,
+    );
+    ui.toggle(t("Текстури", "Textures"), &mut s.textures, col2, y + 186.0);
+    ui.toggle(t("Контури", "Outlines"), &mut s.outlines, x, y + 222.0);
+    ui.toggle(
+        t("Згладжування миші", "Mouse smoothing"),
+        &mut s.mouse_smoothing,
+        col2,
+        y + 222.0,
+    );
     s.render_scale = (ui.slider(
-        "Масштаб рендеру (менше = швидше)",
+        t(
+            "Масштаб рендеру (менше = швидше)",
+            "Render scale (lower = faster)",
+        ),
         s.render_scale * 100.0,
         40.0,
         100.0,
@@ -81,26 +128,47 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         * 5.0
         / 100.0;
     let was = s.vsync;
-    ui.toggle("Вертикальна синхронізація", &mut s.vsync, x, y + 318.0);
+    ui.toggle(
+        t("Вертикальна синхронізація", "Vertical sync"),
+        &mut s.vsync,
+        x,
+        y + 318.0,
+    );
     if s.vsync != was || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed)
     {
         ui.text(
-            "Зміниться після перезапуску гри",
+            t(
+                "Зміниться після перезапуску гри",
+                "Takes effect after restarting the game",
+            ),
             x + 36.0,
             y + 362.0,
             14,
             ACCENT,
         );
     }
+    let li = Lang::ALL.iter().position(|l| *l == s.lang).unwrap_or(0);
+    // in the panel's title row, top right
+    let d = ui.stepper(
+        "Мова / Language",
+        s.lang.name(),
+        x + w - 230.0,
+        y - 58.0,
+        230.0,
+    );
+    if d != 0 {
+        s.lang = Lang::ALL[((li as i32 + d).rem_euclid(Lang::ALL.len() as i32)) as usize];
+        toon_shared::lang::set(s.lang);
+    }
     if !s.vsync {
         const LIMITS: [u32; 6] = [60, 120, 144, 165, 240, 0];
         let i = LIMITS.iter().position(|l| *l == s.fps_limit).unwrap_or(2);
         let label = if s.fps_limit == 0 {
-            "без обмеження".to_string()
+            t("без обмеження", "unlimited").to_string()
         } else {
             format!("{} FPS", s.fps_limit)
         };
-        let d = ui.stepper("Обмеження FPS", &label, x + w - 260.0, y + 390.0, 260.0);
+        let d = ui.stepper(t("Обмеження FPS", "FPS limit"), &label, x, y + 390.0, 260.0);
         if d != 0 {
             s.fps_limit = LIMITS[((i as i32 + d).rem_euclid(LIMITS.len() as i32)) as usize];
         }
@@ -125,7 +193,16 @@ pub fn draw_menu(
         Color::new(0.0, 0.0, 0.0, 0.6),
     );
     ui.bold(title, (w - tw) / 2.0, 92.0, 64, ACCENT);
-    ui.centered("мультяшний мультиплеєрний шутер", w / 2.0, 124.0, 20, TEXT);
+    ui.centered(
+        t(
+            "мультяшний мультиплеєрний шутер",
+            "a cartoon multiplayer shooter",
+        ),
+        w / 2.0,
+        124.0,
+        20,
+        TEXT,
+    );
 
     let pw = 560.0f32.min(w - 40.0);
     let x = (w - pw) / 2.0;
@@ -147,7 +224,7 @@ pub fn draw_menu(
             );
             ui.field(
                 1,
-                "Твоє ім'я",
+                t("Твоє ім'я", "Your name"),
                 &mut s.name,
                 x + 24.0,
                 y + 40.0,
@@ -157,7 +234,7 @@ pub fn draw_menu(
             );
             let enter = ui.field(
                 2,
-                "Адреса сервера (IP:порт)",
+                t("Адреса сервера (IP:порт)", "Server address (IP:port)"),
                 &mut s.address,
                 x + 24.0,
                 y + 110.0,
@@ -167,7 +244,7 @@ pub fn draw_menu(
             );
             ui.field(
                 3,
-                "Пароль сервера (якщо є)",
+                t("Пароль сервера (якщо є)", "Server password (if any)"),
                 &mut s.password,
                 x + 24.0,
                 y + 180.0,
@@ -175,30 +252,56 @@ pub fn draw_menu(
                 true,
                 32,
             );
-            if ui.button("ПІД'ЄДНАТИСЯ", x + 24.0, y + 232.0, pw - 48.0, 54.0) || enter {
+            if ui.button(
+                t("ПІД'ЄДНАТИСЯ", "CONNECT"),
+                x + 24.0,
+                y + 232.0,
+                pw - 48.0,
+                54.0,
+            ) || enter
+            {
                 action = Some(MenuAction::Connect {
                     address: s.address.clone(),
                 });
             }
             let bw = (pw - 60.0) / 2.0;
-            if ui.button2("Створити сервер", x + 24.0, y + 300.0, bw, 46.0) {
+            if ui.button2(
+                t("Створити сервер", "Host a server"),
+                x + 24.0,
+                y + 300.0,
+                bw,
+                46.0,
+            ) {
                 st.page = Page::Host;
             }
-            if ui.button2("Знайти сервери", x + 36.0 + bw, y + 300.0, bw, 46.0) {
+            if ui.button2(
+                t("Знайти сервери", "Find servers"),
+                x + 36.0 + bw,
+                y + 300.0,
+                bw,
+                46.0,
+            ) {
                 st.page = Page::Browser;
                 let recent = s.recent.clone();
                 st.browser.refresh(&recent);
             }
-            if ui.button2("Налаштування", x + 24.0, y + 356.0, bw, 46.0) {
+            if ui.button2(t("Налаштування", "Settings"), x + 24.0, y + 356.0, bw, 46.0)
+            {
                 st.page = Page::Settings;
             }
-            if ui.button_colored("Вихід", x + 36.0 + bw, y + 356.0, bw, 46.0, BAD) {
+            if ui.button_colored(t("Вихід", "Quit"), x + 36.0 + bw, y + 356.0, bw, 46.0, BAD) {
                 action = Some(MenuAction::Quit);
             }
             if let Some(port) = server_running {
-                let ip = st.lan_ip.clone().unwrap_or_else(|| "твій-IP".into());
+                let ip = st
+                    .lan_ip
+                    .clone()
+                    .unwrap_or_else(|| t("твій-IP", "your-IP").into());
                 ui.text(
-                    &format!("Твій сервер працює: {ip}:{port}"),
+                    &tr!(
+                        "Твій сервер працює: {ip}:{port}",
+                        "Your server is running: {ip}:{port}"
+                    ),
                     x + 24.0,
                     y + 426.0,
                     16,
@@ -208,17 +311,33 @@ pub fn draw_menu(
                     ui.text(i, x + 24.0, y + 446.0, 13, MUTED);
                 }
                 let bw = (pw - 60.0) / 2.0;
-                if ui.button2("Грати на ньому", x + 24.0, y + 458.0, bw, 36.0) {
+                if ui.button2(
+                    t("Грати на ньому", "Play on it"),
+                    x + 24.0,
+                    y + 458.0,
+                    bw,
+                    36.0,
+                ) {
                     action = Some(MenuAction::Connect {
                         address: format!("127.0.0.1:{port}"),
                     });
                 }
-                if ui.button_colored("Зупинити", x + 36.0 + bw, y + 458.0, bw, 36.0, BAD) {
+                if ui.button_colored(
+                    t("Зупинити", "Stop"),
+                    x + 36.0 + bw,
+                    y + 458.0,
+                    bw,
+                    36.0,
+                    BAD,
+                ) {
                     action = Some(MenuAction::StopServer);
                 }
             } else {
                 ui.text(
-                    "Порада: створи сервер — друзі під'єднаються за твоїм IP.",
+                    t(
+                        "Порада: створи сервер — друзі під'єднаються за твоїм IP.",
+                        "Tip: host a server and friends can join by your IP.",
+                    ),
                     x + 24.0,
                     y + 440.0,
                     15,
@@ -228,11 +347,17 @@ pub fn draw_menu(
         }
         Page::Host => {
             ui.panel(x, y, pw, 560.0);
-            ui.bold("Створити сервер", x + 24.0, y + 40.0, 26, ACCENT);
+            ui.bold(
+                t("Створити сервер", "Host a server"),
+                x + 24.0,
+                y + 40.0,
+                26,
+                ACCENT,
+            );
             let hs = &mut s.host;
             ui.field(
                 10,
-                "Назва сервера",
+                t("Назва сервера", "Server name"),
                 &mut hs.name,
                 x + 24.0,
                 y + 86.0,
@@ -243,7 +368,7 @@ pub fn draw_menu(
             let mut port = hs.port.to_string();
             ui.field(
                 11,
-                "Порт (UDP + TCP)",
+                t("Порт (UDP + TCP)", "Port (UDP + TCP)"),
                 &mut port,
                 x + 24.0,
                 y + 150.0,
@@ -258,7 +383,7 @@ pub fn draw_menu(
             }
             ui.field(
                 12,
-                "RCON-пароль (адмінка)",
+                t("RCON-пароль (адмінка)", "RCON password (admin)"),
                 &mut hs.rcon,
                 x + 250.0,
                 y + 150.0,
@@ -269,7 +394,13 @@ pub fn draw_menu(
             let modes = ["tdm", "sab"];
             let mi = modes.iter().position(|m| *m == hs.mode).unwrap_or(0);
             let mode_name = toon_shared::Mode::parse(modes[mi]).unwrap().name();
-            let d = ui.stepper("Режим", mode_name, x + 24.0, y + 214.0, (pw - 60.0) / 2.0);
+            let d = ui.stepper(
+                t("Режим", "Mode"),
+                mode_name,
+                x + 24.0,
+                y + 214.0,
+                (pw - 60.0) / 2.0,
+            );
             if d != 0 {
                 hs.mode = modes[((mi as i32 + d).rem_euclid(2)) as usize].into();
             }
@@ -277,7 +408,7 @@ pub fn draw_menu(
             let cur = MapId::parse(&hs.map).unwrap_or(MapId::Depot);
             let ci = maps.iter().position(|m| *m == cur).unwrap_or(0);
             let d = ui.stepper(
-                "Карта",
+                t("Карта", "Map"),
                 toon_shared::maps::build(cur).name,
                 x + 36.0 + (pw - 60.0) / 2.0,
                 y + 214.0,
@@ -290,7 +421,7 @@ pub fn draw_menu(
             }
             hs.bots = ui
                 .slider(
-                    "Боти (заповнення до)",
+                    t("Боти (заповнення до)", "Bots (fill up to)"),
                     hs.bots as f32,
                     0.0,
                     16.0,
@@ -300,10 +431,8 @@ pub fn draw_menu(
                     "{}",
                 )
                 .round() as usize;
-            let skill_label = format!(
-                "Складність ботів ({})",
-                toon_server::bots::skill_name(hs.bot_skill)
-            );
+            let skill = toon_server::bots::skill_name(hs.bot_skill);
+            let skill_label = tr!("Складність ботів ({skill})", "Bot difficulty ({skill})");
             hs.bot_skill = ui.slider(
                 &skill_label,
                 hs.bot_skill,
@@ -316,7 +445,7 @@ pub fn draw_menu(
             );
             hs.max_players = ui
                 .slider(
-                    "Макс. гравців",
+                    t("Макс. гравців", "Max players"),
                     hs.max_players as f32,
                     2.0,
                     24.0,
@@ -328,7 +457,10 @@ pub fn draw_menu(
                 .round() as usize;
             ui.field(
                 13,
-                "Пароль для входу (порожньо = відкритий)",
+                t(
+                    "Пароль для входу (порожньо = відкритий)",
+                    "Join password (empty = open)",
+                ),
                 &mut hs.password,
                 x + 24.0,
                 y + 430.0,
@@ -336,10 +468,16 @@ pub fn draw_menu(
                 true,
                 32,
             );
-            if ui.button("ЗАПУСТИТИ", x + pw - 220.0, y + 490.0, 196.0, 50.0) {
+            if ui.button(
+                t("ЗАПУСТИТИ", "START"),
+                x + pw - 220.0,
+                y + 490.0,
+                196.0,
+                50.0,
+            ) {
                 action = Some(MenuAction::Host);
             }
-            if ui.button2("Назад", x + 24.0, y + 490.0, 140.0, 50.0) {
+            if ui.button2(t("Назад", "Back"), x + 24.0, y + 490.0, 140.0, 50.0) {
                 st.page = Page::Main;
             }
         }
@@ -347,9 +485,9 @@ pub fn draw_menu(
             ui.panel(x - 100.0, y, pw + 200.0, 470.0);
             let x = x - 100.0;
             let pw = pw + 200.0;
-            ui.bold("Сервери", x + 24.0, y + 40.0, 26, ACCENT);
+            ui.bold(t("Сервери", "Servers"), x + 24.0, y + 40.0, 26, ACCENT);
             ui.text(
-                "Локальна мережа + нещодавні",
+                t("Локальна мережа + нещодавні", "Local network + recent"),
                 x + 150.0,
                 y + 40.0,
                 15,
@@ -359,7 +497,10 @@ pub fn draw_menu(
             let results: Vec<ServerInfo> = st.browser.results.clone();
             if results.is_empty() {
                 ui.text(
-                    "Шукаю… (переконайся, що сервер запущено і порт відкрито)",
+                    t(
+                        "Шукаю… (переконайся, що сервер запущено і порт відкрито)",
+                        "Searching… (make sure the server is running and the port is open)",
+                    ),
                     x + 24.0,
                     y + 90.0,
                     16,
@@ -368,35 +509,53 @@ pub fn draw_menu(
             }
             for (i, r) in results.iter().take(7).enumerate() {
                 let ry = y + 64.0 + i as f32 * 48.0;
-                let label = format!(
-                    "{}{}  ·  {}  ·  {}  ·  {}/{} (+{} ботів)  ·  {} мс",
-                    if r.password { "[пароль] " } else { "" },
-                    r.name,
-                    r.map,
-                    r.mode,
-                    r.players,
-                    r.max,
-                    r.bots,
-                    r.ping_ms
+                let lock = if r.password {
+                    t("[пароль] ", "[password] ")
+                } else {
+                    ""
+                };
+                let (name, map, mode) = (&r.name, r.map_name(), r.mode_name());
+                let (players, max, bots, ping) = (r.players, r.max, r.bots, r.ping_ms);
+                let label = tr!(
+                    "{lock}{name}  ·  {map}  ·  {mode}  ·  {players}/{max} (+{bots} ботів)  ·  {ping} мс",
+                    "{lock}{name}  ·  {map}  ·  {mode}  ·  {players}/{max} (+{bots} bots)  ·  {ping} ms"
                 );
                 if ui.button2(&label, x + 24.0, ry, pw - 48.0, 40.0) {
                     s.address = r.addr.clone();
                     st.page = Page::Main;
                 }
             }
-            if ui.button("Оновити", x + pw - 200.0, y + 410.0, 176.0, 44.0) {
+            if ui.button(
+                t("Оновити", "Refresh"),
+                x + pw - 200.0,
+                y + 410.0,
+                176.0,
+                44.0,
+            ) {
                 let recent = s.recent.clone();
                 st.browser.refresh(&recent);
             }
-            if ui.button2("Назад", x + 24.0, y + 410.0, 140.0, 44.0) {
+            if ui.button2(t("Назад", "Back"), x + 24.0, y + 410.0, 140.0, 44.0) {
                 st.page = Page::Main;
             }
         }
         Page::Settings => {
             ui.panel(x, y, pw, 550.0);
-            ui.bold("Налаштування", x + 24.0, y + 40.0, 26, ACCENT);
+            ui.bold(
+                t("Налаштування", "Settings"),
+                x + 24.0,
+                y + 40.0,
+                26,
+                ACCENT,
+            );
             settings_widgets(ui, s, x + 24.0, y + 90.0, pw - 48.0);
-            if ui.button("Зберегти", x + pw - 200.0, y + 490.0, 176.0, 44.0) {
+            if ui.button(
+                t("Зберегти", "Save"),
+                x + pw - 200.0,
+                y + 490.0,
+                176.0,
+                44.0,
+            ) {
                 s.save();
                 st.page = Page::Main;
             }
@@ -415,10 +574,10 @@ pub fn draw_menu(
     }
     // a server turned us away for an old version: look for the update again if the
     // first look failed, and show what can be done
-    let outdated = st
-        .error
-        .as_deref()
-        .is_some_and(|e| e.starts_with(toon_shared::consts::OUTDATED));
+    let outdated = st.error.as_deref().is_some_and(|e| {
+        let (uk, en) = toon_shared::consts::OUTDATED;
+        e.starts_with(uk) || e.starts_with(en)
+    });
     if outdated && !st.rechecked {
         st.rechecked = true;
         if matches!(
@@ -436,8 +595,9 @@ pub fn draw_menu(
     }
     ui.text(
         &format!(
-            "v{}  ·  протокол {}",
+            "v{}  ·  {} {}",
             toon_shared::consts::GAME_VERSION,
+            t("протокол", "protocol"),
             toon_shared::consts::PROTOCOL_VERSION
         ),
         10.0,

@@ -6,6 +6,8 @@ use macroquad::prelude::*;
 use std::sync::{Arc, Mutex};
 use toon_server::update::{self, Release};
 use toon_shared::consts::GAME_VERSION;
+use toon_shared::lang::t;
+use toon_shared::tr;
 
 const BIN: &str = "toon-warfare";
 
@@ -101,7 +103,7 @@ impl Updater {
             State::Available(r) => {
                 box_(ui, 92.0, outdated);
                 ui.shadowed(
-                    &format!("Доступне оновлення v{}", r.version),
+                    &tr!("Доступне оновлення v{}", "Update available: v{}", r.version),
                     x + 14.0,
                     y + 26.0,
                     18,
@@ -109,20 +111,27 @@ impl Updater {
                 );
                 let mb = r.size as f32 / 1_048_576.0;
                 ui.shadowed(
-                    &format!("у тебе v{GAME_VERSION} · {mb:.0} МБ"),
+                    &tr!(
+                        "у тебе v{GAME_VERSION} · {mb:.0} МБ",
+                        "you have v{GAME_VERSION} · {mb:.0} MB"
+                    ),
                     x + 14.0,
                     y + 46.0,
                     14,
                     MUTED,
                 );
-                if ui.button("Оновити", x + 14.0, y + 54.0, pw - 28.0, 32.0) {
+                if ui.button(t("Оновити", "Update"), x + 14.0, y + 54.0, pw - 28.0, 32.0) {
                     self.install(r);
                 }
             }
             State::Downloading(v, p) => {
                 box_(ui, 64.0, false);
                 ui.shadowed(
-                    &format!("Завантаження v{v}… {:.0}%", p * 100.0),
+                    &tr!(
+                        "Завантаження v{v}… {:.0}%",
+                        "Downloading v{v}… {:.0}%",
+                        p * 100.0
+                    ),
                     x + 14.0,
                     y + 26.0,
                     18,
@@ -140,7 +149,10 @@ impl Updater {
             State::Installed(v) => {
                 box_(ui, 44.0, false);
                 ui.shadowed(
-                    &format!("Оновлено до v{v}, перезапуск…"),
+                    &tr!(
+                        "Оновлено до v{v}, перезапуск…",
+                        "Updated to v{v}, restarting…"
+                    ),
                     x + 14.0,
                     y + 28.0,
                     18,
@@ -150,46 +162,91 @@ impl Updater {
             }
             State::Failed(e) => {
                 box_(ui, 92.0, true);
-                ui.shadowed("Не вдалося оновити", x + 14.0, y + 26.0, 18, BAD);
+                ui.shadowed(
+                    t("Не вдалося оновити", "Update failed"),
+                    x + 14.0,
+                    y + 26.0,
+                    18,
+                    BAD,
+                );
                 ui.shadowed(&e, x + 14.0, y + 46.0, 13, MUTED);
-                if ui.button2("Спробувати ще", x + 14.0, y + 54.0, pw - 28.0, 32.0) {
+                if ui.button2(
+                    t("Спробувати ще", "Try again"),
+                    x + 14.0,
+                    y + 54.0,
+                    pw - 28.0,
+                    32.0,
+                ) {
                     self.check();
                 }
             }
             State::Checking if outdated => {
                 box_(ui, 44.0, false);
-                ui.shadowed("Шукаю оновлення…", x + 14.0, y + 28.0, 18, TEXT);
+                ui.shadowed(
+                    t("Шукаю оновлення…", "Looking for updates…"),
+                    x + 14.0,
+                    y + 28.0,
+                    18,
+                    TEXT,
+                );
             }
             State::CheckFailed(e) if outdated => {
                 box_(ui, 92.0, true);
-                ui.shadowed("Не вдалося знайти оновлення", x + 14.0, y + 26.0, 18, BAD);
+                ui.shadowed(
+                    t("Не вдалося знайти оновлення", "Could not look for updates"),
+                    x + 14.0,
+                    y + 26.0,
+                    18,
+                    BAD,
+                );
                 ui.shadowed(&e, x + 14.0, y + 46.0, 13, MUTED);
-                if ui.button2("Спробувати ще", x + 14.0, y + 54.0, pw - 28.0, 32.0) {
+                if ui.button2(
+                    t("Спробувати ще", "Try again"),
+                    x + 14.0,
+                    y + 54.0,
+                    pw - 28.0,
+                    32.0,
+                ) {
                     self.check();
                 }
             }
             State::UpToDate if outdated => {
                 box_(ui, 64.0, true);
                 ui.shadowed(
-                    "Новішої версії ще не опубліковано —",
+                    t(
+                        "Новішої версії ще не опубліковано —",
+                        "No newer version published yet —",
+                    ),
                     x + 14.0,
                     y + 26.0,
                     16,
                     TEXT,
                 );
-                ui.shadowed("спробуй за кілька хвилин", x + 14.0, y + 48.0, 16, TEXT);
+                ui.shadowed(
+                    t("спробуй за кілька хвилин", "try again in a few minutes"),
+                    x + 14.0,
+                    y + 48.0,
+                    16,
+                    TEXT,
+                );
             }
             State::Off if outdated && !self.enabled => {
                 box_(ui, 64.0, true);
                 ui.shadowed(
-                    "Оновлення вимкнено (--no-update):",
+                    t(
+                        "Оновлення вимкнено (--no-update):",
+                        "Updates are off (--no-update):",
+                    ),
                     x + 14.0,
                     y + 26.0,
                     16,
                     TEXT,
                 );
                 ui.shadowed(
-                    "завантаж гру з Releases на GitHub",
+                    t(
+                        "завантаж гру з Releases на GitHub",
+                        "download the game from GitHub Releases",
+                    ),
                     x + 14.0,
                     y + 48.0,
                     16,

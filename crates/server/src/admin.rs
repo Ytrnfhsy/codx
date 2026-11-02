@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use toon_shared::map::MapId;
 use toon_shared::protocol::S2C;
+use toon_shared::tr;
 use toon_shared::tuning::{FieldInfo, GrenadeTuning, MoveTuning, Tuning, WeaponStats};
 use toon_shared::weapons::WeaponId;
 use toon_shared::{Mode, Team};
@@ -157,8 +158,8 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             if rest.is_empty() {
                 return "Використання: say <текст>".into();
             }
-            g.broadcast(S2C::Chat {
-                from: "Адмін".into(),
+            g.say(crate::game::Dest::All, || S2C::Chat {
+                from: toon_shared::lang::t("Адмін", "Admin").into(),
                 team: Team::Spectator,
                 text: rest.into(),
                 team_only: false,
@@ -301,7 +302,7 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             } else {
                 None
             };
-            g.end_match(w, "Завершено адміністратором");
+            g.end_match(w, ("Завершено адміністратором", "Ended by an admin"));
             "Матч завершено".into()
         }
         "team" => {
@@ -493,7 +494,15 @@ fn set_var(g: &mut Game, key: &str, v: &str) -> String {
         _ => return format!("Невідомий ключ «{key}»"),
     }
     if key != "password" {
-        g.center_all(format!("Налаштування змінено: {key} = {v}"), 3.0);
+        g.center_all(
+            || {
+                tr!(
+                    "Налаштування змінено: {key} = {v}",
+                    "Setting changed: {key} = {v}"
+                )
+            },
+            3.0,
+        );
     }
     format!("{key} = {v}")
 }

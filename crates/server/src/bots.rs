@@ -124,10 +124,10 @@ pub fn parse_skill(v: &str) -> Option<f32> {
 
 pub fn skill_name(s: f32) -> &'static str {
     match s {
-        x if x < 0.25 => "легкі",
-        x if x < 0.55 => "звичайні",
-        x if x < 0.85 => "важкі",
-        _ => "ветерани",
+        x if x < 0.25 => toon_shared::lang::t("легкі", "easy"),
+        x if x < 0.55 => toon_shared::lang::t("звичайні", "normal"),
+        x if x < 0.85 => toon_shared::lang::t("важкі", "hard"),
+        _ => toon_shared::lang::t("ветерани", "veteran"),
     }
 }
 

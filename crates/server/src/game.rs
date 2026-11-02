@@ -7,12 +7,13 @@ use glam::{vec3, Vec3};
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use toon_shared::consts::*;
+use toon_shared::lang::{pick, t, Lang, Text};
 use toon_shared::map::{Map, MapId, Spawn};
 use toon_shared::physics::{body_box, Body, Stance, World};
 use toon_shared::protocol::*;
 use toon_shared::rng::Rng;
 use toon_shared::weapons::{Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
-use toon_shared::{maps, Mode, Team};
+use toon_shared::{maps, tr, Mode, Team};
 
 pub const PREROUND_FIRST: f64 = 8.0;
 pub const PREROUND_NEXT: f64 = 5.0;
@@ -37,6 +38,8 @@ pub struct HistEntry {
 pub struct Player {
     pub id: u8,
     pub name: String,
+    /// Language the server writes to this player in.
+    pub lang: Lang,
     pub addr: Option<SocketAddr>,
     pub ip: String,
     pub bot: Option<Box<Bot>>,
@@ -95,6 +98,7 @@ impl Player {
         Player {
             id,
             name,
+            lang: Lang::Uk,
             ip: addr
                 .map(|a| a.ip().to_string())
                 .unwrap_or_else(|| "bot".into()),
@@ -398,11 +402,29 @@ impl Game {
     pub fn send_team(&mut self, team: Team, msg: S2C) {
         self.outbox.push((Dest::Team(team), msg, true));
     }
-    pub fn center_all(&mut self, text: impl Into<String>, secs: f32) {
-        self.broadcast(S2C::Center {
-            text: text.into(),
-            secs,
-        });
+    pub fn center_all(&mut self, text: impl Fn() -> String, secs: f32) {
+        self.say(Dest::All, || S2C::Center { text: text(), secs });
+    }
+
+    /// Sends a message written in each recipient's own language: `f` runs once per player
+    /// with their language current.
+    pub fn say(&mut self, dest: Dest, f: impl Fn() -> S2C) {
+        let to: Vec<(u8, Lang)> = self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| !p.is_bot())
+            .filter(|p| match dest {
+                Dest::All => true,
+                Dest::One(id) => p.id == id,
+                Dest::Team(t) => p.team == t,
+            })
+            .map(|p| (p.id, p.lang))
+            .collect();
+        for (id, l) in to {
+            let msg = toon_shared::lang::with(l, &f);
+            self.outbox.push((Dest::One(id), msg, true));
+        }
     }
 
     pub fn p(&self, id: u8) -> Option<&Player> {
@@ -494,7 +516,7 @@ impl Game {
         password: &str,
         version: u16,
     ) -> Result<u8, String> {
-        self.connect_as(addr, name, password, version, GAME_VERSION)
+        self.connect_as(addr, name, password, version, GAME_VERSION, Lang::Uk)
     }
 
     /// `connect` for a client of game version `game`.
@@ -505,26 +527,52 @@ impl Game {
         password: &str,
         version: u16,
         game: &str,
+        lang: Lang,
+    ) -> Result<u8, String> {
+        // a refusal is written in the newcomer's language
+        let id = toon_shared::lang::with(lang, || self.admit(addr, name, password, version, game))?;
+        if let Some(p) = self.pm(id) {
+            p.lang = lang;
+        }
+        self.welcome(id);
+        Ok(id)
+    }
+
+    fn admit(
+        &mut self,
+        addr: SocketAddr,
+        name: &str,
+        password: &str,
+        version: u16,
+        game: &str,
     ) -> Result<u8, String> {
         if version != PROTOCOL_VERSION || (self.cfg.require_same_version && game != GAME_VERSION) {
             if crate::update::newer(game, GAME_VERSION) {
-                return Err(format!(
-                    "{SERVER_OUTDATED} На сервері v{GAME_VERSION}, у тебе v{game}: адміну треба оновити сервер (toon-server --update)."
+                return Err(tr!(
+                    "{} На сервері v{GAME_VERSION}, у тебе v{game}: адміну треба оновити сервер (toon-server --update).",
+                    "{} The server has v{GAME_VERSION}, you have v{game}: the admin needs to update the server (toon-server --update).",
+                    pick(SERVER_OUTDATED)
                 ));
             }
-            return Err(format!(
-                "{OUTDATED} На сервері гра v{GAME_VERSION}, у тебе v{game}. Онови гру: кнопка «Оновити» справа вгорі в меню (або завантаж її з Releases на GitHub)."
+            return Err(tr!(
+                "{} На сервері гра v{GAME_VERSION}, у тебе v{game}. Онови гру: кнопка «Оновити» справа вгорі в меню (або завантаж її з Releases на GitHub).",
+                "{} The server has v{GAME_VERSION}, you have v{game}. Update the game: the Update button in the top right of the menu (or download it from GitHub Releases).",
+                pick(OUTDATED)
             ));
         }
         let ip = addr.ip().to_string();
         if let Some(b) = self.bans.find(&ip) {
-            return Err(format!("Тебе заблоковано на цьому сервері: {}", b.reason));
+            return Err(tr!(
+                "Тебе заблоковано на цьому сервері: {}",
+                "You are banned from this server: {}",
+                b.reason
+            ));
         }
         if !self.cfg.password.is_empty() && password != self.cfg.password {
-            return Err("Невірний пароль сервера".into());
+            return Err(t("Невірний пароль сервера", "Wrong server password").into());
         }
         if self.humans() >= self.cfg.max_players {
-            return Err("Сервер заповнений".into());
+            return Err(t("Сервер заповнений", "The server is full").into());
         }
         // make room by removing a bot if needed
         if self.players.iter().flatten().count() >= self.cfg.max_players {
@@ -539,11 +587,18 @@ impl Game {
             }
         }
         let Some(slot) = self.players.iter().position(|p| p.is_none()) else {
-            return Err("Сервер заповнений".into());
+            return Err(t("Сервер заповнений", "The server is full").into());
         };
         let id = slot as u8;
         let name = self.sanitize_name(name, None);
         self.players[slot] = Some(Player::new(id, name.clone(), Some(addr), self.time));
+        self.logf(format!("+ {name} ({ip}) підключився як #{id}"));
+        Ok(id)
+    }
+
+    /// First messages to a player who just got in, and the news for everyone.
+    fn welcome(&mut self, id: u8) {
+        let name = self.p(id).map(|p| p.name.clone()).unwrap_or_default();
         self.send(
             id,
             S2C::Welcome {
@@ -556,14 +611,12 @@ impl Game {
             },
         );
         self.send(id, S2C::Tuning(Box::new(self.tuning.clone())));
-        self.broadcast(S2C::Chat {
+        self.say(Dest::All, || S2C::Chat {
             from: String::new(),
             team: Team::Spectator,
-            text: format!("{name} приєднався до гри"),
+            text: tr!("{name} приєднався до гри", "{name} joined the game"),
             team_only: false,
         });
-        self.logf(format!("+ {name} ({ip}) підключився як #{id}"));
-        Ok(id)
     }
 
     pub fn remove_player(&mut self, id: u8, reason: Option<&str>) {
@@ -580,10 +633,11 @@ impl Game {
                 Some(r) => format!("{} покинув гру ({r})", p.name),
                 None => format!("{} покинув гру", p.name),
             };
-            self.broadcast(S2C::Chat {
+            let name = p.name.clone();
+            self.say(Dest::All, || S2C::Chat {
                 from: String::new(),
                 team: Team::Spectator,
-                text: text.clone(),
+                text: tr!("{name} покинув гру", "{name} left the game"),
                 team_only: false,
             });
             self.logf(format!("- {text}"));
@@ -649,7 +703,7 @@ impl Game {
         }
         self.send(id, S2C::TeamSet(team));
         if notify {
-            self.broadcast(S2C::Chat {
+            self.say(Dest::All, || S2C::Chat {
                 from: String::new(),
                 team,
                 text: format!("{name} → {}", team.name()),
@@ -1002,6 +1056,11 @@ impl Game {
                 }
             }
             C2S::Disconnect => {}
+            C2S::Lang(l) => {
+                if let Some(p) = self.pm(id) {
+                    p.lang = l;
+                }
+            }
         }
     }
 
@@ -1032,13 +1091,14 @@ impl Game {
                 {
                     self.set_team(bot, other, false);
                 } else {
-                    self.send(
-                        id,
-                        S2C::Center {
-                            text: "Команда переповнена — автобаланс".into(),
-                            secs: 3.0,
-                        },
-                    );
+                    self.say(Dest::One(id), || S2C::Center {
+                        text: t(
+                            "Команда переповнена — автобаланс",
+                            "Team is full — auto-balance",
+                        )
+                        .into(),
+                        secs: 3.0,
+                    });
                     let t = self.auto_team(id);
                     self.set_team(id, t, true);
                     return;
@@ -1145,10 +1205,15 @@ impl Game {
             if let Some(p) = self.pm(id) {
                 p.rcon_fails += 1;
             }
-            self.send(
-                id,
-                S2C::RconReply("RCON: невірний пароль або адміністрування вимкнено".into()),
-            );
+            self.say(Dest::One(id), || {
+                S2C::RconReply(
+                    t(
+                        "RCON: невірний пароль або адміністрування вимкнено",
+                        "RCON: wrong password, or administration is off",
+                    )
+                    .into(),
+                )
+            });
             return;
         }
         let name = self.p(id).map(|p| p.name.clone()).unwrap_or_default();
@@ -1214,11 +1279,14 @@ impl Game {
                 self.spawn_player(id, true);
             }
         }
-        let text = match self.mode {
-            Mode::Tdm => format!("{} — {}", self.mode.name(), self.map.name),
-            Mode::Sab => format!("{} — раунд {}", self.mode.name(), self.round),
-        };
-        self.center_all(text, pre as f32);
+        let (mode, map, round) = (self.mode, self.map.id, self.round);
+        self.center_all(
+            || match mode {
+                Mode::Tdm => format!("{} — {}", mode.name(), map.name()),
+                Mode::Sab => tr!("{} — раунд {round}", "{} — round {round}", mode.name()),
+            },
+            pre as f32,
+        );
     }
 
     pub fn reset_bomb(&mut self) {
@@ -1231,35 +1299,45 @@ impl Game {
         self.sab.dropped_since = self.time;
     }
 
-    pub fn end_match(&mut self, winner: Option<Team>, reason: &str) {
+    pub fn end_match(&mut self, winner: Option<Team>, reason: Text) {
         if self.state == MatchState::PostMatch {
             return;
         }
         self.state = MatchState::PostMatch;
         self.state_end = self.time + POSTMATCH_TIME;
-        let text = match winner {
-            Some(t) => format!("{} перемагають! {reason}", t.name()),
-            None => format!("Нічия! {reason}"),
+        let text = || match winner {
+            Some(t) => tr!("{} перемагають! {}", "{} win! {}", t.name(), pick(reason)),
+            None => tr!("Нічия! {}", "Draw! {}", pick(reason)),
         };
         self.logf(format!(
-            "Матч завершено: {text} ({}:{})",
-            self.scores[0], self.scores[1]
+            "Матч завершено: {} ({}:{})",
+            text(),
+            self.scores[0],
+            self.scores[1]
         ));
-        self.broadcast(S2C::MatchEnd { winner, text });
+        self.say(Dest::All, || S2C::MatchEnd {
+            winner,
+            text: text(),
+        });
     }
 
-    pub fn round_win(&mut self, winner: Option<Team>, reason: &str) {
+    pub fn round_win(&mut self, winner: Option<Team>, reason: Text) {
         if self.state != MatchState::Playing {
             return;
         }
         if let Some(t) = winner {
             self.scores[t.index()] += 1;
         }
-        let text = match winner {
-            Some(t) => format!("{} виграли раунд — {reason}", t.name()),
-            None => format!("Раунд нічийний — {reason}"),
+        let text = || match winner {
+            Some(t) => tr!(
+                "{} виграли раунд — {}",
+                "{} win the round — {}",
+                t.name(),
+                pick(reason)
+            ),
+            None => tr!("Раунд нічийний — {}", "Round drawn — {}", pick(reason)),
         };
-        self.logf(text.clone());
+        self.logf(text());
         if let Some(t) = winner {
             if self.scores[t.index()] >= self.cfg.sab.rounds_to_win as i32 {
                 self.end_match(Some(t), reason);
@@ -1268,7 +1346,10 @@ impl Game {
         }
         self.state = MatchState::RoundEnd;
         self.state_end = self.time + ROUND_END_TIME;
-        self.broadcast(S2C::RoundEnd { winner, text });
+        self.say(Dest::All, || S2C::RoundEnd {
+            winner,
+            text: text(),
+        });
     }
 
     /// Switches map/mode immediately (admin or rotation).
@@ -1340,7 +1421,7 @@ impl Game {
                         Mode::Sab => self.cfg.sab.time_limit,
                     };
                     self.round_end = self.time + limit as f64 * 60.0;
-                    self.center_all("В БІЙ!", 1.5);
+                    self.center_all(|| t("В БІЙ!", "FIGHT!").into(), 1.5);
                 }
             }
             MatchState::Playing => {
@@ -1358,13 +1439,19 @@ impl Game {
                             } else {
                                 None
                             };
-                            self.end_match(w, "Час вийшов");
+                            self.end_match(w, ("Час вийшов", "Time is up"));
                         }
                         Mode::Sab => {
                             self.overtime = true;
                             self.sab.overtime_end =
                                 self.time + self.cfg.sab.overtime_limit as f64 * 60.0;
-                            self.center_all("ОВЕРТАЙМ! Відродження вимкнено", 4.0);
+                            self.center_all(
+                                || {
+                                    t("ОВЕРТАЙМ! Відродження вимкнено", "OVERTIME! No respawns")
+                                        .into()
+                                },
+                                4.0,
+                            );
                         }
                     }
                 }

@@ -1,5 +1,6 @@
 //! Weapons, perks, loadouts and default classes in the spirit of CoD4.
 
+use crate::lang::t;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -35,12 +36,12 @@ pub enum WeaponClass {
 impl WeaponClass {
     pub fn name(self) -> &'static str {
         match self {
-            WeaponClass::Rifle => "Штурмова гвинтівка",
-            WeaponClass::Smg => "Пістолет-кулемет",
-            WeaponClass::Lmg => "Кулемет",
-            WeaponClass::Shotgun => "Дробовик",
-            WeaponClass::Sniper => "Снайперська гвинтівка",
-            WeaponClass::Pistol => "Пістолет",
+            WeaponClass::Rifle => t("Штурмова гвинтівка", "Assault rifle"),
+            WeaponClass::Smg => t("Пістолет-кулемет", "SMG"),
+            WeaponClass::Lmg => t("Кулемет", "LMG"),
+            WeaponClass::Shotgun => t("Дробовик", "Shotgun"),
+            WeaponClass::Sniper => t("Снайперська гвинтівка", "Sniper rifle"),
+            WeaponClass::Pistol => t("Пістолет", "Pistol"),
         }
     }
 }
@@ -238,14 +239,14 @@ impl Perk1 {
     pub const ALL: [Perk1; 2] = [Perk1::Frag3, Perk1::Bandolier];
     pub fn name(self) -> &'static str {
         match self {
-            Perk1::Frag3 => "Фраг ×3",
-            Perk1::Bandolier => "Бандольєр",
+            Perk1::Frag3 => t("Фраг ×3", "Frag ×3"),
+            Perk1::Bandolier => t("Бандольєр", "Bandolier"),
         }
     }
     pub fn desc(self) -> &'static str {
         match self {
-            Perk1::Frag3 => "Три осколкові гранати",
-            Perk1::Bandolier => "Більше запасних набоїв",
+            Perk1::Frag3 => t("Три осколкові гранати", "Three frag grenades"),
+            Perk1::Bandolier => t("Більше запасних набоїв", "More spare ammo"),
         }
     }
 }
@@ -259,18 +260,18 @@ impl Perk2 {
     ];
     pub fn name(self) -> &'static str {
         match self {
-            Perk2::StoppingPower => "Зупиняюча сила",
-            Perk2::Juggernaut => "Джаггернаут",
-            Perk2::SleightOfHand => "Спритність рук",
-            Perk2::UavJammer => "Глушилка БПЛА",
+            Perk2::StoppingPower => t("Зупиняюча сила", "Stopping Power"),
+            Perk2::Juggernaut => t("Джаггернаут", "Juggernaut"),
+            Perk2::SleightOfHand => t("Спритність рук", "Sleight of Hand"),
+            Perk2::UavJammer => t("Глушилка БПЛА", "UAV Jammer"),
         }
     }
     pub fn desc(self) -> &'static str {
         match self {
-            Perk2::StoppingPower => "+40% урону від куль",
-            Perk2::Juggernaut => "Отримуєш на 25% менше урону",
-            Perk2::SleightOfHand => "Перезарядка вдвічі швидша",
-            Perk2::UavJammer => "Невидимий для ворожого БПЛА",
+            Perk2::StoppingPower => t("+40% урону від куль", "+40% bullet damage"),
+            Perk2::Juggernaut => t("Отримуєш на 25% менше урону", "Take 25% less damage"),
+            Perk2::SleightOfHand => t("Перезарядка вдвічі швидша", "Reload twice as fast"),
+            Perk2::UavJammer => t("Невидимий для ворожого БПЛА", "Invisible to enemy UAV"),
         }
     }
 }
@@ -284,18 +285,18 @@ impl Perk3 {
     ];
     pub fn name(self) -> &'static str {
         match self {
-            Perk3::SteadyAim => "Стійкий приціл",
-            Perk3::ExtremeConditioning => "Екстремальна підготовка",
-            Perk3::Martyrdom => "Мученик",
-            Perk3::DeadSilence => "Мертва тиша",
+            Perk3::SteadyAim => t("Стійкий приціл", "Steady Aim"),
+            Perk3::ExtremeConditioning => t("Екстремальна підготовка", "Extreme Conditioning"),
+            Perk3::Martyrdom => t("Мученик", "Martyrdom"),
+            Perk3::DeadSilence => t("Мертва тиша", "Dead Silence"),
         }
     }
     pub fn desc(self) -> &'static str {
         match self {
-            Perk3::SteadyAim => "Точніша стрільба від стегна",
-            Perk3::ExtremeConditioning => "Спринт удвічі довший",
-            Perk3::Martyrdom => "Після смерті падає граната",
-            Perk3::DeadSilence => "Беззвучні кроки",
+            Perk3::SteadyAim => t("Точніша стрільба від стегна", "Tighter hip fire"),
+            Perk3::ExtremeConditioning => t("Спринт удвічі довший", "Sprint twice as long"),
+            Perk3::Martyrdom => t("Після смерті падає граната", "Drop a grenade when you die"),
+            Perk3::DeadSilence => t("Беззвучні кроки", "Silent footsteps"),
         }
     }
 }
@@ -417,13 +418,13 @@ impl Killstreak {
     ];
     pub fn name(self) -> &'static str {
         match self {
-            Killstreak::Uav => "Радар",
-            Killstreak::Airstrike => "Авіаудар",
-            Killstreak::Artillery => "Артилерія",
-            Killstreak::Helicopter => "Гелікоптер",
-            Killstreak::Fpv => "FPV-дрон",
-            Killstreak::Bomber => "Дрон-бомбер",
-            Killstreak::Nrk => "НРК",
+            Killstreak::Uav => t("Радар", "Radar"),
+            Killstreak::Airstrike => t("Авіаудар", "Airstrike"),
+            Killstreak::Artillery => t("Артилерія", "Artillery"),
+            Killstreak::Helicopter => t("Гелікоптер", "Helicopter"),
+            Killstreak::Fpv => t("FPV-дрон", "FPV drone"),
+            Killstreak::Bomber => t("Дрон-бомбер", "Bomber drone"),
+            Killstreak::Nrk => t("НРК", "Ground robot"),
         }
     }
     /// Kills in a row needed.
@@ -496,17 +497,17 @@ impl Cause {
     pub fn name(self) -> &'static str {
         match self {
             Cause::Weapon(w) => w.def().name,
-            Cause::Grenade => "Граната",
-            Cause::Knife => "Ніж",
-            Cause::Airstrike => "Авіаудар",
-            Cause::Helicopter => "Гелікоптер",
-            Cause::Bomb => "Бомба",
-            Cause::Fall => "Падіння",
-            Cause::World => "Світ",
-            Cause::Artillery => "Артилерія",
-            Cause::Fpv => "FPV-дрон",
-            Cause::Drop => "Скид з дрона",
-            Cause::Nrk => "НРК",
+            Cause::Grenade => t("Граната", "Grenade"),
+            Cause::Knife => t("Ніж", "Knife"),
+            Cause::Airstrike => t("Авіаудар", "Airstrike"),
+            Cause::Helicopter => t("Гелікоптер", "Helicopter"),
+            Cause::Bomb => t("Бомба", "Bomb"),
+            Cause::Fall => t("Падіння", "Fall"),
+            Cause::World => t("Світ", "World"),
+            Cause::Artillery => t("Артилерія", "Artillery"),
+            Cause::Fpv => t("FPV-дрон", "FPV drone"),
+            Cause::Drop => t("Скид з дрона", "Drone drop"),
+            Cause::Nrk => t("НРК", "Ground robot"),
         }
     }
 }

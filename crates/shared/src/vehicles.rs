@@ -2,6 +2,7 @@
 //! ground robot (НРК). Their movement lives here so the pilot's client can predict it and
 //! the server can tell how far a vehicle may legally move.
 
+use crate::lang::t;
 use crate::physics::{Body, MoveInput, Stance, World};
 use crate::tuning::MoveTuning;
 use crate::{vec3, Vec2, Vec3};
@@ -31,9 +32,9 @@ pub mod keys {
 impl VehicleKind {
     pub fn name(self) -> &'static str {
         match self {
-            VehicleKind::Fpv => "FPV-дрон",
-            VehicleKind::Bomber => "Дрон-бомбер",
-            VehicleKind::Nrk => "НРК",
+            VehicleKind::Fpv => t("FPV-дрон", "FPV drone"),
+            VehicleKind::Bomber => t("Дрон-бомбер", "Bomber drone"),
+            VehicleKind::Nrk => t("НРК", "Ground robot"),
         }
     }
     pub fn health(self) -> f32 {

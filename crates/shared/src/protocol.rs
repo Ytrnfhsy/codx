@@ -84,6 +84,10 @@ pub enum C2S {
     /// Swap the current weapon for a dropped one (entity id).
     PickUp(u16),
     Disconnect,
+    /// The player's language, sent before `Hello` and again when it changes: the server
+    /// writes its messages to them in it. (Last in the list, and separate from `Hello`, so
+    /// servers that do not know it simply skip it.)
+    Lang(crate::lang::Lang),
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]

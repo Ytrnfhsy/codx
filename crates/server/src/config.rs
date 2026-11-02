@@ -126,7 +126,8 @@ impl Default for ServerConfig {
             max_players: 18,
             password: String::new(),
             rcon_password: String::new(),
-            motd: "Ласкаво просимо! Грай чесно :)".into(),
+            motd: toon_shared::lang::t("Ласкаво просимо! Грай чесно :)", "Welcome! Play fair :)")
+                .into(),
             rotation: vec![
                 RotationEntry {
                     map: "wreck".into(),

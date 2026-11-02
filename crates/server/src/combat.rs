@@ -3,6 +3,7 @@
 use crate::game::{Dest, Game, Grenade, Heli, PendingBlast};
 use glam::{vec3, Vec3};
 use toon_shared::consts::*;
+use toon_shared::lang::{pick, t};
 use toon_shared::protocol::{MatchState, ShotFx, S2C};
 use toon_shared::ray::{ray_player, ray_sphere, HitZone};
 use toon_shared::weapons::{Cause, Killstreak, Perk2, Perk3, WeaponId};
@@ -327,9 +328,9 @@ impl Game {
                         popup = Some((
                             pts,
                             if headshot {
-                                "Хедшот!".to_string()
+                                ("Хедшот!", "Headshot!")
                             } else {
-                                "Вбивство".to_string()
+                                ("Вбивство", "Kill")
                             },
                         ));
                         reward = Killstreak::for_streak(k.streak);
@@ -343,7 +344,10 @@ impl Game {
                     }
                 }
                 if let Some((pts, text)) = popup {
-                    self.send(a, S2C::ScorePopup { points: pts, text });
+                    self.say(Dest::One(a), || S2C::ScorePopup {
+                        points: pts,
+                        text: pick(text).into(),
+                    });
                     if counts && self.mode == Mode::Tdm {
                         self.scores[killer_team.index()] += 1;
                     }
@@ -358,13 +362,10 @@ impl Game {
                 if p.team != vteam {
                     p.assists += 1;
                     p.score += SCORE_ASSIST;
-                    self.send(
-                        aid,
-                        S2C::ScorePopup {
-                            points: SCORE_ASSIST,
-                            text: "Допомога".into(),
-                        },
-                    );
+                    self.say(Dest::One(aid), || S2C::ScorePopup {
+                        points: SCORE_ASSIST,
+                        text: t("Допомога", "Assist").into(),
+                    });
                 }
             }
         }
@@ -388,7 +389,7 @@ impl Game {
         if counts && self.mode == Mode::Tdm {
             for t in [Team::Allies, Team::Axis] {
                 if self.scores[t.index()] >= self.cfg.tdm.score_limit {
-                    self.end_match(Some(t), "Досягнуто ліміту очок");
+                    self.end_match(Some(t), ("Досягнуто ліміту очок", "Score limit reached"));
                     break;
                 }
             }
@@ -738,13 +739,10 @@ impl Game {
             }
             Killstreak::Helicopter => {
                 if self.helis.iter().any(|h| h.team == team) {
-                    self.send(
-                        id,
-                        S2C::Center {
-                            text: "Гелікоптер вже в повітрі".into(),
-                            secs: 2.0,
-                        },
-                    );
+                    self.say(Dest::One(id), || S2C::Center {
+                        text: t("Гелікоптер вже в повітрі", "A helicopter is already up").into(),
+                        secs: 2.0,
+                    });
                     return;
                 }
                 let hid = self.new_ent_id();
@@ -840,7 +838,10 @@ impl Game {
                 radius: 6.0,
                 big: true,
             });
-            self.center_all("Гелікоптер збито!", 2.5);
+            self.center_all(
+                || t("Гелікоптер збито!", "Helicopter shot down!").into(),
+                2.5,
+            );
         }
         self.helis.retain(|h| time < h.until);
         for (owner, from, to) in shots {

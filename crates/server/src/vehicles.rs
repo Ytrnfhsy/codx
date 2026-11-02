@@ -11,6 +11,7 @@ use glam::{vec3, Vec3};
 use toon_shared::physics::{fits, Body, Stance};
 use toon_shared::protocol::{ShotFx, VehicleHud, S2C};
 use toon_shared::ray::smoke_blocks;
+use toon_shared::tr;
 use toon_shared::vehicles::*;
 use toon_shared::weapons::{Cause, WeaponId};
 use toon_shared::{look_dir, yaw_of, Team};
@@ -530,13 +531,11 @@ impl Game {
                     radius: 2.5,
                     big: false,
                 });
-                self.send(
-                    v.owner,
-                    S2C::Center {
-                        text: format!("{} знищено", v.kind.name()),
-                        secs: 2.0,
-                    },
-                );
+                let kind = v.kind;
+                self.say(Dest::One(v.owner), || S2C::Center {
+                    text: tr!("{} знищено", "{} destroyed", kind.name()),
+                    secs: 2.0,
+                });
             }
             End::Expired => {}
         }

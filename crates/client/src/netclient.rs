@@ -24,10 +24,10 @@ pub fn resolve(addr: &str) -> Result<SocketAddr, String> {
     };
     with_port
         .to_socket_addrs()
-        .map_err(|e| format!("Невірна адреса «{a}»: {e}"))?
+        .map_err(|e| toon_shared::tr!("Невірна адреса «{a}»: {e}", "Bad address \"{a}\": {e}"))?
         .find(|s| s.is_ipv4())
         .or_else(|| with_port.to_socket_addrs().ok().and_then(|mut i| i.next()))
-        .ok_or_else(|| format!("Не вдалося знайти «{a}»"))
+        .ok_or_else(|| toon_shared::tr!("Не вдалося знайти «{a}»", "Could not find \"{a}\""))
 }
 
 impl NetClient {
@@ -48,6 +48,7 @@ impl NetClient {
             last_send: Instant::now(),
             started: Instant::now(),
         };
+        c.chan.send_reliable(&C2S::Lang(toon_shared::lang::get()));
         c.chan.send_reliable(&C2S::Hello {
             name: name.to_string(),
             password: password.to_string(),
@@ -116,11 +117,24 @@ pub struct ServerInfo {
     pub name: String,
     pub map: String,
     pub mode: String,
+    /// Short ids ("wreck", "tdm"), to show the names in our own language.
+    pub map_id: String,
+    pub mode_id: String,
     pub players: u64,
     pub bots: u64,
     pub max: u64,
     pub password: bool,
     pub ping_ms: u32,
+}
+
+impl ServerInfo {
+    /// Map name in our language (the server's own name for maps we do not know).
+    pub fn map_name(&self) -> &str {
+        toon_shared::map::MapId::parse(&self.map_id).map_or(self.map.as_str(), |m| m.name())
+    }
+    pub fn mode_name(&self) -> &str {
+        toon_shared::Mode::parse(&self.mode_id).map_or(self.mode.as_str(), |m| m.name())
+    }
 }
 
 /// Non-blocking server browser: sends info queries and collects replies.
@@ -177,6 +191,8 @@ impl Browser {
                 name: v["name"].as_str().unwrap_or("?").to_string(),
                 map: v["map"].as_str().unwrap_or("?").to_string(),
                 mode: v["mode"].as_str().unwrap_or("?").to_string(),
+                map_id: v["map_id"].as_str().unwrap_or("").to_string(),
+                mode_id: v["mode_id"].as_str().unwrap_or("").to_string(),
                 players: v["players"].as_u64().unwrap_or(0),
                 bots: v["bots"].as_u64().unwrap_or(0),
                 max: v["max_players"].as_u64().unwrap_or(0),

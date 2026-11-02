@@ -1,8 +1,10 @@
 //! Sabotage: one neutral bomb in the middle, plant it on the enemy site.
 
-use crate::game::Game;
+use crate::game::{Dest, Game};
 use toon_shared::consts::*;
+use toon_shared::lang::t;
 use toon_shared::protocol::{flags, S2C};
+use toon_shared::tr;
 use toon_shared::weapons::Cause;
 use toon_shared::{Mode, Team};
 
@@ -21,8 +23,8 @@ impl Game {
         self.sab.pos = glam::vec3(pos.x, floor, pos.z);
         self.sab.dropped_since = self.time;
         let name = self.p(id).map(|p| p.name.clone()).unwrap_or_default();
-        self.broadcast(S2C::BombEvent {
-            text: format!("{name} впустив бомбу!"),
+        self.say(Dest::All, || S2C::BombEvent {
+            text: tr!("{name} впустив бомбу!", "{name} dropped the bomb!"),
         });
     }
 
@@ -47,17 +49,20 @@ impl Game {
             if let Some(site) = self.sab.planted_at {
                 let defenders = site;
                 if alive(defenders) == 0 && present(defenders) > 0 {
-                    self.round_win(Some(defenders.enemy()), "Захисників знищено");
+                    self.round_win(
+                        Some(defenders.enemy()),
+                        ("Захисників знищено", "Defenders eliminated"),
+                    );
                 }
             }
             return;
         }
         if a == 0 && b > 0 && present(Team::Allies) > 0 {
-            self.round_win(Some(Team::Axis), "Ворога знищено");
+            self.round_win(Some(Team::Axis), ("Ворога знищено", "Enemy eliminated"));
         } else if b == 0 && a > 0 && present(Team::Axis) > 0 {
-            self.round_win(Some(Team::Allies), "Ворога знищено");
+            self.round_win(Some(Team::Allies), ("Ворога знищено", "Enemy eliminated"));
         } else if a == 0 && b == 0 {
-            self.round_win(None, "Усі загинули");
+            self.round_win(None, ("Усі загинули", "Everyone died"));
         }
     }
 
@@ -116,19 +121,19 @@ impl Game {
                         if let Some(p) = self.pm(d) {
                             p.score += SCORE_DEFUSE;
                         }
-                        self.send(
-                            d,
-                            S2C::ScorePopup {
-                                points: SCORE_DEFUSE,
-                                text: "Знешкоджено".into(),
-                            },
-                        );
-                        self.broadcast(S2C::BombEvent {
-                            text: format!("{name} знешкодив бомбу!"),
+                        self.say(Dest::One(d), || S2C::ScorePopup {
+                            points: SCORE_DEFUSE,
+                            text: t("Знешкоджено", "Defused").into(),
+                        });
+                        self.say(Dest::All, || S2C::BombEvent {
+                            text: tr!("{name} знешкодив бомбу!", "{name} defused the bomb!"),
                         });
                         self.logf(format!("{name} знешкодив бомбу"));
                         if self.overtime {
-                            self.round_win(Some(site), "Бомбу знешкоджено в овертаймі");
+                            self.round_win(
+                                Some(site),
+                                ("Бомбу знешкоджено в овертаймі", "Bomb defused in overtime"),
+                            );
                         }
                         return;
                     }
@@ -146,7 +151,7 @@ impl Game {
                     Cause::Bomb,
                     true,
                 );
-                self.round_win(Some(site.enemy()), "Ціль знищено");
+                self.round_win(Some(site.enemy()), ("Ціль знищено", "Target destroyed"));
             }
             return;
         }
@@ -168,24 +173,21 @@ impl Game {
                 if let Some((id, team, name)) = picker {
                     self.sab.carrier = Some(id);
                     self.sab.owner = Some(team);
-                    self.send_team(
-                        team,
-                        S2C::BombEvent {
-                            text: format!("{name} несе бомбу — супроводжуйте!"),
-                        },
-                    );
-                    self.send_team(
-                        team.enemy(),
-                        S2C::BombEvent {
-                            text: "Ворог підібрав бомбу!".into(),
-                        },
-                    );
+                    self.say(Dest::Team(team), || S2C::BombEvent {
+                        text: tr!(
+                            "{name} несе бомбу — супроводжуйте!",
+                            "{name} has the bomb — escort them!"
+                        ),
+                    });
+                    self.say(Dest::Team(team.enemy()), || S2C::BombEvent {
+                        text: t("Ворог підібрав бомбу!", "The enemy picked up the bomb!").into(),
+                    });
                 } else if time - self.sab.dropped_since > 60.0
                     && self.sab.pos.distance(self.map.bomb) > 1.0
                 {
                     self.reset_bomb();
-                    self.broadcast(S2C::BombEvent {
-                        text: "Бомбу повернуто в центр".into(),
+                    self.say(Dest::All, || S2C::BombEvent {
+                        text: t("Бомбу повернуто в центр", "The bomb is back in the middle").into(),
                     });
                 }
             }
@@ -222,15 +224,12 @@ impl Game {
                         if let Some(p) = self.pm(c) {
                             p.score += SCORE_PLANT;
                         }
-                        self.send(
-                            c,
-                            S2C::ScorePopup {
-                                points: SCORE_PLANT,
-                                text: "Бомбу закладено".into(),
-                            },
-                        );
-                        self.broadcast(S2C::BombEvent {
-                            text: format!("{name} заклав бомбу!"),
+                        self.say(Dest::One(c), || S2C::ScorePopup {
+                            points: SCORE_PLANT,
+                            text: t("Бомбу закладено", "Bomb planted").into(),
+                        });
+                        self.say(Dest::All, || S2C::BombEvent {
+                            text: tr!("{name} заклав бомбу!", "{name} planted the bomb!"),
                         });
                         self.logf(format!("{name} заклав бомбу"));
                     }
@@ -245,7 +244,7 @@ impl Game {
             if self.state == toon_shared::protocol::MatchState::Playing
                 && time >= self.sab.overtime_end
             {
-                self.round_win(None, "Овертайм завершився");
+                self.round_win(None, ("Овертайм завершився", "Overtime is over"));
             }
         }
     }

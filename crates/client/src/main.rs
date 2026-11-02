@@ -26,8 +26,10 @@ use menu::{MenuAction, MenuState};
 use netclient::NetClient;
 use settings::Settings;
 use std::time::Instant;
+use toon_shared::lang::t;
 use toon_shared::map::MapId;
 use toon_shared::protocol::{C2S, S2C};
+use toon_shared::tr;
 use toon_shared::{Mode, Team};
 
 #[derive(Default, Clone)]
@@ -55,6 +57,8 @@ struct Args {
     no_vsync: bool,
     /// Do not look for game updates.
     no_update: bool,
+    /// Language for this run (also saved): "uk" or "en".
+    lang: Option<String>,
     log_fps: bool,
     width: i32,
     height: i32,
@@ -83,6 +87,10 @@ fn parse_args() -> Args {
             "--host" => a.host = true,
             "--no-vsync" => a.no_vsync = true,
             "--no-update" => a.no_update = true,
+            "--lang" => {
+                a.lang = next;
+                i += 1;
+            }
             "--log-fps" => a.log_fps = true,
             "--no-sound" | "--mute" => a.no_sound = true,
             "--screenshot" => {
@@ -154,7 +162,7 @@ fn parse_args() -> Args {
             }
             "-h" | "--help" => {
                 println!(
-                    "toon-warfare [--connect IP:порт] [--name ім'я] [--host] [--map wreck|site|depot|market|cargo] [--mode tdm|sab] [--bots N] [--score-limit N] [--no-sound] [--no-update] [--size 1280x720]"
+                    "toon-warfare [--connect IP:порт] [--name ім'я] [--host] [--map wreck|site|depot|market|cargo] [--mode tdm|sab] [--bots N] [--score-limit N] [--no-sound] [--no-update] [--lang uk|en] [--size 1280x720]"
                 );
                 std::process::exit(0);
             }
@@ -257,6 +265,12 @@ async fn amain(args: Args) {
     let fonts = ui::Fonts::load();
     let mats = mesh::Materials::new();
     let mut settings = Settings::load();
+    match args.lang.as_deref() {
+        Some("en") => settings.lang = toon_shared::lang::Lang::En,
+        Some("uk") => settings.lang = toon_shared::lang::Lang::Uk,
+        _ => {}
+    }
+    toon_shared::lang::set(settings.lang);
     if let Some(n) = &args.name {
         settings.name = n.clone();
     }
@@ -345,6 +359,8 @@ async fn amain(args: Args) {
     }
 
     loop {
+        // the chosen language for everything this frame draws and says
+        toon_shared::lang::set(settings.lang);
         let dt = get_frame_time().min(0.1);
         fps = fps * 0.95 + (1.0 / dt.max(1e-4)) * 0.05;
         let mut chars = Vec::new();
@@ -415,7 +431,10 @@ async fn amain(args: Args) {
                                 menu.host_info = Some(format!(
                                     "{}",
                                     if h.http_port.is_some() {
-                                        format!("адмінка: http://localhost:{port}/admin")
+                                        tr!(
+                                            "адмінка: http://localhost:{port}/admin",
+                                            "admin: http://localhost:{port}/admin"
+                                        )
                                     } else {
                                         String::new()
                                     }
@@ -472,14 +491,17 @@ async fn amain(args: Args) {
                 };
                 let dots = ".".repeat(((get_time() * 3.0) as usize) % 4);
                 ui.centered(
-                    &format!("Під'єднання до {address}{dots}"),
+                    &tr!(
+                        "Під'єднання до {address}{dots}",
+                        "Connecting to {address}{dots}"
+                    ),
                     screen_width() / 2.0,
                     screen_height() / 2.0,
                     28,
                     ui::ACCENT,
                 );
                 ui.centered(
-                    "Esc — скасувати",
+                    t("Esc — скасувати", "Esc — cancel"),
                     screen_width() / 2.0,
                     screen_height() / 2.0 + 36.0,
                     16,
@@ -532,8 +554,9 @@ async fn amain(args: Args) {
                     }
                     next = Some(Screen::Game(Box::new(g)));
                 } else if since.elapsed().as_secs_f32() > 8.0 {
-                    menu.error = Some(format!(
-                        "Сервер {address} не відповідає. Перевір адресу і чи відкрито UDP-порт."
+                    menu.error = Some(tr!(
+                        "Сервер {address} не відповідає. Перевір адресу і чи відкрито UDP-порт.",
+                        "Server {address} does not answer. Check the address and that the UDP port is open."
                     ));
                     next = Some(Screen::Menu);
                 } else if is_key_pressed(KeyCode::Escape) {
