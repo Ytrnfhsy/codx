@@ -11,14 +11,21 @@ pub const MAX_REWIND: f32 = 0.35;
 pub const DEFAULT_PORT: u16 = 27015;
 pub const PROTOCOL_VERSION: u16 = 15;
 /// Version of the game build: the release tag (`TW_VERSION`, set by CI for `v*` tags,
-/// without the `v`) or the crate version for builds made by hand.
+/// without the `v`); for builds made by hand the nearest `v*` git tag (see build.rs), or
+/// the crate version without git.
 pub const GAME_VERSION: &str = match option_env!("TW_VERSION") {
     Some(v) => v,
-    None => env!("CARGO_PKG_VERSION"),
+    None => match option_env!("TW_GIT_VERSION") {
+        Some(v) => v,
+        None => env!("CARGO_PKG_VERSION"),
+    },
 };
 /// Start of the server's reject message for a client of another version (the client
 /// then offers to update).
 pub const OUTDATED: &str = "Версія гри не збігається.";
+/// Start of the reject message when the server is the older one (nothing to update on
+/// the client).
+pub const SERVER_OUTDATED: &str = "Сервер старіший за твою гру.";
 /// True for builds published as a release (they look for and install updates).
 pub const RELEASE_BUILD: bool = option_env!("TW_VERSION").is_some();
 /// Prefix of a connectionless server info query.
