@@ -47,7 +47,7 @@ impl MenuState {
             error: None,
             host_info: None,
             lan_ip: lan_ip(),
-            updater: crate::updater::Updater::new(updates && toon_shared::consts::RELEASE_BUILD),
+            updater: crate::updater::Updater::new(updates, toon_shared::consts::RELEASE_BUILD),
             rechecked: false,
         }
     }
@@ -413,7 +413,9 @@ pub fn draw_menu(
         st.rechecked = true;
         if matches!(
             st.updater.state(),
-            crate::updater::State::CheckFailed(_) | crate::updater::State::UpToDate
+            crate::updater::State::Off
+                | crate::updater::State::CheckFailed(_)
+                | crate::updater::State::UpToDate
         ) {
             st.updater.check();
         }

@@ -508,7 +508,7 @@ impl Game {
     ) -> Result<u8, String> {
         if version != PROTOCOL_VERSION || (self.cfg.require_same_version && game != GAME_VERSION) {
             return Err(format!(
-                "{OUTDATED} На сервері гра v{GAME_VERSION}, у тебе v{game}. Онови гру: кнопка «Оновити» в меню."
+                "{OUTDATED} На сервері гра v{GAME_VERSION}, у тебе v{game}. Онови гру: кнопка «Оновити» справа вгорі в меню (або завантаж її з Releases на GitHub)."
             ));
         }
         let ip = addr.ip().to_string();

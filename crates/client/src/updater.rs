@@ -11,7 +11,8 @@ const BIN: &str = "toon-warfare";
 
 #[derive(Clone)]
 pub enum State {
-    /// Not a release build, or turned off (`--no-update`).
+    /// Not looked yet (a build from source looks only when a server asks for an
+    /// update), or turned off (`--no-update`).
     Off,
     Checking,
     UpToDate,
@@ -30,12 +31,16 @@ pub struct Updater {
 }
 
 impl Updater {
-    pub fn new(enabled: bool) -> Updater {
+    /// `enabled`: may look for updates at all; `at_start`: look right away (release
+    /// builds), otherwise only when `check` is called.
+    pub fn new(enabled: bool, at_start: bool) -> Updater {
         let u = Updater {
             state: Arc::new(Mutex::new(State::Off)),
             enabled,
         };
-        u.check();
+        if at_start {
+            u.check();
+        }
         u
     }
 
@@ -174,10 +179,22 @@ impl Updater {
                 );
                 ui.shadowed("спробуй за кілька хвилин", x + 14.0, y + 48.0, 16, TEXT);
             }
-            State::Off if outdated => {
+            State::Off if outdated && !self.enabled => {
                 box_(ui, 64.0, true);
-                ui.shadowed("Це збірка з вихідного коду:", x + 14.0, y + 26.0, 16, TEXT);
-                ui.shadowed("онови код і збери гру заново", x + 14.0, y + 48.0, 16, TEXT);
+                ui.shadowed(
+                    "Оновлення вимкнено (--no-update):",
+                    x + 14.0,
+                    y + 26.0,
+                    16,
+                    TEXT,
+                );
+                ui.shadowed(
+                    "завантаж гру з Releases на GitHub",
+                    x + 14.0,
+                    y + 48.0,
+                    16,
+                    TEXT,
+                );
             }
             _ => {}
         }
