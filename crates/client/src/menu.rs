@@ -1,7 +1,7 @@
 //! Main menu: join a server, host one, browse the LAN, settings.
 
 use crate::netclient::{Browser, ServerInfo};
-use crate::settings::Settings;
+use crate::settings::{server_key, Settings};
 use crate::ui::*;
 use macroquad::prelude::*;
 use toon_shared::lang::{t, Lang};
@@ -30,6 +30,8 @@ pub struct MenuState {
     pub host_info: Option<String>,
     pub lan_ip: Option<String>,
     pub updater: crate::updater::Updater,
+    /// The "add a favourite" field on the server list.
+    pub fav_input: String,
     /// Already looked again for an update after a server said we are outdated.
     rechecked: bool,
 }
@@ -51,6 +53,7 @@ impl MenuState {
             lan_ip: lan_ip(),
             updater: crate::updater::Updater::new(updates, toon_shared::consts::RELEASE_BUILD),
             rechecked: false,
+            fav_input: String::new(),
         }
     }
 }
@@ -175,6 +178,14 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
     }
 }
 
+/// A ★ button: gold when the server is a favourite, a hollow ☆ when not.
+fn star_button(ui: &mut Ui, fav: bool, x: f32, y: f32, w: f32, h: f32) -> bool {
+    let clicked = ui.button2("", x, y, w, h);
+    let (star, color) = if fav { ("★", ACCENT) } else { ("☆", MUTED) };
+    ui.centered(star, x + w / 2.0, y + h / 2.0 + 9.0, 26, color);
+    clicked
+}
+
 pub fn draw_menu(
     ui: &mut Ui,
     st: &mut MenuState,
@@ -238,10 +249,17 @@ pub fn draw_menu(
                 &mut s.address,
                 x + 24.0,
                 y + 110.0,
-                pw - 48.0,
+                pw - 48.0 - 54.0,
                 false,
                 64,
             );
+            // ★ keeps this address among the favourites
+            let fav = s.is_favorite(&s.address);
+            if star_button(ui, fav, x + pw - 24.0 - 44.0, y + 110.0, 44.0, 36.0) {
+                let a = s.address.clone();
+                s.toggle_favorite(&a);
+                s.save();
+            }
             ui.field(
                 3,
                 t("Пароль сервера (якщо є)", "Server password (if any)"),
@@ -282,8 +300,7 @@ pub fn draw_menu(
                 46.0,
             ) {
                 st.page = Page::Browser;
-                let recent = s.recent.clone();
-                st.browser.refresh(&recent);
+                st.browser.refresh(&s.servers_to_ask());
             }
             if ui.button2(t("Налаштування", "Settings"), x + 24.0, y + 356.0, bw, 46.0)
             {
@@ -482,20 +499,38 @@ pub fn draw_menu(
             }
         }
         Page::Browser => {
-            ui.panel(x - 100.0, y, pw + 200.0, 470.0);
+            ui.panel(x - 100.0, y, pw + 200.0, 530.0);
             let x = x - 100.0;
             let pw = pw + 200.0;
             ui.bold(t("Сервери", "Servers"), x + 24.0, y + 40.0, 26, ACCENT);
             ui.text(
-                t("Локальна мережа + нещодавні", "Local network + recent"),
-                x + 150.0,
+                t(
+                    "★ обрані · локальна мережа · нещодавні",
+                    "★ favourites · local network · recent",
+                ),
+                x + 190.0,
                 y + 40.0,
                 15,
                 MUTED,
             );
             st.browser.poll();
             let results: Vec<ServerInfo> = st.browser.results.clone();
-            if results.is_empty() {
+            // favourites first (also those that do not answer, so they can be removed)
+            let mut rows: Vec<(String, Option<ServerInfo>)> = Vec::new();
+            for f in &s.favorites {
+                let found = results
+                    .iter()
+                    .find(|r| server_key(&r.addr) == server_key(f));
+                if found.is_some() || st.browser.age() > 1.5 {
+                    rows.push((f.clone(), found.cloned()));
+                }
+            }
+            for r in &results {
+                if !s.is_favorite(&r.addr) {
+                    rows.push((r.addr.clone(), Some(r.clone())));
+                }
+            }
+            if rows.is_empty() {
                 ui.text(
                     t(
                         "Шукаю… (переконайся, що сервер запущено і порт відкрито)",
@@ -507,35 +542,85 @@ pub fn draw_menu(
                     MUTED,
                 );
             }
-            for (i, r) in results.iter().take(7).enumerate() {
+            let mut toggle = None;
+            for (i, (addr, info)) in rows.iter().take(7).enumerate() {
                 let ry = y + 64.0 + i as f32 * 48.0;
-                let lock = if r.password {
-                    t("[пароль] ", "[password] ")
-                } else {
-                    ""
+                let label = match info {
+                    Some(r) => {
+                        let lock = if r.password {
+                            t("[пароль] ", "[password] ")
+                        } else {
+                            ""
+                        };
+                        let (name, map, mode) = (&r.name, r.map_name(), r.mode_name());
+                        let (players, max, bots, ping) = (r.players, r.max, r.bots, r.ping_ms);
+                        tr!(
+                            "{lock}{name}  ·  {map}  ·  {mode}  ·  {players}/{max} (+{bots} ботів)  ·  {ping} мс",
+                            "{lock}{name}  ·  {map}  ·  {mode}  ·  {players}/{max} (+{bots} bots)  ·  {ping} ms"
+                        )
+                    }
+                    None => tr!("{addr}  ·  не відповідає", "{addr}  ·  not answering"),
                 };
-                let (name, map, mode) = (&r.name, r.map_name(), r.mode_name());
-                let (players, max, bots, ping) = (r.players, r.max, r.bots, r.ping_ms);
-                let label = tr!(
-                    "{lock}{name}  ·  {map}  ·  {mode}  ·  {players}/{max} (+{bots} ботів)  ·  {ping} мс",
-                    "{lock}{name}  ·  {map}  ·  {mode}  ·  {players}/{max} (+{bots} bots)  ·  {ping} ms"
-                );
-                if ui.button2(&label, x + 24.0, ry, pw - 48.0, 40.0) {
-                    s.address = r.addr.clone();
+                if ui.button2(&label, x + 24.0, ry, pw - 48.0 - 54.0, 40.0) {
+                    s.address = addr.clone();
                     st.page = Page::Main;
                 }
+                if star_button(
+                    ui,
+                    s.is_favorite(addr),
+                    x + pw - 24.0 - 44.0,
+                    ry,
+                    44.0,
+                    40.0,
+                ) {
+                    toggle = Some(addr.clone());
+                }
+            }
+            if let Some(a) = toggle {
+                s.toggle_favorite(&a);
+                s.save();
+            }
+            // add one by address (an IP or a domain)
+            let add_w = 170.0;
+            let enter = ui.field(
+                30,
+                t(
+                    "Додати сервер в обрані (IP або домен)",
+                    "Add a favourite server (IP or domain)",
+                ),
+                &mut st.fav_input,
+                x + 24.0,
+                y + 428.0,
+                pw - 48.0 - add_w - 12.0,
+                false,
+                64,
+            );
+            let add = ui.button2(
+                t("★ Додати", "★ Add"),
+                x + pw - 24.0 - add_w,
+                y + 428.0,
+                add_w,
+                36.0,
+            );
+            if (add || enter) && !st.fav_input.trim().is_empty() {
+                let a = st.fav_input.trim().to_string();
+                if !s.is_favorite(&a) {
+                    s.toggle_favorite(&a);
+                    s.save();
+                }
+                st.fav_input.clear();
+                st.browser.refresh(&s.servers_to_ask());
             }
             if ui.button(
                 t("Оновити", "Refresh"),
                 x + pw - 200.0,
-                y + 410.0,
+                y + 474.0,
                 176.0,
                 44.0,
             ) {
-                let recent = s.recent.clone();
-                st.browser.refresh(&recent);
+                st.browser.refresh(&s.servers_to_ask());
             }
-            if ui.button2(t("Назад", "Back"), x + 24.0, y + 410.0, 140.0, 44.0) {
+            if ui.button2(t("Назад", "Back"), x + 24.0, y + 474.0, 140.0, 44.0) {
                 st.page = Page::Main;
             }
         }

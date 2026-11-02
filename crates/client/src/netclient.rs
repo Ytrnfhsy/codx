@@ -125,6 +125,8 @@ pub struct ServerInfo {
     pub max: u64,
     pub password: bool,
     pub ping_ms: u32,
+    /// Where the answer came from.
+    from: Option<SocketAddr>,
 }
 
 impl ServerInfo {
@@ -142,6 +144,10 @@ pub struct Browser {
     sock: Option<UdpSocket>,
     sent: Instant,
     pub results: Vec<ServerInfo>,
+    /// Addresses we asked (as typed) and where they resolved to, so a reply is listed
+    /// under the name the player knows it by (a domain stays a domain). Filled by
+    /// background threads: looking up a domain can take seconds.
+    asked: std::sync::Arc<std::sync::Mutex<Vec<(SocketAddr, String)>>>,
 }
 
 impl Browser {
@@ -155,20 +161,36 @@ impl Browser {
             sock,
             sent: Instant::now(),
             results: Vec::new(),
+            asked: Default::default(),
         }
     }
 
     /// Queries the given addresses and broadcasts on the LAN.
     pub fn refresh(&mut self, addrs: &[String]) {
         self.results.clear();
+        // a fresh list: answers to an earlier refresh still being looked up are dropped
+        self.asked = Default::default();
         self.sent = Instant::now();
         let Some(s) = &self.sock else { return };
         for a in addrs {
-            if let Ok(sa) = resolve(a) {
-                let _ = s.send_to(QUERY_MAGIC, sa);
-            }
+            let (Ok(sock), asked, a) = (s.try_clone(), self.asked.clone(), a.clone()) else {
+                continue;
+            };
+            std::thread::spawn(move || {
+                if let Ok(sa) = resolve(&a) {
+                    if let Ok(mut l) = asked.lock() {
+                        l.push((sa, a.trim().to_string()));
+                    }
+                    let _ = sock.send_to(QUERY_MAGIC, sa);
+                }
+            });
         }
         let _ = s.send_to(QUERY_MAGIC, ("255.255.255.255", DEFAULT_PORT));
+    }
+
+    /// Seconds since the last refresh (servers that have not answered by now are down).
+    pub fn age(&self) -> f32 {
+        self.sent.elapsed().as_secs_f32()
     }
 
     pub fn poll(&mut self) {
@@ -182,10 +204,19 @@ impl Browser {
                 continue;
             };
             let port = v["port"].as_u64().unwrap_or(from.port() as u64);
-            let addr = format!("{}:{}", from.ip(), port);
-            if self.results.iter().any(|r| r.addr == addr) {
+            let typed = self
+                .asked
+                .lock()
+                .ok()
+                .and_then(|l| l.iter().find(|(sa, _)| *sa == from).map(|(_, t)| t.clone()));
+            // one row per server: a LAN broadcast answer may come before the direct one
+            if let Some(r) = self.results.iter_mut().find(|r| r.from == Some(from)) {
+                if let Some(t) = typed {
+                    r.addr = t;
+                }
                 continue;
             }
+            let addr = typed.unwrap_or_else(|| format!("{}:{}", from.ip(), port));
             self.results.push(ServerInfo {
                 addr,
                 name: v["name"].as_str().unwrap_or("?").to_string(),
@@ -198,6 +229,7 @@ impl Browser {
                 max: v["max_players"].as_u64().unwrap_or(0),
                 password: v["password"].as_bool().unwrap_or(false),
                 ping_ms: self.sent.elapsed().as_millis() as u32,
+                from: Some(from),
             });
         }
     }

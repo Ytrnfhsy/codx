@@ -73,6 +73,8 @@ pub struct Settings {
     pub custom: Vec<CustomClass>,
     pub last_class: usize,
     pub recent: Vec<String>,
+    /// Favourite servers, as typed (an IP or a domain, with or without the port).
+    pub favorites: Vec<String>,
     pub host: HostSettings,
 }
 
@@ -119,6 +121,7 @@ impl Settings {
                 .collect(),
             last_class: 0,
             recent: Vec::new(),
+            favorites: Vec::new(),
             host: HostSettings::default(),
         }
     }
@@ -172,6 +175,35 @@ impl Settings {
         }
     }
 
+    pub fn is_favorite(&self, addr: &str) -> bool {
+        let a = server_key(addr);
+        !a.is_empty() && self.favorites.iter().any(|f| server_key(f) == a)
+    }
+
+    /// Adds the server to the favourites, or takes it off.
+    pub fn toggle_favorite(&mut self, addr: &str) {
+        let a = server_key(addr);
+        if a.is_empty() {
+            return;
+        }
+        if self.is_favorite(addr) {
+            self.favorites.retain(|f| server_key(f) != a);
+        } else {
+            self.favorites.push(addr.trim().to_string());
+        }
+    }
+
+    /// Servers the browser asks directly: favourites, then recent ones.
+    pub fn servers_to_ask(&self) -> Vec<String> {
+        let mut v = self.favorites.clone();
+        for r in &self.recent {
+            if !self.is_favorite(r) {
+                v.push(r.clone());
+            }
+        }
+        v
+    }
+
     pub fn remember_server(&mut self, addr: &str) {
         self.recent.retain(|a| a != addr);
         self.recent.insert(0, addr.to_string());
@@ -188,5 +220,15 @@ impl Settings {
             v.push((c.name.clone(), c.loadout));
         }
         v
+    }
+}
+
+/// A server address in one form for comparing: lower case, with the default port.
+pub fn server_key(addr: &str) -> String {
+    let a = addr.trim().to_lowercase();
+    if a.is_empty() || a.contains(':') {
+        a
+    } else {
+        format!("{a}:{}", toon_shared::consts::DEFAULT_PORT)
     }
 }

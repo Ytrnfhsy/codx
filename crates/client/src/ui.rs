@@ -28,7 +28,7 @@ impl Fonts {
         bold.set_filter(FilterMode::Linear);
         let mut chars: Vec<char> = (32u8..127).map(|c| c as char).collect();
         chars.extend(
-            "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯабвгґдеєжзиіїйклмнопрстуфхцчшщьюя'—·«»…×°☠✦★▮▄▁"
+            "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯабвгґдеєжзиіїйклмнопрстуфхцчшщьюя'—·«»…×°☠✦★☆▮▄▁"
                 .chars(),
         );
         // Grow each atlas while it is still empty (growing later re-packs every glyph, which is
