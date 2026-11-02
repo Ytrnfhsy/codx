@@ -107,6 +107,9 @@ pub struct ServerConfig {
     /// Players required to start a match (otherwise warmup).
     pub min_players: usize,
     pub http_enabled: bool,
+    /// Only let in clients of exactly the server's game version (a server updated to a
+    /// new release then asks every player to update too).
+    pub require_same_version: bool,
     /// Directory for bans and logs.
     pub data_dir: String,
     /// Fine tuning of movement and every weapon (see `tune` admin command).
@@ -163,6 +166,7 @@ impl Default for ServerConfig {
             spawn_protection: 3.0,
             min_players: 2,
             http_enabled: true,
+            require_same_version: true,
             data_dir: "data".into(),
             tuning: tuning_json(&Tuning::default()),
         }

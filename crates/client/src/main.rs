@@ -18,6 +18,7 @@ mod settings;
 mod soldier;
 mod textures;
 mod ui;
+mod updater;
 
 use game::{GameClient, Overlay, Welcome};
 use macroquad::prelude::*;
@@ -52,6 +53,8 @@ struct Args {
     render_scale: Option<f32>,
     rcon: Option<String>,
     no_vsync: bool,
+    /// Do not look for game updates.
+    no_update: bool,
     log_fps: bool,
     width: i32,
     height: i32,
@@ -79,6 +82,7 @@ fn parse_args() -> Args {
             }
             "--host" => a.host = true,
             "--no-vsync" => a.no_vsync = true,
+            "--no-update" => a.no_update = true,
             "--log-fps" => a.log_fps = true,
             "--no-sound" | "--mute" => a.no_sound = true,
             "--screenshot" => {
@@ -150,7 +154,7 @@ fn parse_args() -> Args {
             }
             "-h" | "--help" => {
                 println!(
-                    "toon-warfare [--connect IP:порт] [--name ім'я] [--host] [--map wreck|site|depot|market|cargo] [--mode tdm|sab] [--bots N] [--score-limit N] [--no-sound] [--size 1280x720]"
+                    "toon-warfare [--connect IP:порт] [--name ім'я] [--host] [--map wreck|site|depot|market|cargo] [--mode tdm|sab] [--bots N] [--score-limit N] [--no-sound] [--no-update] [--size 1280x720]"
                 );
                 std::process::exit(0);
             }
@@ -268,7 +272,7 @@ async fn amain(args: Args) {
             map,
         }
     };
-    let mut menu = MenuState::new();
+    let mut menu = MenuState::new(!args.no_update);
     let mut screen = Screen::Menu;
     let mut server: Option<toon_server::ServerHandle> = None;
     let mut focus: Option<u32> = None;

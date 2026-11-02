@@ -33,6 +33,8 @@ pub enum C2S {
         name: String,
         password: String,
         version: u16,
+        /// `GAME_VERSION` of the client build.
+        game: String,
     },
     JoinTeam(Option<Team>),
     /// Selects a class; spawns immediately if allowed.

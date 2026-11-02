@@ -494,8 +494,22 @@ impl Game {
         password: &str,
         version: u16,
     ) -> Result<u8, String> {
-        if version != PROTOCOL_VERSION {
-            return Err(format!("Версія гри не збігається (сервер {PROTOCOL_VERSION}, клієнт {version}). Онови гру."));
+        self.connect_as(addr, name, password, version, GAME_VERSION)
+    }
+
+    /// `connect` for a client of game version `game`.
+    pub fn connect_as(
+        &mut self,
+        addr: SocketAddr,
+        name: &str,
+        password: &str,
+        version: u16,
+        game: &str,
+    ) -> Result<u8, String> {
+        if version != PROTOCOL_VERSION || (self.cfg.require_same_version && game != GAME_VERSION) {
+            return Err(format!(
+                "{OUTDATED} На сервері гра v{GAME_VERSION}, у тебе v{game}. Онови гру: кнопка «Оновити» в меню."
+            ));
         }
         let ip = addr.ip().to_string();
         if let Some(b) = self.bans.find(&ip) {

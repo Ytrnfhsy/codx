@@ -52,6 +52,7 @@ impl NetClient {
             name: name.to_string(),
             password: password.to_string(),
             version: PROTOCOL_VERSION,
+            game: toon_shared::consts::GAME_VERSION.to_string(),
         });
         c.flush();
         Ok(c)

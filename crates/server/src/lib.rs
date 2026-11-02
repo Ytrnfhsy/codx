@@ -11,6 +11,7 @@ pub mod nav;
 pub mod netserver;
 pub mod pickups;
 pub mod sab;
+pub mod update;
 pub mod vehicles;
 
 use config::ServerConfig;

@@ -27,6 +27,9 @@ pub struct MenuState {
     pub error: Option<String>,
     pub host_info: Option<String>,
     pub lan_ip: Option<String>,
+    pub updater: crate::updater::Updater,
+    /// Already looked again for an update after a server said we are outdated.
+    rechecked: bool,
 }
 
 pub fn lan_ip() -> Option<String> {
@@ -36,13 +39,16 @@ pub fn lan_ip() -> Option<String> {
 }
 
 impl MenuState {
-    pub fn new() -> MenuState {
+    /// `updates`: look for game updates (release builds only).
+    pub fn new(updates: bool) -> MenuState {
         MenuState {
             page: Page::Main,
             browser: Browser::new(),
             error: None,
             host_info: None,
             lan_ip: lan_ip(),
+            updater: crate::updater::Updater::new(updates && toon_shared::consts::RELEASE_BUILD),
+            rechecked: false,
         }
     }
 }
@@ -397,10 +403,29 @@ pub fn draw_menu(
     if let Some(i) = &st.host_info {
         ui.centered(i, w / 2.0, h - 90.0, 16, GOOD);
     }
+    // a server turned us away for an old version: look for the update again if the
+    // first look failed, and show what can be done
+    let outdated = st
+        .error
+        .as_deref()
+        .is_some_and(|e| e.starts_with(toon_shared::consts::OUTDATED));
+    if outdated && !st.rechecked {
+        st.rechecked = true;
+        if matches!(
+            st.updater.state(),
+            crate::updater::State::CheckFailed(_) | crate::updater::State::UpToDate
+        ) {
+            st.updater.check();
+        }
+    }
+    if st.updater.draw(ui, outdated) {
+        s.save();
+        toon_server::update::restart();
+    }
     ui.text(
         &format!(
             "v{}  ·  протокол {}",
-            env!("CARGO_PKG_VERSION"),
+            toon_shared::consts::GAME_VERSION,
             toon_shared::consts::PROTOCOL_VERSION
         ),
         10.0,

@@ -17,6 +17,10 @@ fn usage() {
   --bots <n>          заповнювати ботами до n гравців
   --map <карта>       depot | market | cargo
   --mode <режим>      tdm | sab
+  --check-update      показати, чи вийшла новіша версія, і вийти
+  --update            завантажити новішу версію сервера з GitHub замість цієї й вийти
+                      (потім перезапусти сервер; гравцям гра запропонує оновитися сама)
+  --version           версія сервера
   -h, --help          ця довідка
 
 Після запуску в консолі доступні адмін-команди (help)."
@@ -33,6 +37,13 @@ fn main() {
         if a == "-h" || a == "--help" {
             usage();
             return;
+        }
+        if a == "--version" {
+            println!("toon-server {}", toon_shared::consts::GAME_VERSION);
+            return;
+        }
+        if a == "--check-update" || a == "--update" {
+            std::process::exit(self_update(a == "--update"));
         }
         let Some(v) = args.get(i + 1).cloned() else {
             eprintln!("Немає значення для {a}");
@@ -99,8 +110,21 @@ fn main() {
         println!(" Веб-панель: http://localhost:{p}/admin  (TCP порт {p})");
     }
     println!(" Конфіг:     {}", cfg_path.display());
+    println!(" Версія:     {}", toon_shared::consts::GAME_VERSION);
     println!(" Введи help для списку команд.");
     println!("==============================================");
+    if toon_shared::consts::RELEASE_BUILD {
+        // a gentle reminder in the console when a newer release is out
+        std::thread::spawn(|| {
+            if let Ok(Some(r)) = toon_server::update::check("toon-server") {
+                println!(
+                    "ℹ  Вийшла нова версія v{} (у тебе v{}): зупини сервер і запусти toon-server --update",
+                    r.version,
+                    toon_shared::consts::GAME_VERSION
+                );
+            }
+        });
+    }
 
     let admin = handle.admin.clone();
     std::thread::spawn(move || {
@@ -124,4 +148,54 @@ fn main() {
         }
     });
     handle.wait();
+}
+
+/// `--check-update` / `--update`: returns the exit code.
+fn self_update(install: bool) -> i32 {
+    use toon_server::update;
+    let me = toon_shared::consts::GAME_VERSION;
+    match update::check("toon-server") {
+        Ok(None) => {
+            println!("Це найновіша версія (v{me}).");
+            0
+        }
+        Ok(Some(r)) if !install => {
+            println!(
+                "Вийшла нова версія v{} (у тебе v{me}). Онови: toon-server --update",
+                r.version
+            );
+            0
+        }
+        Ok(Some(r)) => {
+            println!(
+                "Завантажую v{} ({:.1} МБ)…",
+                r.version,
+                r.size as f64 / 1_048_576.0
+            );
+            let mut shown = 0;
+            match update::install(&r, |p| {
+                let pct = (p * 10.0) as i32 * 10;
+                if pct > shown {
+                    shown = pct;
+                    println!("  {pct}%");
+                }
+            }) {
+                Ok(()) => {
+                    println!(
+                        "Готово: сервер оновлено до v{}. Перезапусти його.",
+                        r.version
+                    );
+                    0
+                }
+                Err(e) => {
+                    eprintln!("Не вдалося оновити: {e}");
+                    1
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Не вдалося перевірити оновлення: {e}");
+            1
+        }
+    }
 }

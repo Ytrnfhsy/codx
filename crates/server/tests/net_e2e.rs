@@ -78,6 +78,7 @@ fn join_move_and_shoot_over_udp() {
         name: "E2E".into(),
         password: String::new(),
         version: PROTOCOL_VERSION,
+        game: toon_shared::consts::GAME_VERSION.to_string(),
     });
     c.chan.send_reliable(&C2S::JoinTeam(Some(Team::Allies)));
     c.chan.send_reliable(&C2S::SetLoadout(DEFAULT_CLASSES[0].1));

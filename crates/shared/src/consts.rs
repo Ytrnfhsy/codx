@@ -9,7 +9,18 @@ pub const INTERP_DELAY: f32 = 0.1;
 pub const MAX_REWIND: f32 = 0.35;
 
 pub const DEFAULT_PORT: u16 = 27015;
-pub const PROTOCOL_VERSION: u16 = 14;
+pub const PROTOCOL_VERSION: u16 = 15;
+/// Version of the game build: the release tag (`TW_VERSION`, set by CI for `v*` tags,
+/// without the `v`) or the crate version for builds made by hand.
+pub const GAME_VERSION: &str = match option_env!("TW_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+/// Start of the server's reject message for a client of another version (the client
+/// then offers to update).
+pub const OUTDATED: &str = "Версія гри не збігається.";
+/// True for builds published as a release (they look for and install updates).
+pub const RELEASE_BUILD: bool = option_env!("TW_VERSION").is_some();
 /// Prefix of a connectionless server info query.
 pub const QUERY_MAGIC: &[u8; 4] = b"TWQ?";
 pub const QUERY_REPLY_MAGIC: &[u8; 4] = b"TWQ!";

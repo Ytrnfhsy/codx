@@ -38,6 +38,7 @@ pub fn info_json(g: &Game) -> serde_json::Value {
         "scores": g.scores,
         "time_left": g.time_left(),
         "version": PROTOCOL_VERSION,
+        "game_version": GAME_VERSION,
         "port": g.cfg.port,
     })
 }
@@ -143,12 +144,14 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                                     name,
                                     password,
                                     version,
+                                    game: client_game,
                                 },
                             ) => {
                                 if conn.closing.is_some() {
                                     continue;
                                 }
-                                match game.connect(addr, &name, &password, version) {
+                                match game.connect_as(addr, &name, &password, version, &client_game)
+                                {
                                     Ok(id) => conn.id = Some(id),
                                     Err(reason) => {
                                         println!("[net] відмова {addr}: {reason}");
