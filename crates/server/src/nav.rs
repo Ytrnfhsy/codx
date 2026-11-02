@@ -1,7 +1,7 @@
 //! Multi-level navigation for bots: a 0.5 m grid where each column can hold several walkable
 //! floors (ground, upper storeys, rooftops). Neighbouring floors are linked when the height
 //! difference can be stepped (stairs) or dropped down (jumping off a roof), so A* paths lead
-//! up stairwells, across balconies and onto roofs.
+//! up stairwells, across balconies and onto roofs; ladders link their foot with the roof.
 
 use glam::{vec3, Vec3};
 use std::cmp::Ordering;
@@ -62,9 +62,9 @@ impl Nav {
 
         // candidate floor heights: the top of every solid box under a column's centre
         let mut tops: Vec<Vec<f32>> = vec![Vec::new(); (w * h) as usize];
-        for b in &world.boxes {
-            if b.max.y > 30.0 {
-                continue; // invisible clip ceilings
+        for (b, m) in world.boxes.iter().zip(&world.mats) {
+            if b.max.y > 30.0 || !m.blocks_movement() {
+                continue; // invisible clip ceilings, and cloth nobody can stand on
             }
             let i0 = (((b.min.x - ox) / CELL) - 0.5).ceil().max(0.0) as i32;
             let i1 = (((b.max.x - ox) / CELL) - 0.5).floor().min((w - 1) as f32) as i32;
@@ -155,6 +155,20 @@ impl Nav {
                     nav.nodes[n as usize].links = links;
                 }
             }
+        }
+        // ladders link their foot with the roof they lead to
+        for l in &world.ladders {
+            let (Some(a), Some(b)) = (nav.nearest(l.base), nav.nearest(l.exit())) else {
+                continue;
+            };
+            let (pa, pb) = (nav.nodes[a as usize].pos, nav.nodes[b as usize].pos);
+            // only if both ends really are the ground at its foot and the roof at its top
+            if (pa.y - l.base.y).abs() > 0.6 || (pb.y - l.top).abs() > 0.6 || a == b {
+                continue;
+            }
+            let cost = 2.0 + (l.top - l.base.y).abs() * 1.5;
+            nav.nodes[a as usize].links.push((b, cost));
+            nav.nodes[b as usize].links.push((a, cost));
         }
         // flood fill from every spawn point
         let mut stack: Vec<u32> = map
@@ -457,8 +471,28 @@ mod tests {
             (MapId::Site, [-4.0, 6.8, -3.5], "half roof"),
             (MapId::Site, [-29.0, 6.8, -16.0], "office roof"),
             (MapId::Site, [-22.3, 3.4, -16.0], "office balcony"),
-            (MapId::Market, [-30.0, 3.4, -5.25], "north balcony"),
-            (MapId::Market, [-18.0, 3.4, 5.25], "south balcony"),
+            (
+                MapId::Market,
+                [33.0, 6.8, -13.0],
+                "roof of the corner house",
+            ),
+            (MapId::Market, [51.0, 3.4, 6.8], "balcony over the street"),
+            (
+                MapId::Market,
+                [-51.0, 3.4, -6.8],
+                "west balcony over the street",
+            ),
+            (MapId::Market, [32.0, 4.55, 13.0], "shop roof (by ladder)"),
+            (
+                MapId::Market,
+                [-32.0, 4.55, -13.0],
+                "west shop roof (by ladder)",
+            ),
+            (
+                MapId::Market,
+                [35.0, 6.35, 33.0],
+                "warehouse roof (by ladder)",
+            ),
             (MapId::Depot, [25.0, 3.4, 0.0], "office upper floor"),
         ];
         for &(id, p, what) in spots {

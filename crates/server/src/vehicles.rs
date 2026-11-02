@@ -355,7 +355,7 @@ impl Game {
                 self.rng.range(-s, s),
             ))
         .normalize();
-        let (dist, hit) = self.trace(Some(owner), from, d, 150.0, time);
+        let (dist, hit, left) = self.trace(Some(owner), from, d, 150.0, time);
         let mut flesh = false;
         match hit {
             Hit::Player(victim, _, _) => {
@@ -365,7 +365,7 @@ impl Game {
                     self.damage(
                         victim,
                         Some(owner),
-                        self.tuning.streaks.nrk_damage,
+                        self.tuning.streaks.nrk_damage * left,
                         Cause::Nrk,
                         false,
                         from,

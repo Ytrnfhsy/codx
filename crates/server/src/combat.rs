@@ -26,8 +26,17 @@ impl Game {
     }
 
     /// Traces a bullet against the world, players (rewound to `t`) and helicopters.
-    pub fn trace(&self, shooter: Option<u8>, o: Vec3, d: Vec3, max: f32, t: f64) -> (f32, Hit) {
-        let mut best = self.world.raycast(o, d, max).map(|(t, _)| t).unwrap_or(max);
+    /// A bullet's flight: how far it got, what it hit, and the share of its damage left
+    /// after the wood and cloth it went through on the way.
+    pub fn trace(
+        &self,
+        shooter: Option<u8>,
+        o: Vec3,
+        d: Vec3,
+        max: f32,
+        t: f64,
+    ) -> (f32, Hit, f32) {
+        let (mut best, _, pierced) = self.world.bullet_trace(o, d, max);
         let mut hit = Hit::None;
         for p in self.players.iter().flatten() {
             if !p.alive || Some(p.id) == shooter {
@@ -58,7 +67,12 @@ impl Game {
                 }
             }
         }
-        (best, hit)
+        let left = pierced
+            .iter()
+            .filter(|p| p.t < best)
+            .filter_map(|p| p.mat.bullet_pass())
+            .product();
+        (best, hit, left)
     }
 
     pub fn fire(&mut self, id: u8, weapon: WeaponId, origin: Vec3, dirs: &[Vec3]) {
@@ -131,11 +145,11 @@ impl Game {
             if d.dot(look).clamp(-1.0, 1.0).acos() > max_angle {
                 continue;
             }
-            let (dist, hit) = self.trace(Some(id), origin, d, 400.0, t);
+            let (dist, hit, left) = self.trace(Some(id), origin, d, 400.0, t);
             let mut flesh = false;
             match hit {
                 Hit::Player(v, dist, zone) => {
-                    let mut dmg = def.damage_at(dist) * zone.mult(def.head_mult);
+                    let mut dmg = def.damage_at(dist) * zone.mult(def.head_mult) * left;
                     if stopping {
                         dmg *= 1.4;
                     }
@@ -148,8 +162,8 @@ impl Game {
                         None => per_victim.push((v, dmg, zone == HitZone::Head)),
                     }
                 }
-                Hit::Heli(i, dist) => heli_dmg.push((i, def.damage_at(dist))),
-                Hit::Vehicle(i, dist) => vehicle_dmg.push((i, def.damage_at(dist))),
+                Hit::Heli(i, dist) => heli_dmg.push((i, def.damage_at(dist) * left)),
+                Hit::Vehicle(i, dist) => vehicle_dmg.push((i, def.damage_at(dist) * left)),
                 Hit::None => {}
             }
             if k < 3 {
@@ -862,7 +876,7 @@ impl Game {
                 self.rng.range(-spread, spread),
             ))
             .normalize();
-            let (dist, hit) = self.trace(None, from, d, 120.0, time);
+            let (dist, hit, left) = self.trace(None, from, d, 120.0, time);
             let mut flesh = false;
             if let Hit::Player(v, _, _) = hit {
                 let same = self.p(owner).map(|o| o.team) == self.p(v).map(|p| p.team);
@@ -872,7 +886,7 @@ impl Game {
                     self.damage(
                         v,
                         if owner_present { Some(owner) } else { None },
-                        self.tuning.streaks.heli_damage,
+                        self.tuning.streaks.heli_damage * left,
                         Cause::Helicopter,
                         false,
                         from,

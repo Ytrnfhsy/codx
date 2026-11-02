@@ -96,6 +96,29 @@ impl Effects {
         });
     }
 
+    /// A bullet going through planks (splinters) or cloth (a few shreds).
+    pub fn pierce(&mut self, pos: Vec3, wood: bool) {
+        let (n, color, size) = if wood {
+            (4, [150, 104, 60], 0.05)
+        } else {
+            (2, [235, 225, 205], 0.07)
+        };
+        for _ in 0..n {
+            let v = self.rv(2.0) + vec3(0.0, 0.8, 0.0);
+            self.push(Particle {
+                pos,
+                vel: v,
+                life: 0.0,
+                max: 0.5,
+                size,
+                grow: 0.0,
+                color,
+                kind: Kind::Spark,
+                grav: 9.0,
+            });
+        }
+    }
+
     pub fn flesh(&mut self, pos: Vec3) {
         self.push(Particle {
             pos,

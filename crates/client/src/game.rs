@@ -1051,6 +1051,17 @@ impl GameClient {
                     .unwrap_or(Vec3::from_array(shot.from))
             };
             self.fx.tracer(from, to);
+            let path = to - from;
+            let len = path.length();
+            if len > 0.1 {
+                let (_, _, pierced) = self.world.bullet_trace(from, path / len, len);
+                for p in &pierced {
+                    self.fx.pierce(
+                        from + path / len * p.t,
+                        p.mat == toon_shared::map::Mat::Wood,
+                    );
+                }
+            }
             if shot.flesh {
                 self.fx.flesh(to);
             } else {
@@ -1355,11 +1366,8 @@ impl GameClient {
         // local visuals: trace against the world and remote players
         let muzzle = self.viewmodel_muzzle_world();
         for (k, d) in dirs.iter().enumerate() {
-            let mut t = self
-                .world
-                .raycast(eye, *d, 300.0)
-                .map(|h| h.0)
-                .unwrap_or(300.0);
+            // bullets go through planks and cloth (as on the server)
+            let (mut t, _, pierced) = self.world.bullet_trace(eye, *d, 300.0);
             let mut flesh = false;
             for r in self.remotes.values() {
                 if !r.alive || r.team == self.team {
@@ -1372,6 +1380,10 @@ impl GameClient {
             }
             let hit = eye + *d * t;
             if k < 3 {
+                for p in pierced.iter().filter(|p| p.t < t) {
+                    self.fx
+                        .pierce(eye + *d * p.t, p.mat == toon_shared::map::Mat::Wood);
+                }
                 self.fx.tracer(muzzle, hit);
                 if flesh {
                     self.fx.flesh(hit);

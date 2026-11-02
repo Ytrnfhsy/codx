@@ -113,8 +113,13 @@ fn bodies_can_walk_up_to_high_ground() {
         (MapId::Site, [-4.0, 6.8, -3.5]),
         (MapId::Site, [-22.3, 3.4, -16.0]),
         (MapId::Site, [-29.0, 6.8, -16.0]),
-        (MapId::Market, [-30.0, 3.4, -5.25]),
-        (MapId::Market, [-18.0, 3.4, 5.25]),
+        (MapId::Market, [33.0, 6.8, -13.0]),
+        (MapId::Market, [51.0, 3.4, 6.8]),
+        // up ladders
+        (MapId::Market, [32.0, 4.55, 13.0]),
+        (MapId::Market, [-32.0, 4.55, -13.0]),
+        (MapId::Market, [35.0, 6.35, 33.0]),
+        (MapId::Market, [-52.0, 4.55, 13.0]),
     ];
     for &(id, p) in spots {
         let m = toon_shared::maps::build(id);
@@ -128,4 +133,19 @@ fn bodies_can_walk_up_to_high_ground() {
             "{id:?}: walker got stuck at {end:?} on the way to {target:?}"
         );
     }
+}
+
+#[test]
+fn bodies_climb_down_ladders_too() {
+    let m = toon_shared::maps::build(MapId::Market);
+    let w = World::from_map(&m);
+    let nav = Nav::build(&m, &w);
+    // the shop roof is 4.55 m up: too high to jump, so the way down is the ladder
+    let from = glam::vec3(32.0, 4.56, 13.0);
+    let to = glam::vec3(32.0, 0.0, 0.0);
+    let end = walk(&m, &w, &nav, from, to);
+    assert!(
+        end.y < 0.3 && glam::vec3(end.x - to.x, 0.0, end.z - to.z).length() < 1.5,
+        "walker got stuck at {end:?}"
+    );
 }

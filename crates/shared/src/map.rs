@@ -48,6 +48,35 @@ impl MapId {
     }
 }
 
+/// What a box is made of, for bullets and movement.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Mat {
+    /// Brick, concrete, metal: stops bullets.
+    #[default]
+    Solid,
+    /// Thin planks (fences, stall boards, doors): bullets go through, a little weaker;
+    /// players cannot.
+    Wood,
+    /// Awnings, sheets, laundry: bullets go through almost unhurt, players too, but you
+    /// cannot see through.
+    Cloth,
+}
+
+impl Mat {
+    /// Share of a bullet's damage left after going through, or None if it stops it.
+    pub fn bullet_pass(self) -> Option<f32> {
+        match self {
+            Mat::Solid => None,
+            Mat::Wood => Some(0.7),
+            Mat::Cloth => Some(0.95),
+        }
+    }
+    /// Blocks players walking into it (and holds them up).
+    pub fn blocks_movement(self) -> bool {
+        self != Mat::Cloth
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct MapBox {
     pub min: Vec3,
@@ -57,6 +86,39 @@ pub struct MapBox {
     pub solid: bool,
     /// Rendered.
     pub visible: bool,
+    pub mat: Mat,
+}
+
+/// A ladder up a wall. Players climb it with W/S (or walk off a roof onto it); the
+/// climbing column stands in front of the wall.
+#[derive(Clone, Copy, Debug)]
+pub struct Ladder {
+    /// Foot of the ladder, where the climber stands (on the ground in front of the wall).
+    pub base: Vec3,
+    /// Unit vector from the wall towards the climber (horizontal).
+    pub out: Vec3,
+    /// Height of the floor at the top (the roof).
+    pub top: f32,
+}
+
+impl Ladder {
+    /// The climbing column: (centre of its floor print, half width across, reach).
+    /// A point counts as on the ladder if it is within `half_w` across and between the
+    /// wall and `reach` in front of it, from the bottom to a little above the top.
+    pub fn holds(&self, p: Vec3) -> bool {
+        let d = p - self.base;
+        let along = d.dot(self.out);
+        let across = d.dot(vec3(-self.out.z, 0.0, self.out.x));
+        across.abs() <= 0.55
+            && (-0.75..=0.45).contains(&along)
+            && p.y >= self.base.y - 0.1
+            && p.y <= self.top + 0.4
+    }
+    /// A point on the roof just past the top of the ladder.
+    pub fn exit(&self) -> Vec3 {
+        let p = self.base - self.out * 1.6;
+        vec3(p.x, self.top, p.z)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -72,6 +134,7 @@ pub struct Map {
     pub min: Vec2,
     pub max: Vec2,
     pub boxes: Vec<MapBox>,
+    pub ladders: Vec<Ladder>,
     /// Side spawns, indexed by `Team::index()`.
     pub spawns: [Vec<Spawn>; 2],
     /// Sabotage bomb spawn.
@@ -207,6 +270,7 @@ pub fn shade(c: [u8; 3], k: f32) -> [u8; 3] {
 #[derive(Default)]
 pub struct MapBuilder {
     pub boxes: Vec<MapBox>,
+    pub ladders: Vec<Ladder>,
 }
 
 impl MapBuilder {
@@ -226,12 +290,83 @@ impl MapBuilder {
             color,
             solid,
             visible,
+            mat: Mat::Solid,
         });
     }
 
     /// Solid visible box from two corners.
     pub fn block(&mut self, x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32, c: [u8; 3]) {
         self.push(vec3(x0, y0, z0), vec3(x1, y1, z1), c, true, true);
+    }
+
+    /// Thin planks bullets go through (fences, stall boards, doors).
+    pub fn wood(&mut self, x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32, c: [u8; 3]) {
+        self.block_of(Mat::Wood, x0, y0, z0, x1, y1, z1, c);
+    }
+
+    /// Cloth (awnings, sheets): bullets and players pass, eyes do not.
+    pub fn cloth(&mut self, x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32, c: [u8; 3]) {
+        self.block_of(Mat::Cloth, x0, y0, z0, x1, y1, z1, c);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn block_of(
+        &mut self,
+        m: Mat,
+        x0: f32,
+        y0: f32,
+        z0: f32,
+        x1: f32,
+        y1: f32,
+        z1: f32,
+        c: [u8; 3],
+    ) {
+        let n = self.boxes.len();
+        self.block(x0, y0, z0, x1, y1, z1, c);
+        if let Some(b) = self.boxes.get_mut(n) {
+            b.mat = m;
+        }
+    }
+
+    /// A ladder against a wall: `face` is a point on the wall's outer face at the foot of
+    /// the ladder, `out` points away from the wall, `top` is the roof's floor height.
+    /// Roofs overhang their walls a little, so the ladder stands 0.4 m off the wall.
+    pub fn ladder(&mut self, face: Vec3, out: Vec3, top: f32) {
+        let out = vec3(out.x, 0.0, out.z).normalize_or(vec3(1.0, 0.0, 0.0));
+        let across = vec3(-out.z, 0.0, out.x);
+        let foot = face + out * 0.4;
+        let c = [92, 70, 52];
+        let rail_top = top + 1.0;
+        for s in [-0.3f32, 0.3] {
+            let p = foot + across * s;
+            let (a, b) = (p - (across + out) * 0.04, p + (across + out) * 0.04);
+            self.push(
+                vec3(a.x, face.y, a.z),
+                vec3(b.x, rail_top, b.z),
+                c,
+                false,
+                true,
+            );
+        }
+        let mut y = face.y + 0.3;
+        while y < rail_top - 0.1 {
+            let (a, b) = (foot - across * 0.3, foot + across * 0.3);
+            let lo = a.min(b) - out * 0.03;
+            let hi = a.max(b) + out * 0.03;
+            self.push(
+                vec3(lo.x, y, lo.z),
+                vec3(hi.x, y + 0.05, hi.z),
+                c,
+                false,
+                true,
+            );
+            y += 0.32;
+        }
+        self.ladders.push(Ladder {
+            base: vec3(foot.x, face.y, foot.z) + out * 0.35,
+            out,
+            top,
+        });
     }
 
     /// Non-solid decal-like box (floor paint, pads).

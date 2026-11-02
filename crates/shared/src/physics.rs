@@ -2,7 +2,7 @@
 //! and on the server (bots, validation), so movement feels identical on both.
 
 use crate::consts::*;
-use crate::map::Map;
+use crate::map::{Ladder, Map, Mat};
 use crate::tuning::MoveTuning;
 use crate::yaw_basis;
 use glam::{vec3, Vec3};
@@ -27,9 +27,20 @@ impl Aabb {
 
 const CELL: f32 = 4.0;
 
+/// Wood or cloth a bullet went through.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pierced {
+    pub t: f32,
+    pub mat: Mat,
+    pub normal: Vec3,
+}
+
 /// Collision world: solid boxes plus a uniform grid for broad-phase queries.
 pub struct World {
     pub boxes: Vec<Aabb>,
+    /// What each box is made of (parallel to `boxes`).
+    pub mats: Vec<Mat>,
+    pub ladders: Vec<Ladder>,
     origin: (f32, f32),
     dims: (i32, i32),
     cells: Vec<Vec<u32>>,
@@ -37,15 +48,15 @@ pub struct World {
 
 impl World {
     pub fn from_map(map: &Map) -> World {
-        let boxes: Vec<Aabb> = map
-            .boxes
+        let solid: Vec<_> = map.boxes.iter().filter(|b| b.solid).collect();
+        let boxes: Vec<Aabb> = solid
             .iter()
-            .filter(|b| b.solid)
             .map(|b| Aabb {
                 min: b.min,
                 max: b.max,
             })
             .collect();
+        let mats = solid.iter().map(|b| b.mat).collect();
         let pad = 4.0;
         let origin = (map.min.x - pad, map.min.y - pad);
         let dims = (
@@ -55,6 +66,8 @@ impl World {
         let mut cells = vec![Vec::new(); (dims.0 * dims.1) as usize];
         let mut w = World {
             boxes,
+            mats,
+            ladders: map.ladders.clone(),
             origin,
             dims,
             cells: Vec::new(),
@@ -78,14 +91,15 @@ impl World {
         (cx, cz)
     }
 
-    /// Calls `f` for every box that may overlap the given XZ rectangle (may repeat boxes).
+    /// Calls `f` for every box that blocks movement and may overlap the given XZ rectangle
+    /// (may repeat boxes). Cloth is left out: players walk through it.
     fn for_candidates(&self, bb: &Aabb, mut f: impl FnMut(&Aabb) -> bool) -> bool {
         let (x0, z0) = self.cell_of(bb.min.x, bb.min.z);
         let (x1, z1) = self.cell_of(bb.max.x, bb.max.z);
         for cz in z0..=z1 {
             for cx in x0..=x1 {
                 for &i in &self.cells[(cz * self.dims.0 + cx) as usize] {
-                    if f(&self.boxes[i as usize]) {
+                    if self.mats[i as usize].blocks_movement() && f(&self.boxes[i as usize]) {
                         return true;
                     }
                 }
@@ -94,8 +108,80 @@ impl World {
         false
     }
 
+    /// Walks the grid cells a ray crosses, in order (2D, over XZ), calling
+    /// `f(box indices of the cell, distance where the ray leaves the cell)` until it
+    /// returns true or the ray is `max` long.
+    fn walk_ray(&self, o: Vec3, d: Vec3, max: f32, mut f: impl FnMut(&[u32], f32) -> bool) {
+        // start where the ray enters the grid
+        let gx0 = self.origin.0;
+        let gz0 = self.origin.1;
+        let gx1 = gx0 + self.dims.0 as f32 * CELL;
+        let gz1 = gz0 + self.dims.1 as f32 * CELL;
+        let mut t0 = 0.0f32;
+        let mut t1 = max;
+        for (o, d, lo, hi) in [(o.x, d.x, gx0, gx1), (o.z, d.z, gz0, gz1)] {
+            if d.abs() < 1e-9 {
+                if o < lo || o > hi {
+                    return;
+                }
+            } else {
+                let (a, b) = ((lo - o) / d, (hi - o) / d);
+                t0 = t0.max(a.min(b));
+                t1 = t1.min(a.max(b));
+            }
+        }
+        if t0 > t1 {
+            return;
+        }
+        let p = o + d * (t0 + 1e-4);
+        let (mut cx, mut cz) = self.cell_of(p.x, p.z);
+        let step = |d: f32| if d > 0.0 { 1 } else { -1 };
+        let next = |c: i32, org: f32, o: f32, d: f32| {
+            if d.abs() < 1e-9 {
+                f32::INFINITY
+            } else {
+                let edge = org + (c + if d > 0.0 { 1 } else { 0 }) as f32 * CELL;
+                (edge - o) / d
+            }
+        };
+        let (sx, sz) = (step(d.x), step(d.z));
+        let dtx = if d.x.abs() < 1e-9 {
+            f32::INFINITY
+        } else {
+            CELL / d.x.abs()
+        };
+        let dtz = if d.z.abs() < 1e-9 {
+            f32::INFINITY
+        } else {
+            CELL / d.z.abs()
+        };
+        let mut tx = next(cx, gx0, o.x, d.x);
+        let mut tz = next(cz, gz0, o.z, d.z);
+        loop {
+            let leave = tx.min(tz).min(t1);
+            if f(&self.cells[(cz * self.dims.0 + cx) as usize], leave) || leave >= t1 {
+                return;
+            }
+            if tx < tz {
+                cx += sx;
+                tx += dtx;
+            } else {
+                cz += sz;
+                tz += dtz;
+            }
+            if cx < 0 || cz < 0 || cx >= self.dims.0 || cz >= self.dims.1 {
+                return;
+            }
+        }
+    }
+
     pub fn overlaps(&self, bb: &Aabb) -> bool {
         self.for_candidates(bb, |b| b.overlaps(bb))
+    }
+
+    /// The ladder a body standing at `p` is on, if any.
+    pub fn ladder_at(&self, p: Vec3) -> Option<&Ladder> {
+        self.ladders.iter().find(|l| l.holds(p))
     }
 
     /// Highest top among boxes overlapping `bb` (used for step-up).
@@ -111,27 +197,65 @@ impl World {
     }
 
     /// Raycast against world geometry. Returns distance and surface normal.
+    /// Everything counts here, cloth too (it hides what is behind it).
     pub fn raycast(&self, o: Vec3, d: Vec3, max_dist: f32) -> Option<(f32, Vec3)> {
         let mut best: Option<(f32, Vec3)> = None;
         let inv = vec3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z);
-        let end = o + d * max_dist;
-        let seg = Aabb {
-            min: o.min(end),
-            max: o.max(end),
-        };
         let mut limit = max_dist;
-        // Coarse: walk the grid cells overlapped by the segment's bounding box.
-        // Cheap enough for our map sizes and keeps the code simple.
-        self.for_candidates(&seg, |b| {
-            if let Some((t, n)) = crate::ray::ray_aabb(o, inv, b.min, b.max) {
-                if t <= limit {
-                    limit = t;
-                    best = Some((t, n));
+        // the cells along the ray, nearest first: stop once a hit lies inside the cell
+        self.walk_ray(o, d, max_dist, |cell, leave| {
+            for &i in cell {
+                let b = &self.boxes[i as usize];
+                if let Some((t, n)) = crate::ray::ray_aabb(o, inv, b.min, b.max) {
+                    if t <= limit {
+                        limit = t;
+                        best = Some((t, n));
+                    }
                 }
             }
-            false
+            best.is_some() && limit <= leave
         });
         best
+    }
+
+    /// A bullet's path: where it stops (the first solid surface, or `max_dist`), and the
+    /// wood and cloth it goes through on the way (distance, material, surface normal),
+    /// nearest first.
+    pub fn bullet_trace(&self, o: Vec3, d: Vec3, max_dist: f32) -> (f32, Vec3, Vec<Pierced>) {
+        let inv = vec3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z);
+        let mut stop = max_dist;
+        let mut normal = Vec3::ZERO;
+        let mut soft: Vec<(u32, Pierced)> = Vec::new();
+        self.walk_ray(o, d, max_dist, |cell, leave| {
+            for &i in cell {
+                let b = &self.boxes[i as usize];
+                let Some((t, n)) = crate::ray::ray_aabb(o, inv, b.min, b.max) else {
+                    continue;
+                };
+                if t > stop {
+                    continue;
+                }
+                match self.mats[i as usize] {
+                    Mat::Solid => {
+                        stop = t;
+                        normal = n;
+                    }
+                    mat => {
+                        if !soft.iter().any(|(j, _)| *j == i) {
+                            soft.push((i, Pierced { t, mat, normal: n }));
+                        }
+                    }
+                }
+            }
+            stop <= leave
+        });
+        let mut pierced: Vec<Pierced> = soft
+            .into_iter()
+            .map(|(_, p)| p)
+            .filter(|p| p.t < stop)
+            .collect();
+        pierced.sort_by(|a, b| a.t.total_cmp(&b.t));
+        (stop, normal, pierced)
     }
 
     /// True if nothing blocks the segment a → b.
@@ -232,6 +356,10 @@ pub struct Body {
     /// Sum of instant vertical snaps (stairs up/down) since last read — lets the
     /// camera smooth them out. See [`Body::take_snap`].
     pub snap: f32,
+    /// Holding on to a ladder (no gravity).
+    pub climbing: bool,
+    /// Seconds before a ladder can be grabbed again (after jumping off one).
+    pub ladder_free: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -319,6 +447,11 @@ impl Body {
         };
         let wish = (fwd * f + right * r) * self.max_speed(inp, t) * dir_mult;
 
+        self.ladder_free = (self.ladder_free - dt).max(0.0);
+        if self.climb(world, inp, t, dt) {
+            return;
+        }
+
         let hv = vec3(self.vel.x, 0.0, self.vel.z);
         let new_hv = if self.on_ground {
             // heavier weapons = more inertia (slower to speed up and to stop)
@@ -373,6 +506,68 @@ impl Body {
                 }
             }
         }
+    }
+
+    /// Ladder climbing. W climbs towards where you face (up when facing the wall, down
+    /// when facing away from it), S the other way, A/D shuffle sideways, jump lets go.
+    /// You get on by pressing W/S at its foot or by stepping onto it from the roof, and off
+    /// at the top by climbing on (you step onto the roof), at the bottom by reaching the
+    /// ground. Returns true if it moved the body.
+    fn climb(&mut self, world: &World, inp: &MoveInput, t: &MoveTuning, dt: f32) -> bool {
+        const SPEED: f32 = 3.2;
+        let Some(l) = world.ladder_at(self.pos).copied() else {
+            self.climbing = false;
+            return false;
+        };
+        if self.ladder_free > 0.0 || self.stance == Stance::Prone {
+            self.climbing = false;
+            return false;
+        }
+        let (fwd, right) = yaw_basis(inp.yaw);
+        let toward = -l.out;
+        let facing_wall = fwd.dot(toward) >= 0.0;
+        let up = inp.forward * if facing_wall { 1.0 } else { -1.0 };
+        if !self.climbing {
+            // grab it: pressing a key at its foot, or falling past it
+            let grab = (self.on_ground
+                && inp.forward.abs() > 0.1
+                && (up > 0.0 || self.pos.y > l.base.y + 0.5))
+                || (!self.on_ground && self.vel.y < 0.0 && self.pos.y < l.top - 0.3);
+            if !grab {
+                return false;
+            }
+            self.climbing = true;
+            self.stance = Stance::Stand;
+        }
+        if inp.jump {
+            // let go, pushing off the wall
+            self.climbing = false;
+            self.ladder_free = 0.4;
+            self.vel = l.out * 3.0 + vec3(0.0, t.jump_speed * 0.5, 0.0);
+            return false;
+        }
+        let side = right.dot(vec3(-l.out.z, 0.0, l.out.x)).signum() * inp.right;
+        let across = vec3(-l.out.z, 0.0, l.out.x) * side * 1.2;
+        let along = (self.pos - l.base).dot(l.out);
+        self.vel = if up > 0.0 && self.pos.y >= l.top + 0.02 {
+            // at the top: step onto the roof
+            toward * 3.0
+        } else if up < 0.0 && self.pos.y >= l.top - 0.1 && along < -0.05 {
+            // getting on from the roof: out over the edge first, then down
+            l.out * 2.5
+        } else {
+            vec3(0.0, up * SPEED, 0.0) + across
+        };
+        let delta = self.vel * dt;
+        self.on_ground = false;
+        self.move_axis(world, 0, delta.x, false);
+        self.move_axis(world, 2, delta.z, false);
+        self.move_axis(world, 1, delta.y, false);
+        if self.on_ground && up <= 0.0 {
+            // reached the ground
+            self.climbing = false;
+        }
+        true
     }
 
     fn move_axis(&mut self, world: &World, axis: usize, d: f32, grounded: bool) {
@@ -510,6 +705,160 @@ mod tests {
     use crate::map::MapId;
     use crate::maps;
     use glam::vec2;
+
+    /// The grid walk finds exactly what checking every box finds.
+    #[test]
+    fn raycast_matches_brute_force_on_every_map() {
+        let mut rng = crate::rng::Rng::new(7);
+        for id in MapId::ALL {
+            let map = maps::build(id);
+            let w = World::from_map(&map);
+            for k in 0..3000 {
+                let o = vec3(
+                    rng.range(map.min.x - 3.0, map.max.x + 3.0),
+                    rng.range(0.1, 12.0),
+                    rng.range(map.min.y - 3.0, map.max.y + 3.0),
+                );
+                let d = if k % 10 == 0 {
+                    vec3(0.0, -1.0, 0.0)
+                } else if k % 10 == 1 {
+                    vec3(1.0, 0.0, 0.0)
+                } else {
+                    vec3(
+                        rng.range(-1.0, 1.0),
+                        rng.range(-0.6, 0.6),
+                        rng.range(-1.0, 1.0),
+                    )
+                    .normalize_or(vec3(0.0, 0.0, 1.0))
+                };
+                let max = rng.range(1.0, 160.0);
+                let inv = vec3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z);
+                let brute = w
+                    .boxes
+                    .iter()
+                    .filter_map(|b| crate::ray::ray_aabb(o, inv, b.min, b.max))
+                    .map(|(t, _)| t)
+                    .filter(|t| *t <= max)
+                    .fold(None, |a: Option<f32>, t| Some(a.map_or(t, |a| a.min(t))));
+                let got = w.raycast(o, d, max).map(|(t, _)| t);
+                match (brute, got) {
+                    (None, None) => {}
+                    (Some(a), Some(b)) => {
+                        assert!((a - b).abs() < 1e-3, "{id:?} {o} {d}: {a} vs {b}")
+                    }
+                    _ => panic!("{id:?} {o} {d} max {max}: {brute:?} vs {got:?}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bullets_go_through_cloth_and_wood_but_not_walls() {
+        let mut b = crate::map::MapBuilder::new();
+        b.ground_and_bounds(vec2(-20.0, -20.0), vec2(20.0, 20.0), [0; 3], [0; 3], 5.0);
+        b.cloth(2.0, 0.0, -2.0, 2.05, 3.0, 2.0, [255; 3]);
+        b.wood(4.0, 0.0, -2.0, 4.1, 3.0, 2.0, [150, 100, 60]);
+        b.block(6.0, 0.0, -2.0, 6.3, 3.0, 2.0, [200; 3]);
+        let map = Map {
+            id: MapId::Depot,
+            name: "test",
+            min: vec2(-20.0, -20.0),
+            max: vec2(20.0, 20.0),
+            boxes: b.boxes,
+            ladders: b.ladders,
+            spawns: [Vec::new(), Vec::new()],
+            bomb: Vec3::ZERO,
+            sites: [Vec3::ZERO; 2],
+            sky: [0; 3],
+            fog: [0; 3],
+        };
+        let w = World::from_map(&map);
+        let (stop, _, pierced) = w.bullet_trace(vec3(0.0, 1.5, 0.0), vec3(1.0, 0.0, 0.0), 50.0);
+        assert!((stop - 6.0).abs() < 1e-3, "the brick wall stops it: {stop}");
+        let mats: Vec<Mat> = pierced.iter().map(|p| p.mat).collect();
+        assert_eq!(mats, vec![Mat::Cloth, Mat::Wood]);
+        let left: f32 = pierced.iter().filter_map(|p| p.mat.bullet_pass()).product();
+        assert!((left - 0.95 * 0.7).abs() < 1e-4);
+        // eyes stop at the cloth, feet at the wood
+        assert!(
+            (w.raycast(vec3(0.0, 1.5, 0.0), vec3(1.0, 0.0, 0.0), 50.0)
+                .unwrap()
+                .0
+                - 2.0)
+                .abs()
+                < 1e-3
+        );
+        assert!(
+            fits(&w, vec3(2.0, 0.0, 0.0), Stance::Stand),
+            "walk through cloth"
+        );
+        assert!(
+            !fits(&w, vec3(4.05, 0.0, 0.0), Stance::Stand),
+            "not through planks"
+        );
+    }
+
+    #[test]
+    fn climbs_a_ladder_onto_the_roof_and_back_down() {
+        let mut b = crate::map::MapBuilder::new();
+        b.ground_and_bounds(vec2(-20.0, -20.0), vec2(20.0, 20.0), [0; 3], [0; 3], 5.0);
+        // a 4.2 m house from x = 0 to 8; the ladder on its west wall
+        b.building(0.0, -4.0, 8.0, 4.0, 0.0, 4.2, &[], [200; 3], Some([150; 3]));
+        let top = 4.2 + 0.35;
+        b.ladder(vec3(0.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0), top);
+        let map = Map {
+            id: MapId::Depot,
+            name: "test",
+            min: vec2(-20.0, -20.0),
+            max: vec2(20.0, 20.0),
+            boxes: b.boxes,
+            ladders: b.ladders,
+            spawns: [Vec::new(), Vec::new()],
+            bomb: Vec3::ZERO,
+            sites: [Vec3::ZERO; 2],
+            sky: [0; 3],
+            fog: [0; 3],
+        };
+        let w = World::from_map(&map);
+        let t = mt();
+        let east = -std::f32::consts::FRAC_PI_2; // yaw looking towards +x (the wall)
+        let mut body = Body {
+            pos: vec3(-1.5, 0.0, 0.0),
+            on_ground: true,
+            ..Default::default()
+        };
+        let run = |body: &mut Body, yaw: f32, forward: f32, secs: f32| {
+            for _ in 0..(secs * 60.0) as usize {
+                let inp = MoveInput {
+                    forward,
+                    yaw,
+                    ..Default::default()
+                };
+                body.step(&w, &inp, &t, 1.0 / 60.0);
+            }
+        };
+        // climb until standing on the roof
+        let mut secs = 0.0;
+        while !(body.on_ground && body.pos.y > top - 0.05 && body.pos.x > 0.3) {
+            run(&mut body, east, 1.0, 0.05);
+            secs += 0.05;
+            assert!(
+                secs < 4.0,
+                "stuck at {} (climbing {})",
+                body.pos,
+                body.climbing
+            );
+        }
+        assert!(!body.climbing);
+        assert!(secs > 1.0, "it takes a moment to climb {top} m: {secs} s");
+        // walk back off the roof facing away from the wall: onto the ladder and down
+        run(&mut body, east + std::f32::consts::PI, 1.0, 5.0);
+        assert!(
+            body.pos.y < 0.1 && body.pos.x < 0.0,
+            "back on the ground: {}",
+            body.pos
+        );
+    }
 
     fn mt() -> MoveTuning {
         MoveTuning::default()
