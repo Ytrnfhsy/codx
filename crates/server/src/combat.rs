@@ -16,6 +16,9 @@ pub enum Hit {
     Vehicle(usize, f32),
 }
 
+/// Radius of a helicopter's hit sphere.
+const HELI_HIT_RADIUS: f32 = 2.6;
+
 impl Game {
     fn combat_allowed(&self) -> bool {
         matches!(self.state, MatchState::Warmup | MatchState::Playing)
@@ -38,7 +41,7 @@ impl Game {
             }
         }
         for (i, h) in self.helis.iter().enumerate() {
-            if let Some(dist) = ray_sphere(o, d, h.pos, 2.6) {
+            if let Some(dist) = ray_sphere(o, d, h.pos, HELI_HIT_RADIUS) {
                 if dist < best {
                     best = dist;
                     hit = Hit::Heli(i, dist);
@@ -819,7 +822,10 @@ impl Game {
                     h.yaw = toon_shared::yaw_of(d);
                     if time >= h.next_shot {
                         h.next_shot = time + 0.11;
-                        shots.push((h.owner, h.pos - vec3(0.0, 1.5, 0.0), tp));
+                        // the gun fires from just outside the helicopter's own hit
+                        // sphere: from inside it every bullet "hit" the helicopter
+                        let muzzle = h.pos + d.normalize_or_zero() * (HELI_HIT_RADIUS + 0.3);
+                        shots.push((h.owner, muzzle, tp));
                     }
                 }
                 None => {

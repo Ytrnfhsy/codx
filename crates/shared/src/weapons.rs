@@ -438,13 +438,25 @@ impl Killstreak {
             Killstreak::Nrk => 21,
         }
     }
-    /// The reward for reaching exactly `streak` kills.
+    /// Kills for one full round of rewards; after the last one they start over.
+    pub const CYCLE: u32 = 21;
+    /// The reward for reaching exactly `streak` kills (going round: 24 kills is the radar
+    /// again, 27 the airstrike, …).
     pub fn for_streak(streak: u32) -> Option<Killstreak> {
-        Killstreak::ALL.into_iter().find(|k| k.kills() == streak)
+        if streak == 0 {
+            return None;
+        }
+        let n = (streak - 1) % Self::CYCLE + 1;
+        Killstreak::ALL.into_iter().find(|k| k.kills() == n)
     }
-    /// The next reward above `streak` kills.
-    pub fn next_after(streak: u32) -> Option<Killstreak> {
-        Killstreak::ALL.into_iter().find(|k| k.kills() > streak)
+    /// The next reward after `streak` kills and how many more kills it takes.
+    pub fn next_after(streak: u32) -> (Killstreak, u32) {
+        let n = streak % Self::CYCLE;
+        let k = Killstreak::ALL
+            .into_iter()
+            .find(|k| k.kills() > n)
+            .unwrap_or(Killstreak::ALL[0]);
+        (k, k.kills() - n)
     }
     /// Called in on a point picked on the map.
     pub fn needs_target(self) -> bool {

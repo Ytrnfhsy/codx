@@ -97,6 +97,26 @@ fn rewards_come_every_three_kills() {
     }
     assert_eq!(got, Killstreak::ALL.to_vec());
     assert_eq!(g.p(me).unwrap().rewards, Killstreak::ALL.to_vec());
+    // and round again: 24 kills is the radar, 27 the airstrike
+    g.pm(me).unwrap().rewards.clear();
+    for _ in 22..=27 {
+        place(&mut g, foe, FOE_AT);
+        g.kill(foe, Some(me), Cause::World, false);
+    }
+    assert_eq!(
+        g.p(me).unwrap().rewards,
+        vec![Killstreak::Uav, Killstreak::Airstrike]
+    );
+}
+
+#[test]
+fn next_reward_goes_round() {
+    assert_eq!(Killstreak::next_after(0), (Killstreak::Uav, 3));
+    assert_eq!(Killstreak::next_after(20), (Killstreak::Nrk, 1));
+    assert_eq!(Killstreak::next_after(21), (Killstreak::Uav, 3));
+    assert_eq!(Killstreak::next_after(25), (Killstreak::Airstrike, 2));
+    assert_eq!(Killstreak::for_streak(42), Some(Killstreak::Nrk));
+    assert_eq!(Killstreak::for_streak(43), None);
 }
 
 #[test]
@@ -372,4 +392,30 @@ fn own_killstreaks_do_not_hurt_the_pilot() {
     // a grenade of your own still hurts
     g.explode(at, 6.0, 300.0, Some(me), Cause::Grenade, false);
     assert!(!g.p(me).unwrap().alive || g.p(me).unwrap().hp < hp);
+}
+
+#[test]
+fn helicopter_guns_down_enemies_in_the_open() {
+    let (mut g, me, foe) = duel();
+    give(&mut g, me, Killstreak::Helicopter);
+    g.handle(
+        me,
+        C2S::UseKillstreak {
+            target: None,
+            pilot: false,
+        },
+    );
+    assert!(!g.helis.is_empty(), "the helicopter is up");
+    let before = deaths(&g, foe);
+    // keep the enemy standing in the open under its circle
+    let c = g.map.center();
+    let spot = vec3(c.x, 0.0, c.y);
+    for _ in 0..200 {
+        place_if_alive(&mut g, foe, spot);
+        tick(&mut g, 0.1);
+        if deaths(&g, foe) > before {
+            break;
+        }
+    }
+    assert!(deaths(&g, foe) > before, "the door gun killed the enemy");
 }

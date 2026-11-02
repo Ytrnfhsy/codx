@@ -960,16 +960,8 @@ impl GameClient {
             ui.centered(&format!("Граната: {left:.1}"), w / 2.0, h * 0.62, 22, BAD);
         }
         // killstreak
-        let next = Killstreak::next_after(self.me.streak as u32).map(|k| (k, k.kills()));
-        let streak_txt = match next {
-            Some((k, n)) => format!(
-                "Серія: {} (до «{}» {})",
-                self.me.streak,
-                k.name(),
-                n - self.me.streak as u32
-            ),
-            None => format!("Серія: {}", self.me.streak),
-        };
+        let (next, left) = Killstreak::next_after(self.me.streak as u32);
+        let streak_txt = format!("Серія: {} (до «{}» {})", self.me.streak, next.name(), left);
         ui.shadowed(&streak_txt, x, y + 92.0, 13, MUTED);
         if let Some(r) = self.me.rewards.last() {
             let t = format!("[5] {}", r.name());
