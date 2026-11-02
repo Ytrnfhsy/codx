@@ -410,10 +410,12 @@ async fn amain(args: Args) {
                         match host(&settings, &args) {
                             Ok(h) => {
                                 let port = h.port;
+                                // back from the game, the main page shows the server's status
+                                menu.page = menu::Page::Main;
                                 menu.host_info = Some(format!(
-                                    "Сервер запущено на порту {port}{}",
+                                    "{}",
                                     if h.http_port.is_some() {
-                                        format!(" · адмінка: http://localhost:{port}/admin")
+                                        format!("адмінка: http://localhost:{port}/admin")
                                     } else {
                                         String::new()
                                     }

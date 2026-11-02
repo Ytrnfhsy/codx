@@ -129,11 +129,22 @@ pub fn draw_menu(
 
     let pw = 560.0f32.min(w - 40.0);
     let x = (w - pw) / 2.0;
-    let y = 150.0;
+    // a little higher on short windows so the tallest page (hosting) still fits
+    let y = (h - 575.0).clamp(134.0, 150.0);
     let mut action = None;
     match st.page {
         Page::Main => {
-            ui.panel(x, y, pw, 470.0);
+            // a running server adds a status line and its own row of buttons
+            ui.panel(
+                x,
+                y,
+                pw,
+                if server_running.is_some() {
+                    510.0
+                } else {
+                    470.0
+                },
+            );
             ui.field(
                 1,
                 "Твоє ім'я",
@@ -189,19 +200,21 @@ pub fn draw_menu(
                 ui.text(
                     &format!("Твій сервер працює: {ip}:{port}"),
                     x + 24.0,
-                    y + 428.0,
+                    y + 426.0,
                     16,
                     GOOD,
                 );
-                if ui.button_colored("Зупинити", x + pw - 130.0, y + 410.0, 106.0, 30.0, BAD)
-                {
-                    action = Some(MenuAction::StopServer);
+                if let Some(i) = &st.host_info {
+                    ui.text(i, x + 24.0, y + 446.0, 13, MUTED);
                 }
-                if ui.button2("Грати на ньому", x + pw - 290.0, y + 410.0, 150.0, 30.0)
-                {
+                let bw = (pw - 60.0) / 2.0;
+                if ui.button2("Грати на ньому", x + 24.0, y + 458.0, bw, 36.0) {
                     action = Some(MenuAction::Connect {
                         address: format!("127.0.0.1:{port}"),
                     });
+                }
+                if ui.button_colored("Зупинити", x + 36.0 + bw, y + 458.0, bw, 36.0, BAD) {
+                    action = Some(MenuAction::StopServer);
                 }
             } else {
                 ui.text(
@@ -230,7 +243,7 @@ pub fn draw_menu(
             let mut port = hs.port.to_string();
             ui.field(
                 11,
-                "Порт (UDP для гри, TCP для веб-адмінки)",
+                "Порт (UDP + TCP)",
                 &mut port,
                 x + 24.0,
                 y + 150.0,
@@ -393,15 +406,12 @@ pub fn draw_menu(
         let ew = ui.width(e, 18, true) + 40.0;
         draw_rectangle(
             (w - ew) / 2.0,
-            h - 70.0,
+            h - 58.0,
             ew,
-            40.0,
+            38.0,
             Color::new(0.5, 0.08, 0.08, 0.9),
         );
-        ui.centered(e, w / 2.0, h - 43.0, 18, TEXT);
-    }
-    if let Some(i) = &st.host_info {
-        ui.centered(i, w / 2.0, h - 90.0, 16, GOOD);
+        ui.centered(e, w / 2.0, h - 32.0, 18, TEXT);
     }
     // a server turned us away for an old version: look for the update again if the
     // first look failed, and show what can be done
