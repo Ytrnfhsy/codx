@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use toon_shared::map::MapId;
 use toon_shared::protocol::S2C;
 use toon_shared::tr;
-use toon_shared::tuning::{FieldInfo, GrenadeTuning, MoveTuning, Tuning, WeaponStats};
+use toon_shared::tuning::{
+    FieldInfo, GrenadeTuning, MoveTuning, StreakTuning, Tuning, WeaponStats,
+};
 use toon_shared::weapons::WeaponId;
 use toon_shared::{Mode, Team};
 
@@ -536,7 +538,7 @@ fn list_fields(obj: &serde_json::Value, fields: &[FieldInfo], prefix: &str) -> S
 pub fn tune(g: &mut Game, rest: &str) -> String {
     let mut args = rest.split_whitespace();
     let Some(first) = args.next() else {
-        return "Тонке налаштування:\n  tune movement — параметри руху\n  tune grenade — гранати (дальність кидка тощо)\n  tune weapons — список зброї\n  tune <зброя> — параметри зброї (напр. tune m249)\n  tune <шлях> <значення> — tune movement.sprint_speed 8, tune m249.weight 10\n  tune reset [movement|grenade|<зброя>|all]".into();
+        return "Тонке налаштування:\n  tune movement — параметри руху\n  tune grenade — гранати (дальність кидка тощо)\n  tune streaks — кілстріки (пороги вбивств, урон, тривалість…)\n  tune weapons — список зброї\n  tune <зброя> — параметри зброї (напр. tune m249)\n  tune <шлях> <значення> — tune movement.sprint_speed 8, tune m249.weight 10\n  tune reset [movement|grenade|streaks|<зброя>|all]".into();
     };
     let json = serde_json::to_value(&g.tuning).unwrap_or_default();
     let first_l = first.to_lowercase();
@@ -548,6 +550,7 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
             "all" => t = def,
             "movement" | "move" => t.movement = def.movement,
             "grenade" | "grenades" => t.grenade = def.grenade,
+            "streaks" | "streak" | "killstreaks" => t.streaks = def.streaks,
             w => match WeaponId::from_key(w) {
                 Some(id) => {
                     t.weapons.insert(id.key().into(), def.weapon(id).clone());
@@ -567,6 +570,10 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
                 g.tuning.grenade.max_range(g.tuning.movement.gravity),
                 list_fields(&json["grenade"], GrenadeTuning::FIELDS, "")
             ),
+            "streaks" | "streak" | "killstreaks" => format!(
+                "Кілстріки (tune streaks.<ключ> <значення>); нагороди йдуть по колу:\n{}",
+                list_fields(&json["streaks"], StreakTuning::FIELDS, "")
+            ),
             "weapons" => WeaponId::all()
                 .map(|w| {
                     let s = g.tuning.weapon(w);
@@ -585,11 +592,12 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
     let (path, fields): (Vec<String>, &[FieldInfo]) = match parts.as_slice() {
         ["movement" | "move", f] => (vec!["movement".into(), f.to_string()], MoveTuning::FIELDS),
         ["grenade" | "grenades", f] => (vec!["grenade".into(), f.to_string()], GrenadeTuning::FIELDS),
+        ["streaks" | "streak" | "killstreaks", f] => (vec!["streaks".into(), f.to_string()], StreakTuning::FIELDS),
         ["weapons", w, f] | [w, f] if WeaponId::from_key(w).is_some() => {
             (vec!["weapons".into(), WeaponId::from_key(w).unwrap().key().into(), f.to_string()], WeaponStats::FIELDS)
         }
         [f] if MoveTuning::FIELDS.iter().any(|x| x.0 == *f) => (vec!["movement".into(), f.to_string()], MoveTuning::FIELDS),
-        _ => return format!("Невірний шлях «{first}». Приклади: movement.sprint_speed, m249.rpm, grenade.throw_speed"),
+        _ => return format!("Невірний шлях «{first}». Приклади: movement.sprint_speed, m249.rpm, grenade.throw_speed, streaks.heli_damage"),
     };
     let field = path.last().unwrap().clone();
     let Some(info) = fields.iter().find(|x| x.0 == field) else {

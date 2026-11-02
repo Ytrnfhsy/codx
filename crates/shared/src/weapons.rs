@@ -1,6 +1,7 @@
 //! Weapons, perks, loadouts and default classes in the spirit of CoD4.
 
 use crate::lang::t;
+use crate::tuning::StreakTuning;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -428,36 +429,55 @@ impl Killstreak {
         }
     }
     /// Kills in a row needed.
-    pub fn kills(self) -> u32 {
-        match self {
-            Killstreak::Uav => 3,
-            Killstreak::Airstrike => 6,
-            Killstreak::Artillery => 9,
-            Killstreak::Helicopter => 12,
-            Killstreak::Fpv => 15,
-            Killstreak::Bomber => 18,
-            Killstreak::Nrk => 21,
-        }
+    /// Kills in a row it takes.
+    pub fn kills(self, t: &StreakTuning) -> u32 {
+        (match self {
+            Killstreak::Uav => t.uav_kills,
+            Killstreak::Airstrike => t.airstrike_kills,
+            Killstreak::Artillery => t.artillery_kills,
+            Killstreak::Helicopter => t.heli_kills,
+            Killstreak::Fpv => t.fpv_kills,
+            Killstreak::Bomber => t.bomber_kills,
+            Killstreak::Nrk => t.nrk_kills,
+        }) as u32
     }
     /// Kills for one full round of rewards; after the last one they start over.
-    pub const CYCLE: u32 = 21;
-    /// The reward for reaching exactly `streak` kills (going round: 24 kills is the radar
-    /// again, 27 the airstrike, …).
-    pub fn for_streak(streak: u32) -> Option<Killstreak> {
+    pub fn cycle(t: &StreakTuning) -> u32 {
+        Killstreak::ALL
+            .iter()
+            .map(|k| k.kills(t))
+            .max()
+            .unwrap_or(1)
+            .max(1)
+    }
+    /// The reward for reaching exactly `streak` kills (going round: with the usual numbers
+    /// 24 kills is the radar again, 27 the airstrike, …).
+    pub fn for_streak(streak: u32, t: &StreakTuning) -> Option<Killstreak> {
         if streak == 0 {
             return None;
         }
-        let n = (streak - 1) % Self::CYCLE + 1;
-        Killstreak::ALL.into_iter().find(|k| k.kills() == n)
+        let n = (streak - 1) % Self::cycle(t) + 1;
+        Killstreak::ALL.into_iter().find(|k| k.kills(t) == n)
     }
     /// The next reward after `streak` kills and how many more kills it takes.
-    pub fn next_after(streak: u32) -> (Killstreak, u32) {
-        let n = streak % Self::CYCLE;
+    pub fn next_after(streak: u32, t: &StreakTuning) -> (Killstreak, u32) {
+        let n = streak % Self::cycle(t);
         let k = Killstreak::ALL
             .into_iter()
-            .find(|k| k.kills() > n)
-            .unwrap_or(Killstreak::ALL[0]);
-        (k, k.kills() - n)
+            .filter(|k| k.kills(t) > n)
+            .min_by_key(|k| k.kills(t))
+            .unwrap_or_else(|| {
+                Killstreak::ALL
+                    .into_iter()
+                    .min_by_key(|k| k.kills(t))
+                    .unwrap_or(Killstreak::Uav)
+            });
+        let left = if k.kills(t) > n {
+            k.kills(t) - n
+        } else {
+            Self::cycle(t) - n + k.kills(t)
+        };
+        (k, left)
     }
     /// Called in on a point picked on the map.
     pub fn needs_target(self) -> bool {

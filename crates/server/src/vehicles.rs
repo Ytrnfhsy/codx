@@ -126,9 +126,9 @@ impl Game {
             vel: Vec3::ZERO,
             yaw,
             pitch,
-            hp: kind.health(),
-            until: time + kind.duration() as f64,
-            ammo: kind.ammo(),
+            hp: kind.health(&self.tuning.streaks),
+            until: time + kind.duration(&self.tuning.streaks) as f64,
+            ammo: kind.ammo(&self.tuning.streaks),
             auto: !pilot,
             body: Body {
                 pos,
@@ -173,7 +173,7 @@ impl Game {
         let dt = ((time - v.last_drive) as f32).clamp(1.0 / 60.0, 0.5);
         v.last_drive = time;
         // never faster than the vehicle can go (a little slack for network jitter)
-        let reach = v.kind.max_speed() * dt * 1.3 + 0.8;
+        let reach = v.kind.max_speed(&self.tuning.streaks) * dt * 1.3 + 0.8;
         let mut to = pos;
         let d = to - v.pos;
         let flat = vec3(d.x, 0.0, d.z);
@@ -212,8 +212,8 @@ impl Game {
         v.vel = (to - v.pos) / dt;
         v.pos = to;
         if v.kind == VehicleKind::Fpv && keys & keys::CRASH != 0 {
-            let age = v.kind.duration() - (v.until - time) as f32;
-            let end = if age >= FPV_ARM_TIME {
+            let age = v.kind.duration(&self.tuning.streaks) - (v.until - time) as f32;
+            let end = if age >= self.tuning.streaks.fpv_arm_time {
                 End::Detonate(v.pos)
             } else {
                 End::Destroyed
@@ -259,7 +259,8 @@ impl Game {
             match v.kind {
                 VehicleKind::Fpv => {
                     let (pos, team) = (v.pos, v.team);
-                    let armed = v.kind.duration() - (v.until - time) as f32 >= FPV_ARM_TIME;
+                    let armed = v.kind.duration(&self.tuning.streaks) - (v.until - time) as f32
+                        >= self.tuning.streaks.fpv_arm_time;
                     let fire = v.keys & keys::FIRE != 0 && armed;
                     let near = self.players.iter().flatten().any(|p| {
                         p.alive
@@ -279,7 +280,7 @@ impl Game {
                         let did = self.new_ent_id();
                         let v = &mut self.vehicles[i];
                         v.ammo -= 1;
-                        v.next_drop = time + BOMBER_COOLDOWN as f64;
+                        v.next_drop = time + self.tuning.streaks.bomber_cooldown as f64;
                         self.drops.push(BombDrop {
                             id: did,
                             owner,
@@ -294,7 +295,8 @@ impl Game {
                     }
                     let v = &self.vehicles[i];
                     if v.keys & keys::FIRE != 0 && time >= v.next_shot {
-                        self.vehicles[i].next_shot = time + NRK_FIRE_INTERVAL as f64;
+                        self.vehicles[i].next_shot =
+                            time + self.tuning.streaks.nrk_fire_interval as f64;
                         self.robot_fire(i);
                     }
                 }
@@ -329,8 +331,8 @@ impl Game {
             self.drops.retain(|d| d.id != id);
             self.explode(
                 pos,
-                DROP_RADIUS,
-                DROP_DAMAGE,
+                self.tuning.streaks.bomber_drop_radius,
+                self.tuning.streaks.bomber_drop_damage,
                 Some(owner),
                 Cause::Drop,
                 false,
@@ -345,7 +347,7 @@ impl Game {
         let (owner, team) = (v.owner, v.team);
         let fwd = look_dir(v.yaw, v.pitch);
         let from = v.pos + vec3(0.0, NRK_GUN_Y, 0.0) + look_dir(v.yaw, 0.0) * 0.95;
-        let s = NRK_SPREAD;
+        let s = self.tuning.streaks.nrk_spread;
         let d = (fwd
             + vec3(
                 self.rng.range(-s, s),
@@ -360,17 +362,24 @@ impl Game {
                 let same = self.p(victim).map(|p| p.team) == Some(team);
                 if !same || self.cfg.friendly_fire {
                     flesh = true;
-                    self.damage(victim, Some(owner), NRK_DAMAGE, Cause::Nrk, false, from);
+                    self.damage(
+                        victim,
+                        Some(owner),
+                        self.tuning.streaks.nrk_damage,
+                        Cause::Nrk,
+                        false,
+                        from,
+                    );
                 }
             }
             Hit::Heli(h, _) => {
                 if self.helis.get(h).is_some_and(|h| h.team != team) {
-                    self.helis[h].hp -= NRK_DAMAGE;
+                    self.helis[h].hp -= self.tuning.streaks.nrk_damage;
                 }
             }
             Hit::Vehicle(j, _) => {
                 if j != i && self.vehicles[j].team != team {
-                    self.vehicles[j].hp -= NRK_DAMAGE;
+                    self.vehicles[j].hp -= self.tuning.streaks.nrk_damage;
                 }
             }
             Hit::None => {}
@@ -447,6 +456,7 @@ impl Game {
             .map(|p| p.chest());
         let world = &self.world;
         let tuning = self.tuning.movement.clone();
+        let nrk_speed = self.tuning.streaks.nrk_speed;
         let v = &mut self.vehicles[i];
         let mut forward = 0.0;
         let mut want_yaw = v.yaw;
@@ -480,7 +490,16 @@ impl Game {
         if turn.abs() > 0.8 {
             forward = 0.0;
         }
-        nrk_step(world, &mut v.body, forward, 0.0, v.yaw, &tuning, dt);
+        nrk_step(
+            nrk_speed,
+            world,
+            &mut v.body,
+            forward,
+            0.0,
+            v.yaw,
+            &tuning,
+            dt,
+        );
         v.vel = (v.body.pos - v.pos) / dt.max(1e-3);
         v.pos = v.body.pos;
     }
@@ -518,8 +537,8 @@ impl Game {
             End::Detonate(at) => {
                 self.explode(
                     at,
-                    FPV_BLAST_RADIUS,
-                    FPV_BLAST_DAMAGE,
+                    self.tuning.streaks.fpv_blast_radius,
+                    self.tuning.streaks.fpv_blast_damage,
                     Some(v.owner),
                     Cause::Fpv,
                     false,

@@ -90,7 +90,7 @@ fn rewards_come_every_three_kills() {
     for n in 1..=21 {
         place(&mut g, foe, FOE_AT);
         g.kill(foe, Some(me), Cause::World, false);
-        if let Some(k) = Killstreak::for_streak(n) {
+        if let Some(k) = Killstreak::for_streak(n, &g.tuning.streaks) {
             got.push(k);
         }
         assert_eq!(g.p(me).unwrap().streak, n);
@@ -111,12 +111,13 @@ fn rewards_come_every_three_kills() {
 
 #[test]
 fn next_reward_goes_round() {
-    assert_eq!(Killstreak::next_after(0), (Killstreak::Uav, 3));
-    assert_eq!(Killstreak::next_after(20), (Killstreak::Nrk, 1));
-    assert_eq!(Killstreak::next_after(21), (Killstreak::Uav, 3));
-    assert_eq!(Killstreak::next_after(25), (Killstreak::Airstrike, 2));
-    assert_eq!(Killstreak::for_streak(42), Some(Killstreak::Nrk));
-    assert_eq!(Killstreak::for_streak(43), None);
+    let d = toon_shared::tuning::StreakTuning::default();
+    assert_eq!(Killstreak::next_after(0, &d), (Killstreak::Uav, 3));
+    assert_eq!(Killstreak::next_after(20, &d), (Killstreak::Nrk, 1));
+    assert_eq!(Killstreak::next_after(21, &d), (Killstreak::Uav, 3));
+    assert_eq!(Killstreak::next_after(25, &d), (Killstreak::Airstrike, 2));
+    assert_eq!(Killstreak::for_streak(42, &d), Some(Killstreak::Nrk));
+    assert_eq!(Killstreak::for_streak(43, &d), None);
 }
 
 #[test]
@@ -153,7 +154,7 @@ fn drive_towards(g: &mut Game, me: u8, goal: Vec3, held: u8, secs: f32) {
     for _ in 0..steps {
         let Some(v) = g.vehicle_hud(me) else { return };
         let pos = Vec3::from_array(v.pos);
-        let speed = v.kind.max_speed() * 0.8;
+        let speed = v.kind.max_speed(&g.tuning.streaks) * 0.8;
         let d = goal - pos;
         let flat = vec3(d.x, if v.kind == VehicleKind::Fpv { d.y } else { 0.0 }, d.z);
         let step = if flat.length() > speed * TICK_DT {
@@ -418,4 +419,29 @@ fn helicopter_guns_down_enemies_in_the_open() {
         }
     }
     assert!(deaths(&g, foe) > before, "the door gun killed the enemy");
+}
+
+#[test]
+fn killstreaks_follow_the_tuning() {
+    let (mut g, me, foe) = duel();
+    // the radar after 2 kills instead of 3, and a weaker, quicker artillery
+    let mut t = g.tuning.clone();
+    t.streaks.uav_kills = 2;
+    t.streaks.artillery_shells = 2;
+    g.set_tuning(t);
+    for _ in 0..2 {
+        place(&mut g, foe, FOE_AT);
+        g.kill(foe, Some(me), Cause::World, false);
+    }
+    assert_eq!(g.p(me).unwrap().rewards, vec![Killstreak::Uav]);
+    give(&mut g, me, Killstreak::Artillery);
+    let before = g.blasts.len();
+    g.handle(
+        me,
+        C2S::UseKillstreak {
+            target: Some([FOE_AT.x, FOE_AT.z]),
+            pilot: false,
+        },
+    );
+    assert_eq!(g.blasts.len() - before, 2, "two shells");
 }

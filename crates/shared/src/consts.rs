@@ -57,9 +57,6 @@ pub const MELEE_RANGE: f32 = 1.8;
 pub const MELEE_DAMAGE: f32 = 135.0;
 pub const MELEE_COOLDOWN: f32 = 0.9;
 
-pub const UAV_DURATION: f32 = 30.0;
-pub const HELI_DURATION: f32 = 50.0;
-pub const HELI_HEALTH: f32 = 1500.0;
 pub const HELI_HEIGHT: f32 = 22.0;
 /// Firing an unsuppressed weapon shows you on enemy radar this long.
 pub const RADAR_PING_TIME: f32 = 1.2;

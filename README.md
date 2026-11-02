@@ -274,8 +274,11 @@
   tune mp5.ads_time 0.15           # швидший приціл у MP5
   tune grenade                     # гранати: дальність, запал, радіус, урон, відскок
   tune grenade.throw_speed 22      # гранати летять далі (дальність ≈ швидкість² / гравітація)
+  tune streaks                     # кілстріки: пороги вбивств, урон, тривалість, швидкості
+  tune streaks.heli_kills 10       # гелікоптер уже за 10 вбивств
+  tune streaks.fpv_blast_damage 300
   tune w1200.auto true             # автоматичний дробовик
-  tune reset m249                  # повернути заводські (або movement / all)
+  tune reset m249                  # повернути заводські (або movement / grenade / streaks / all)
   save                             # записати в server.json
   ```
 * **`server.json`**, розділ `tuning`: сервер записує туди всі значення, і їх можна редагувати
@@ -299,6 +302,16 @@
 | `fuse` | запал, с | 3.5 |
 | `radius` / `damage` | радіус вибуху (м) / урон в епіцентрі | 6.5 / 150 |
 | `bounce` | пружність відскоку (0 — граната «прилипає») | 0.4 |
+
+**Кілстріки** (`tune streaks`, розділ «Кілстріки» у веб-панелі, `tuning.streaks` у конфігу):
+для кожної нагороди — скільки вбивств поспіль вона коштує (`uav_kills`, `airstrike_kills`, …,
+`nrk_kills`; коло нагород — до найбільшого з порогів, потім з початку) і її сила:
+радар — `uav_time`; авіаудар — `airstrike_bombs/_radius/_damage/_delay`; артилерія —
+`artillery_shells/_radius/_damage/_spread/_delay/_interval`; гелікоптер — `heli_time/_health/
+_damage/_fire_interval/_spread`; FPV — `fpv_time/_health/_speed/_boost/_blast_radius/
+_blast_damage/_crash_speed/_arm_time`; бомбер — `bomber_time/_health/_speed/_bombs/_cooldown/
+_drop_radius/_drop_damage`; НРК — `nrk_time/_health/_speed/_damage/_fire_interval/_spread`.
+Повний список з поясненнями й діапазонами — `tune streaks`.
 
 Виміряно в тесті (кидок по рівній дорозі): граната зупиняється за 5 м при `throw_speed 9`,
 11,5 м при 17 (типово) і 21 м при 26. Боти рахують траєкторію під поточну швидкість кидка.

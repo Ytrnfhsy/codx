@@ -136,6 +136,7 @@ impl GameClient {
     pub fn update_piloting(&mut self, dt: f32, can_act: bool) {
         let key = |k: KeyCode| can_act && is_key_down(k);
         let link = self.eye();
+        let st = self.tuning.streaks.clone();
         let Some(p) = &mut self.piloting else { return };
         let mut fwd = 0.0;
         let mut right = 0.0;
@@ -178,14 +179,14 @@ impl GameClient {
                 if boost {
                     keys |= keys::BOOST;
                 }
-                let target = fpv_target(p.yaw, p.pitch, fwd, right, up, boost);
+                let target = fpv_target(&st, p.yaw, p.pitch, fwd, right, up, boost);
                 let vel = fpv_accel(p.vel, target, dt);
                 let (to, left, impact) = fpv_move(&self.world, p.pos, vel, dt);
                 p.pos = to;
                 p.vel = left;
                 p.speed = left.length();
                 // hitting something hard ends it: a blast once armed, a broken drone before
-                if impact >= FPV_CRASH_SPEED {
+                if impact >= st.fpv_crash_speed {
                     keys |= keys::CRASH;
                 }
                 // bank into slides and turns like a real quad
@@ -213,13 +214,23 @@ impl GameClient {
                 p.signal += (want.clamp(0.1, 1.0) - p.signal) * (dt * 2.5).min(1.0);
             }
             VehicleKind::Bomber => {
-                p.pos = bomber_step(p.pos, p.yaw, fwd, right, dt, self.map.min, self.map.max);
+                p.pos = bomber_step(
+                    st.bomber_speed,
+                    p.pos,
+                    p.yaw,
+                    fwd,
+                    right,
+                    dt,
+                    self.map.min,
+                    self.map.max,
+                );
             }
             VehicleKind::Nrk => {
                 let mut t = dt;
                 while t > 0.0 {
                     let h = t.min(1.0 / 60.0);
                     nrk_step(
+                        st.nrk_speed,
                         &self.world,
                         &mut p.body,
                         fwd,
@@ -293,13 +304,14 @@ impl GameClient {
         let Some(p) = &self.piloting else { return };
         let (w, h) = (screen_width(), screen_height());
         let (cx, cy) = (w / 2.0, h / 2.0);
-        let dur = p.kind.duration();
+        let st = &self.tuning.streaks;
+        let dur = p.kind.duration(st);
         let left = p.time_left / dur;
         match p.kind {
             VehicleKind::Fpv => self.draw_fpv_video(ui, p, left),
             VehicleKind::Bomber => {
                 // the red ring on the ground is the sight; bombs left under the top band
-                for k in 0..BOMBER_DROPS {
+                for k in 0..st.bomber_bombs {
                     let c = if k < p.ammo {
                         Color::from_rgba(150, 170, 100, 255)
                     } else {
@@ -332,7 +344,7 @@ impl GameClient {
         let tc = if left < 0.25 { BAD } else { TEXT };
         let t = tr!("{:.0} с", "{:.0} s", p.time_left.ceil());
         ui.shadowed(&t, bx + bw - 12.0 - ui.width(&t, 18, true), 66.0, 18, tc);
-        let hp = (p.hp / p.kind.health()).clamp(0.0, 1.0);
+        let hp = (p.hp / p.kind.health(st)).clamp(0.0, 1.0);
         draw_rectangle(
             bx + 12.0,
             78.0,
@@ -434,7 +446,7 @@ impl GameClient {
             18,
             TEXT,
         );
-        if p.age < FPV_ARM_TIME {
+        if p.age < self.tuning.streaks.fpv_arm_time {
             ui.centered(
                 toon_shared::lang::t("ЗАРЯД ЗВОДИТЬСЯ…", "ARMING…"),
                 cx,

@@ -1032,7 +1032,7 @@ impl GameClient {
             );
         }
         // killstreak
-        let (next, left) = Killstreak::next_after(self.me.streak as u32);
+        let (next, left) = Killstreak::next_after(self.me.streak as u32, &self.tuning.streaks);
         let streak_txt = tr!(
             "Серія: {} (до «{}» {})",
             "Streak: {} ({} in {})",

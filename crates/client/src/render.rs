@@ -351,7 +351,7 @@ pub fn render_world(
                 let pulse = 1.0 + 0.15 * ((now * 5.0).sin() as f32);
                 for k in 0..12 {
                     let a = k as f32 * std::f32::consts::TAU / 12.0;
-                    let r = toon_shared::vehicles::DROP_RADIUS * 0.5 * pulse;
+                    let r = g.tuning.streaks.bomber_drop_radius * 0.5 * pulse;
                     let c = at + vec3(a.cos() * r, 0.08, a.sin() * r);
                     m.fill.add_box_ex(
                         &(Mat4::from_translation(c) * Mat4::from_rotation_y(-a)),

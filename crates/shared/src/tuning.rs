@@ -137,6 +137,65 @@ tuned! {
     }
 }
 
+tuned! {
+    /// Killstreaks: how many kills each takes and how strong it is.
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(default)]
+    pub struct StreakTuning {
+        uav_kills: u16 = 3, [1.0, 100.0], "Радар: вбивств поспіль, щоб отримати";
+        airstrike_kills: u16 = 6, [1.0, 100.0], "Авіаудар: вбивств поспіль";
+        artillery_kills: u16 = 9, [1.0, 100.0], "Артилерія: вбивств поспіль";
+        heli_kills: u16 = 12, [1.0, 100.0], "Гелікоптер: вбивств поспіль";
+        fpv_kills: u16 = 15, [1.0, 100.0], "FPV-дрон: вбивств поспіль";
+        bomber_kills: u16 = 18, [1.0, 100.0], "Дрон-бомбер: вбивств поспіль";
+        nrk_kills: u16 = 21, [1.0, 100.0], "НРК: вбивств поспіль";
+
+        uav_time: f32 = 30.0, [3.0, 300.0], "Радар: тривалість, с";
+
+        airstrike_bombs: u8 = 9, [1.0, 40.0], "Авіаудар: кількість бомб";
+        airstrike_radius: f32 = 7.0, [1.0, 30.0], "Авіаудар: радіус вибуху бомби, м";
+        airstrike_damage: f32 = 190.0, [1.0, 1000.0], "Авіаудар: урон бомби в епіцентрі";
+        airstrike_delay: f32 = 2.6, [0.0, 15.0], "Авіаудар: затримка до першої бомби, с";
+
+        artillery_shells: u8 = 14, [1.0, 60.0], "Артилерія: кількість снарядів";
+        artillery_radius: f32 = 5.5, [1.0, 30.0], "Артилерія: радіус вибуху снаряда, м";
+        artillery_damage: f32 = 150.0, [1.0, 1000.0], "Артилерія: урон снаряда в епіцентрі";
+        artillery_spread: f32 = 9.0, [1.0, 50.0], "Артилерія: розкид по площі, м";
+        artillery_delay: f32 = 3.0, [0.0, 15.0], "Артилерія: затримка до першого снаряда, с";
+        artillery_interval: f32 = 0.32, [0.02, 3.0], "Артилерія: інтервал між снарядами, с";
+
+        heli_time: f32 = 50.0, [5.0, 300.0], "Гелікоптер: тривалість, с";
+        heli_health: f32 = 1500.0, [1.0, 20000.0], "Гелікоптер: здоров'я";
+        heli_damage: f32 = 22.0, [1.0, 500.0], "Гелікоптер: урон кулі";
+        heli_fire_interval: f32 = 0.11, [0.02, 3.0], "Гелікоптер: інтервал між пострілами, с";
+        heli_spread: f32 = 0.045, [0.0, 0.5], "Гелікоптер: розкид куль (радіани)";
+
+        fpv_time: f32 = 30.0, [3.0, 300.0], "FPV-дрон: батарея, с";
+        fpv_health: f32 = 40.0, [1.0, 5000.0], "FPV-дрон: здоров'я";
+        fpv_speed: f32 = 20.0, [2.0, 80.0], "FPV-дрон: крейсерська швидкість (W), м/с";
+        fpv_boost: f32 = 32.0, [2.0, 100.0], "FPV-дрон: швидкість з газом (Shift), м/с";
+        fpv_blast_radius: f32 = 6.5, [1.0, 30.0], "FPV-дрон: радіус вибуху, м";
+        fpv_blast_damage: f32 = 230.0, [1.0, 2000.0], "FPV-дрон: урон вибуху в епіцентрі";
+        fpv_crash_speed: f32 = 3.0, [0.5, 50.0], "FPV-дрон: швидкість удару, від якої він вибухає, м/с";
+        fpv_arm_time: f32 = 0.7, [0.0, 10.0], "FPV-дрон: зведення заряду після злету, с";
+
+        bomber_time: f32 = 45.0, [5.0, 300.0], "Дрон-бомбер: тривалість, с";
+        bomber_health: f32 = 220.0, [1.0, 10000.0], "Дрон-бомбер: здоров'я";
+        bomber_speed: f32 = 11.0, [1.0, 60.0], "Дрон-бомбер: швидкість, м/с";
+        bomber_bombs: u8 = 6, [1.0, 40.0], "Дрон-бомбер: кількість бомб";
+        bomber_cooldown: f32 = 0.9, [0.05, 10.0], "Дрон-бомбер: пауза між скидами, с";
+        bomber_drop_radius: f32 = 5.0, [1.0, 30.0], "Дрон-бомбер: радіус вибуху бомби, м";
+        bomber_drop_damage: f32 = 175.0, [1.0, 2000.0], "Дрон-бомбер: урон бомби в епіцентрі";
+
+        nrk_time: f32 = 60.0, [5.0, 600.0], "НРК: тривалість, с";
+        nrk_health: f32 = 700.0, [1.0, 20000.0], "НРК: здоров'я";
+        nrk_speed: f32 = 5.0, [0.5, 20.0], "НРК: швидкість, м/с";
+        nrk_damage: f32 = 20.0, [1.0, 500.0], "НРК: урон кулі";
+        nrk_fire_interval: f32 = 0.1, [0.02, 3.0], "НРК: інтервал між пострілами, с";
+        nrk_spread: f32 = 0.022, [0.0, 0.5], "НРК: розкид куль (радіани)";
+    }
+}
+
 impl GrenadeTuning {
     /// Approximate max throw distance on flat ground (45°), metres.
     pub fn max_range(&self, gravity: f32) -> f32 {
@@ -246,6 +305,7 @@ impl WeaponStats {
 pub struct Tuning {
     pub movement: MoveTuning,
     pub grenade: GrenadeTuning,
+    pub streaks: StreakTuning,
     /// Keyed by [`WeaponId::key`] for readable configs.
     pub weapons: BTreeMap<String, WeaponStats>,
     /// Fast lookup by weapon id, rebuilt by [`Tuning::finalize`].
@@ -267,6 +327,7 @@ impl Default for Tuning {
         let mut t = Tuning {
             movement: MoveTuning::default(),
             grenade: GrenadeTuning::default(),
+            streaks: StreakTuning::default(),
             weapons,
             cache: Vec::new(),
         };
@@ -281,6 +342,7 @@ impl Tuning {
     pub fn finalize(&mut self) {
         self.movement.clamp_all();
         self.grenade.clamp_all();
+        self.streaks.clamp_all();
         self.weapons.retain(|k, _| WeaponId::from_key(k).is_some());
         for d in WEAPONS.iter() {
             self.weapons

@@ -316,6 +316,7 @@ impl Game {
         if let Some(a) = attacker {
             if a != victim {
                 let mut reward: Option<Killstreak> = None;
+                let streaks = self.tuning.streaks.clone();
                 let mut popup = None;
                 if let Some(k) = self.pm(a) {
                     killer_name = k.name.clone();
@@ -333,7 +334,7 @@ impl Game {
                                 ("Вбивство", "Kill")
                             },
                         ));
-                        reward = Killstreak::for_streak(k.streak);
+                        reward = Killstreak::for_streak(k.streak, &streaks);
                         if let Some(r) = reward {
                             if !k.rewards.contains(&r) {
                                 k.rewards.push(r);
@@ -659,7 +660,7 @@ impl Game {
         let name = p.name.clone();
         match k {
             Killstreak::Uav => {
-                self.uav_until[team.index()] = time + UAV_DURATION as f64;
+                self.uav_until[team.index()] = time + self.tuning.streaks.uav_time as f64;
             }
             Killstreak::Airstrike => {
                 let Some([tx, tz]) = target else { return };
@@ -676,8 +677,11 @@ impl Game {
                     dir = vec3(1.0, 0.0, 0.0);
                 }
                 let dir = dir.normalize();
-                for i in 0..9 {
-                    let off = (i as f32 - 4.0) * 2.8 + self.rng.range(-0.6, 0.6);
+                let st = self.tuning.streaks.clone();
+                let n = st.airstrike_bombs as usize;
+                for i in 0..n {
+                    // a line of bombs centred on the target, ~2.8 m apart
+                    let off = (i as f32 - (n as f32 - 1.0) / 2.0) * 2.8 + self.rng.range(-0.6, 0.6);
                     let side = vec3(-dir.z, 0.0, dir.x) * self.rng.range(-2.0, 2.0);
                     let mut p = tgt + dir * off + side;
                     p.y = self
@@ -686,10 +690,10 @@ impl Game {
                         .unwrap_or(0.0)
                         + 0.3;
                     self.blasts.push(PendingBlast {
-                        at: time + 2.6 + i as f64 * 0.1,
+                        at: time + st.airstrike_delay as f64 + i as f64 * 0.1,
                         pos: p,
-                        radius: 7.0,
-                        damage: 190.0,
+                        radius: st.airstrike_radius,
+                        damage: st.airstrike_damage,
                         owner: Some(id),
                         cause: Cause::Airstrike,
                     });
@@ -705,9 +709,10 @@ impl Game {
                 let Some([tx, tz]) = target else { return };
                 let tx = tx.clamp(self.map.min.x, self.map.max.x);
                 let tz = tz.clamp(self.map.min.y, self.map.max.y);
-                let spread = 9.0;
+                let st = self.tuning.streaks.clone();
+                let spread = st.artillery_spread;
                 // a barrage: shells land one after another over a few seconds
-                for k in 0..14 {
+                for k in 0..st.artillery_shells {
                     let a = self.rng.range(0.0, std::f32::consts::TAU);
                     let r = spread * self.rng.f32().sqrt();
                     let x = tx + a.cos() * r;
@@ -718,10 +723,13 @@ impl Game {
                         .unwrap_or(0.0)
                         + 0.3;
                     self.blasts.push(PendingBlast {
-                        at: time + 3.0 + k as f64 * 0.32 + self.rng.range(0.0, 0.15) as f64,
+                        at: time
+                            + st.artillery_delay as f64
+                            + k as f64 * st.artillery_interval as f64
+                            + self.rng.range(0.0, 0.15) as f64,
                         pos: vec3(x, y, z),
-                        radius: 5.5,
-                        damage: 150.0,
+                        radius: st.artillery_radius,
+                        damage: st.artillery_damage,
                         owner: Some(id),
                         cause: Cause::Artillery,
                     });
@@ -754,8 +762,8 @@ impl Game {
                     angle: 0.0,
                     pos: vec3(c.x, HELI_HEIGHT, c.y),
                     yaw: 0.0,
-                    hp: HELI_HEALTH,
-                    until: time + HELI_DURATION as f64,
+                    hp: self.tuning.streaks.heli_health,
+                    until: time + self.tuning.streaks.heli_time as f64,
                     next_shot: time + 2.0,
                     next_target: time,
                     target: None,
@@ -775,6 +783,7 @@ impl Game {
 
     pub fn update_helis(&mut self, dt: f32) {
         let time = self.time;
+        let heli_interval = self.tuning.streaks.heli_fire_interval as f64;
         let c = self.map.center();
         let radius = (self.map.size().min_element() * 0.28).max(8.0);
         let mut shots: Vec<(u8, Vec3, Vec3)> = Vec::new();
@@ -819,7 +828,7 @@ impl Game {
                     let d = tp - h.pos;
                     h.yaw = toon_shared::yaw_of(d);
                     if time >= h.next_shot {
-                        h.next_shot = time + 0.11;
+                        h.next_shot = time + heli_interval;
                         // the gun fires from just outside the helicopter's own hit
                         // sphere: from inside it every bullet "hit" the helicopter
                         let muzzle = h.pos + d.normalize_or_zero() * (HELI_HIT_RADIUS + 0.3);
@@ -845,7 +854,7 @@ impl Game {
         }
         self.helis.retain(|h| time < h.until);
         for (owner, from, to) in shots {
-            let spread = 0.045;
+            let spread = self.tuning.streaks.heli_spread;
             let d = (to - from).normalize();
             let d = (d + vec3(
                 self.rng.range(-spread, spread),
@@ -863,7 +872,7 @@ impl Game {
                     self.damage(
                         v,
                         if owner_present { Some(owner) } else { None },
-                        22.0,
+                        self.tuning.streaks.heli_damage,
                         Cause::Helicopter,
                         false,
                         from,
