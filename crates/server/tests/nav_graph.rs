@@ -113,13 +113,14 @@ fn bodies_can_walk_up_to_high_ground() {
         (MapId::Site, [-4.0, 6.8, -3.5]),
         (MapId::Site, [-22.3, 3.4, -16.0]),
         (MapId::Site, [-29.0, 6.8, -16.0]),
-        (MapId::Market, [33.0, 6.8, -13.0]),
-        (MapId::Market, [51.0, 3.4, 6.8]),
+        (MapId::Market, [27.5, 6.8, -11.25]),
+        (MapId::Market, [-27.5, 6.8, -11.25]),
+        (MapId::Market, [43.0, 3.4, 5.8]),
         // up ladders
-        (MapId::Market, [32.0, 4.55, 13.0]),
-        (MapId::Market, [-32.0, 4.55, -13.0]),
-        (MapId::Market, [35.0, 6.35, 33.0]),
-        (MapId::Market, [-52.0, 4.55, 13.0]),
+        (MapId::Market, [27.0, 4.55, 11.25]),
+        (MapId::Market, [-41.0, 4.55, -11.25]),
+        (MapId::Market, [-29.0, 4.35, 11.25]),
+        (MapId::Market, [28.5, 6.35, 27.5]),
     ];
     for &(id, p) in spots {
         let m = toon_shared::maps::build(id);
@@ -141,11 +142,59 @@ fn bodies_climb_down_ladders_too() {
     let w = World::from_map(&m);
     let nav = Nav::build(&m, &w);
     // the shop roof is 4.55 m up: too high to jump, so the way down is the ladder
-    let from = glam::vec3(32.0, 4.56, 13.0);
-    let to = glam::vec3(32.0, 0.0, 0.0);
+    let from = glam::vec3(27.0, 4.56, 11.25);
+    let to = glam::vec3(27.0, 0.0, 0.0);
     let end = walk(&m, &w, &nav, from, to);
     assert!(
         end.y < 0.3 && glam::vec3(end.x - to.x, 0.0, end.z - to.z).length() < 1.5,
         "walker got stuck at {end:?}"
     );
+}
+
+/// Market's two sides are built differently but must play the same: from each team's
+/// yard the walks to the bomb, to its own site, to the enemy site and up to its high
+/// house are about as long.
+#[test]
+fn market_sides_are_equally_far() {
+    let m = toon_shared::maps::build(MapId::Market);
+    let w = World::from_map(&m);
+    let nav = Nav::build(&m, &w);
+    let len = |a: glam::Vec3, b: glam::Vec3| -> f32 {
+        let path = nav.path(a, b).expect("path");
+        let mut l = 0.0;
+        let mut p = a;
+        for q in path {
+            l += p.distance(q);
+            p = q;
+        }
+        l
+    };
+    // allies (0) live in the west and defend sites[0]; axis (1) the east
+    let high = [
+        glam::vec3(-27.5, 6.8, -11.25),
+        glam::vec3(27.5, 6.8, -11.25),
+    ];
+    let mut rows = Vec::new();
+    for team in 0..2 {
+        let mut sum = [0.0f32; 4];
+        for s in &m.spawns[team] {
+            sum[0] += len(s.pos, m.bomb);
+            sum[1] += len(s.pos, m.sites[team]);
+            sum[2] += len(s.pos, m.sites[1 - team]);
+            sum[3] += len(s.pos, high[team]);
+        }
+        let n = m.spawns[team].len() as f32;
+        rows.push(sum.map(|x| x / n));
+    }
+    println!("west {:?}\neast {:?}", rows[0], rows[1]);
+    for (k, what) in ["bomb", "own site", "enemy site", "own high house"]
+        .iter()
+        .enumerate()
+    {
+        let (a, b) = (rows[0][k], rows[1][k]);
+        assert!(
+            (a - b).abs() / a.max(b) < 0.08,
+            "{what}: west walks {a:.0} m, east {b:.0} m"
+        );
+    }
 }

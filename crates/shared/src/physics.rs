@@ -509,10 +509,11 @@ impl Body {
     }
 
     /// Ladder climbing. W climbs towards where you face (up when facing the wall, down
-    /// when facing away from it), S the other way, A/D shuffle sideways, jump lets go.
-    /// You get on by pressing W/S at its foot or by stepping onto it from the roof, and off
-    /// at the top by climbing on (you step onto the roof), at the bottom by reaching the
-    /// ground. Returns true if it moved the body.
+    /// when facing away from it or along it), S the other way, A/D shuffle sideways, jump
+    /// lets go. You get on by walking at its foot facing it, or by stepping off the roof
+    /// onto it; walking past its foot does not grab it. You get off at the top by climbing
+    /// on (you step onto the roof) and at the bottom by reaching the ground. Returns true if
+    /// it moved the body.
     fn climb(&mut self, world: &World, inp: &MoveInput, t: &MoveTuning, dt: f32) -> bool {
         const SPEED: f32 = 3.2;
         let Some(l) = world.ladder_at(self.pos).copied() else {
@@ -525,13 +526,22 @@ impl Body {
         }
         let (fwd, right) = yaw_basis(inp.yaw);
         let toward = -l.out;
-        let facing_wall = fwd.dot(toward) >= 0.0;
-        let up = inp.forward * if facing_wall { 1.0 } else { -1.0 };
+        // facing the wall W climbs, facing away (or along the wall: heading off somewhere)
+        // it goes down; walking past the foot of a ladder does not grab it
+        let facing = fwd.dot(toward);
+        let up = if facing > 0.3 {
+            inp.forward
+        } else if facing < -0.3 {
+            -inp.forward
+        } else {
+            -inp.forward.abs()
+        };
         if !self.climbing {
-            // grab it: pressing a key at its foot, or falling past it
-            let grab = (self.on_ground
-                && inp.forward.abs() > 0.1
-                && (up > 0.0 || self.pos.y > l.base.y + 0.5))
+            // grab it: walking at it from below, stepping off the roof onto it, or falling
+            // past it
+            let at_foot = self.pos.y < l.base.y + 0.5;
+            let grab = (self.on_ground && at_foot && facing > 0.5 && inp.forward > 0.1)
+                || (self.on_ground && !at_foot && facing < -0.3 && inp.forward > 0.1)
                 || (!self.on_ground && self.vel.y < 0.0 && self.pos.y < l.top - 0.3);
             if !grab {
                 return false;
@@ -837,6 +847,18 @@ mod tests {
                 body.step(&w, &inp, &t, 1.0 / 60.0);
             }
         };
+        // walking along the wall right past the ladder's foot does not grab it
+        let mut passer = Body {
+            pos: vec3(-0.9, 0.0, -3.0),
+            on_ground: true,
+            ..Default::default()
+        };
+        run(&mut passer, std::f32::consts::PI, 1.0, 1.2);
+        assert!(
+            passer.pos.z > 1.0 && passer.pos.y < 0.05,
+            "walked past: {}",
+            passer.pos
+        );
         // climb until standing on the roof
         let mut secs = 0.0;
         while !(body.on_ground && body.pos.y > top - 0.05 && body.pos.x > 0.3) {

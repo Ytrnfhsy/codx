@@ -1,23 +1,28 @@
-//! «Ринок» — a market district, 200 × 104 m.
+//! «Ринок» — a market district, 168 × 88 m.
 //!
 //! A main street runs west–east through a market square full of stalls and carts. Rows of
 //! shops and houses line it, with alleys between them; behind them run back lanes hung
-//! with laundry, then warehouses, apartment blocks and courtyards (the Sabotage sites),
-//! and parking strips along the outer walls. The teams start at bus stations at either
-//! end. The map is point-symmetric (east half turned round = west half), so both sides
-//! get the same streets.
+//! with laundry, then warehouses, houses and fenced courtyards (the Sabotage sites), and
+//! strips along the outer walls. The teams start in yards at either end.
 //!
-//! Awnings, sheets and canopies are cloth and stall boards, carts and plank fences are
-//! wood: bullets go through both. One-storey shops and warehouses have ladders up to
-//! their flat roofs.
+//! The two sides are built differently but play the same: from each yard three routes
+//! lead in (the street and both back lanes), each side has its site courtyard, one house
+//! with a walled roof over the street, a warehouse to go through and about six roofs
+//! reached by ladders, all at the same distances from its yard and from the bomb. The
+//! east has shops under awnings, stall rows, a fountain and a bus station; the west a
+//! covered market hall, garages, a café terrace, a well and a lorry depot, and its site
+//! and warehouse sit across the street from where the east has them.
+//!
+//! Awnings, sheets, canopies and lorry covers are cloth; stall boards, carts, tables and
+//! plank fences are wood: bullets go through both.
 
 use crate::map::{door, pal, wide_door, window, Map, MapBuilder, MapId, Opening, Side, Spawn};
 use crate::props::Tower;
 use glam::{vec2, vec3, Vec3};
 use std::f32::consts::FRAC_PI_2;
 
-const HALF_X: f32 = 100.0;
-const HALF_Z: f32 = 52.0;
+const HALF_X: f32 = 84.0;
+const HALF_Z: f32 = 44.0;
 
 /// Tomatoes, oranges, cabbages, lemons, aubergines, melons.
 const PRODUCE: [[u8; 3]; 6] = [
@@ -692,257 +697,531 @@ fn courtyard(
     site
 }
 
-/// The east half (x > 0); the west half is the same turned round.
-fn half(b: &mut MapBuilder, h: Half) -> Vec3 {
-    let east = h.s > 0.0;
-    // ---- market square (x 0..24): stalls, carts, a fountain
-    for (i, &x) in [5.0f32, 11.0, 17.0].iter().enumerate() {
-        for (j, &z) in [10.0f32, 15.5, -10.0, -15.5].iter().enumerate() {
-            stall(b, h, x, z, true, i * 4 + j + if east { 0 } else { 2 });
+/// Open market hall: pillars round the edge, a flat roof (with a ladder up its back
+/// edge) and stalls underneath.
+fn market_hall(b: &mut MapBuilder, h: Half, l: Lot, ladder_x: f32) {
+    let height = 4.0;
+    let (x0, z0, x1, z1) = l.rect();
+    let mut x = x0 + 0.3;
+    while x <= x1 - 0.2 {
+        for z in [z0 + 0.3, z1 - 0.3] {
+            h.block(
+                b,
+                x - 0.25,
+                0.0,
+                z - 0.25,
+                x + 0.25,
+                height,
+                z + 0.25,
+                pal::WALL_WHITE,
+            );
+        }
+        x += (x1 - x0 - 0.6) / 3.0;
+    }
+    h.block(b, x0, height, z0, x1, height + 0.35, z1, pal::ROOF_RED);
+    let mid = l.mid_z();
+    for (k, sx) in [x0 + 3.5, x0 + 7.5, x1 - 3.0].iter().enumerate() {
+        stall(b, h, *sx, mid, true, k + 3);
+    }
+    let face = h.v(vec3(ladder_x, 0.0, l.back));
+    b.ladder(face, h.v(vec3(0.0, 0.0, -l.out())), height + 0.35);
+}
+
+/// Small garage with a wide door to the street and a car inside.
+fn garage(b: &mut MapBuilder, h: Half, l: Lot, color: [u8; 3], car: [u8; 3]) {
+    let cx = (l.x0 + l.x1) / 2.0;
+    let ops = h.ops(&[(l.front_side(), wide_door(cx)), (l.back_side(), window(cx))]);
+    let (x0, z0, x1, z1) = l.rect();
+    let (a, bz, c, d) = h.rect(x0, z0, x1, z1);
+    b.building(a, bz, c, d, 0.0, 3.4, &ops, color, Some(pal::ROOF_GREY));
+    let (px, pz) = h.p(cx, l.mid_z());
+    b.car(px, pz, false, car);
+}
+
+/// Café terrace in front of a shop: wooden tables under cloth parasols.
+fn terrace(b: &mut MapBuilder, h: Half, x0: f32, x1: f32, z: f32) {
+    let mut x = x0 + 1.2;
+    let mut k = 0;
+    while x < x1 - 0.8 {
+        h.wood(b, x - 0.5, 0.0, z - 0.5, x + 0.5, 0.8, z + 0.5, pal::WOOD);
+        h.block(
+            b,
+            x - 0.05,
+            0.8,
+            z - 0.05,
+            x + 0.05,
+            2.3,
+            z + 0.05,
+            pal::METAL,
+        );
+        h.cloth(
+            b,
+            x - 1.0,
+            2.3,
+            z - 1.0,
+            x + 1.0,
+            2.38,
+            z + 1.0,
+            CANVAS[k % CANVAS.len()],
+        );
+        x += 2.6;
+        k += 1;
+    }
+}
+
+/// Well with a little roof (the west square's centrepiece).
+fn well(b: &mut MapBuilder, h: Half, cx: f32, cz: f32) {
+    h.block(b, cx - 1.1, 0.0, cz - 1.1, cx + 1.1, 0.9, cz + 1.1, STONE);
+    h.decal(b, cx - 0.8, cz - 0.8, cx + 0.8, cz + 0.8, 0.9, WATER);
+    for (sx, sz) in [(-1.0f32, -1.0f32), (1.0, 1.0)] {
+        h.block(
+            b,
+            cx + sx * 0.95 - 0.08,
+            0.9,
+            cz + sz * 0.95 - 0.08,
+            cx + sx * 0.95 + 0.08,
+            2.6,
+            cz + sz * 0.95 + 0.08,
+            pal::TRUNK,
+        );
+    }
+    h.block(
+        b,
+        cx - 1.4,
+        2.6,
+        cz - 1.4,
+        cx + 1.4,
+        2.8,
+        cz + 1.4,
+        pal::ROOF_RED,
+    );
+}
+
+/// Lorry: cab and a canvas-covered cargo box (cloth: bullets go through the back).
+fn lorry(b: &mut MapBuilder, h: Half, cx: f32, cz: f32, c: [u8; 3]) {
+    h.block(
+        b,
+        cx - 1.2,
+        0.0,
+        cz - 4.2,
+        cx + 1.2,
+        0.6,
+        cz + 4.2,
+        pal::DARK,
+    );
+    h.block(b, cx - 1.2, 0.6, cz + 2.4, cx + 1.2, 2.8, cz + 4.2, c);
+    h.detail(
+        b,
+        cx - 1.22,
+        1.6,
+        cz + 3.3,
+        cx + 1.22,
+        2.5,
+        cz + 4.22,
+        pal::WINDOW,
+    );
+    h.wood(
+        b,
+        cx - 1.2,
+        0.6,
+        cz - 4.2,
+        cx + 1.2,
+        1.2,
+        cz + 2.3,
+        pal::WOOD,
+    );
+    h.cloth(
+        b,
+        cx - 1.2,
+        1.2,
+        cz - 4.2,
+        cx + 1.2,
+        3.0,
+        cz + 2.3,
+        [120, 130, 90],
+    );
+}
+
+// The map in numbers (half of it, x > 0, z > 0 towards the team's "south" in local
+// coordinates): street |z| ≤ 5, sidewalks to 6.5, the front rows 6.5..16, back lanes
+// 16..21, the back rows 21..35, parking 35..44; the square x < 20, the rows 22..68, the
+// team's yard 70..84.
+const ROW_A: (f32, f32) = (6.5, 16.0);
+const LANE: (f32, f32) = (16.0, 21.0);
+
+fn row_a(x0: f32, x1: f32, north: bool) -> Lot {
+    let s = if north { -1.0 } else { 1.0 };
+    Lot {
+        x0,
+        x1,
+        front: s * ROW_A.0,
+        back: s * ROW_A.1,
+    }
+}
+
+fn row_b(x0: f32, x1: f32, north: bool, depth: f32) -> Lot {
+    let s = if north { -1.0 } else { 1.0 };
+    Lot {
+        x0,
+        x1,
+        front: s * LANE.1,
+        back: s * (LANE.1 + depth),
+    }
+}
+
+/// The east side (the axis team's): shops under awnings, a square of stall rows and a
+/// fountain, a bus station.
+fn east(b: &mut MapBuilder) -> Vec3 {
+    let h = Half { s: 1.0 };
+    // ---- the square's east part: four rows of stalls, a fountain, carts
+    for (i, &x) in [4.5f32, 10.0, 15.5].iter().enumerate() {
+        for (j, &z) in [9.5f32, 13.5, -9.5, -13.5].iter().enumerate() {
+            stall(b, h, x, z, true, i * 4 + j);
         }
     }
-    fountain(b, h, 0.5, 12.8);
-    cart(b, h, 8.0, 7.6, true, 1);
-    cart(b, h, 21.0, -7.4, true, 3);
-    cart(b, h, 22.5, 12.8, false, 4);
-    for (x, z) in [(14.0, 18.0), (2.5, -18.2)] {
-        let (px, pz) = h.p(x, z);
-        b.crate_(px, pz, 1.0, 0.0);
-    }
-    b.tree(h.x(23.0), h.x(17.5), false);
-    b.tree(h.x(23.0), h.x(-17.5), false);
+    fountain(b, h, 0.5, 11.5);
+    cart(b, h, 8.0, 6.9, true, 1);
+    cart(b, h, 18.0, -6.9, true, 3);
+    cart(b, h, 19.5, 11.5, false, 4);
+    b.tree(19.5, 15.0, false);
+    b.tree(19.5, -15.0, false);
 
-    // ---- main street (z −6..6): parked cars, a kiosk at the square's corner
+    // ---- the street
     for (x, z, c) in [
-        (30.0, 4.6, pal::CAR_A),
-        (47.0, -4.6, pal::CAR_C),
-        (58.0, 4.6, pal::CAR_B),
-        (74.0, -4.6, pal::CAR_A),
-        (79.0, 4.6, pal::CAR_C),
+        (26.0, 3.8, pal::CAR_A),
+        (40.0, -3.8, pal::CAR_C),
+        (51.0, 3.8, pal::CAR_B),
+        (63.0, -3.8, pal::CAR_A),
+    ] {
+        b.car(x, z, true, c);
+    }
+    kiosk(b, h, 21.0, 3.8, pal::WALL_BLUE);
+    cart(b, h, 33.0, -4.0, true, 2);
+
+    // ---- front rows
+    shop(
+        b,
+        h,
+        row_a(22.0, 32.0, false),
+        pal::WALL_PINK,
+        pal::ROOF_RED,
+        Some(26.0),
+    );
+    house(
+        b,
+        h,
+        row_a(35.0, 45.0, false),
+        pal::WALL_BLUE,
+        pal::ROOF_GREY,
+        false,
+    );
+    shop(
+        b,
+        h,
+        row_a(48.0, 58.0, false),
+        pal::WALL_GREEN,
+        pal::ROOF_RED,
+        Some(54.0),
+    );
+    shop(
+        b,
+        h,
+        row_a(60.0, 69.0, false),
+        pal::WALL_TAN,
+        pal::ROOF_GREY,
+        None,
+    );
+    house(
+        b,
+        h,
+        row_a(22.0, 33.0, true),
+        pal::WALL_WHITE,
+        pal::ROOF_RED,
+        true,
+    );
+    shop(
+        b,
+        h,
+        row_a(36.0, 46.0, true),
+        pal::WALL_TAN,
+        pal::ROOF_GREY,
+        Some(40.0),
+    );
+    shop(
+        b,
+        h,
+        row_a(49.0, 59.0, true),
+        pal::WALL_PINK,
+        pal::ROOF_RED,
+        None,
+    );
+    shop(
+        b,
+        h,
+        row_a(60.0, 69.0, true),
+        pal::WALL_BLUE,
+        pal::ROOF_GREY,
+        Some(64.0),
+    );
+
+    // ---- back lanes
+    laundry(b, h, 33.5, 16.2, 20.8, 0);
+    laundry(b, h, 59.0, 16.2, 20.8, 1);
+    laundry(b, h, 47.5, -20.8, -16.2, 2);
+    laundry(b, h, 66.0, -20.8, -16.2, 3);
+    cart(b, h, 40.0, 18.5, true, 0);
+    cart(b, h, 56.0, -18.6, true, 5);
+    dumpster(b, h, 51.0, 19.9);
+    dumpster(b, h, 25.0, -19.9);
+    fence_x(b, h, 62.0, 66.0, 18.5);
+    fence_x(b, h, 43.0, 46.5, -18.5);
+    for (x, z, s) in [(29.0, 20.0, 1.1), (30.2, 20.1, 0.8), (53.0, -17.0, 1.0)] {
+        b.crate_(x, z, s, 0.0);
+    }
+
+    // ---- back rows: a warehouse, the site, houses
+    warehouse(b, h, row_b(22.0, 35.0, false, 13.0), pal::WALL_TAN);
+    let site = courtyard(b, h, 39.0, 51.0, 22.5, 33.5, pal::PAD_AXIS);
+    house(
+        b,
+        h,
+        row_b(55.0, 67.0, false, 12.0),
+        pal::WALL_GREEN,
+        pal::ROOF_RED,
+        false,
+    );
+    shop(
+        b,
+        h,
+        row_b(22.0, 31.0, true, 10.0),
+        pal::WALL_BLUE,
+        pal::ROOF_RED,
+        Some(27.0),
+    );
+    warehouse(b, h, row_b(35.0, 50.0, true, 13.0), pal::BRICK);
+    house(
+        b,
+        h,
+        row_b(54.0, 66.0, true, 12.0),
+        pal::WALL_PINK,
+        pal::ROOF_GREY,
+        false,
+    );
+
+    // ---- behind the square: planters, a kiosk
+    h.block(b, 3.0, 0.0, 26.0, 17.0, 0.9, 27.0, STONE);
+    kiosk(b, h, 10.0, -26.0, pal::WALL_GREEN);
+    dumpster(b, h, 14.0, 33.0);
+    cart(b, h, 6.0, -33.0, false, 2);
+
+    // ---- parking along the walls
+    for (x, z, c, along) in [
+        (28.0, 39.5, pal::CAR_B, false),
+        (34.0, 39.5, pal::CAR_C, false),
+        (48.0, 39.5, pal::CAR_A, false),
+        (62.0, 39.5, pal::CAR_B, true),
+        (36.0, -39.5, pal::CAR_A, false),
+        (58.0, -39.5, pal::CAR_C, false),
+    ] {
+        b.car(x, z, along, c);
+    }
+    b.container(66.0, -39.0, true, 0.0, pal::CONT_ORANGE);
+    for (x, z) in [(42.0, 41.5), (54.0, -41.5), (18.0, 38.0), (18.0, -38.0)] {
+        b.tree(x, z, false);
+    }
+
+    // ---- bus station: the team's yard
+    bus(b, h, 77.0, -12.0);
+    bus(b, h, 77.0, 14.0);
+    kiosk(b, h, 75.0, 28.0, pal::WALL_WHITE);
+    for z in [-26.0f32, 4.0, 30.0] {
+        b.barrier(71.0, z, false);
+    }
+    b.decal(70.0, -44.0, 84.0, 44.0, 0.0, pal::ASPHALT);
+    site
+}
+
+/// The west side (the allies'): the same routes and the same kinds of positions as the
+/// east, built differently: a covered market hall, garages, a café terrace, a well in the
+/// square, a lorry depot.
+/// Drawn in local coordinates turned round (x, z → −x, −z).
+fn west(b: &mut MapBuilder) -> Vec3 {
+    let h = Half { s: -1.0 };
+    // ---- the square's west part: long stall rows one way, a well and carts the other
+    for (i, &x) in [5.0f32, 10.0, 15.0].iter().enumerate() {
+        for (j, &z) in [9.2f32, 13.4].iter().enumerate() {
+            stall(b, h, x, z, false, i * 2 + j + 1);
+        }
+    }
+    well(b, h, 9.0, -11.5);
+    for (k, &x) in [4.0f32, 15.0].iter().enumerate() {
+        stall(b, h, x, -9.5, true, k + 4);
+        stall(b, h, x, -14.0, true, k + 6);
+    }
+    cart(b, h, 12.0, 7.0, true, 2);
+    cart(b, h, 3.0, -7.0, true, 4);
+    cart(b, h, 19.0, -11.0, false, 0);
+    cart(b, h, 19.0, 11.0, false, 1);
+    let (tx, tz) = h.p(1.5, 15.0);
+    b.tree(tx, tz, true);
+    let (tx, tz) = h.p(1.5, -15.0);
+    b.tree(tx, tz, true);
+
+    // ---- the street
+    for (x, z, c) in [
+        (24.0, -3.8, pal::CAR_B),
+        (37.0, 3.8, pal::CAR_A),
+        (47.0, -3.8, pal::CAR_C),
+        (60.0, 3.8, pal::CAR_B),
     ] {
         let (px, pz) = h.p(x, z);
         b.car(px, pz, true, c);
     }
-    kiosk(b, h, 25.5, 5.0, pal::WALL_BLUE);
-    cart(b, h, 38.0, -5.0, true, 2);
+    cart(b, h, 30.0, 4.0, true, 5);
+    let (bx, bz) = h.p(54.0, -3.0);
+    b.barrier(bx, bz, true);
 
-    // ---- row A (z 7.5..19 and −19..−7.5): shops and houses facing the street
-    let south_a = |x0, x1| Lot {
-        x0,
-        x1,
-        front: 7.5,
-        back: 19.0,
-    };
-    let north_a = |x0, x1| Lot {
-        x0,
-        x1,
-        front: -7.5,
-        back: -19.0,
-    };
-    shop(
-        b,
-        h,
-        south_a(26.0, 38.0),
-        pal::WALL_PINK,
-        pal::ROOF_RED,
-        Some(30.0),
-    );
+    // ---- front rows: the high house across the street from the east one's side
     house(
         b,
         h,
-        south_a(42.0, 54.0),
-        pal::WALL_BLUE,
-        pal::ROOF_GREY,
-        false,
-    );
-    shop(
-        b,
-        h,
-        south_a(58.0, 70.0),
-        pal::WALL_GREEN,
-        pal::ROOF_RED,
-        Some(66.0),
-    );
-    shop(
-        b,
-        h,
-        south_a(74.0, 84.0),
+        row_a(22.0, 33.0, false),
         pal::WALL_TAN,
-        pal::ROOF_GREY,
-        None,
-    );
-    house(
-        b,
-        h,
-        north_a(26.0, 40.0),
-        pal::WALL_WHITE,
         pal::ROOF_RED,
         true,
     );
     shop(
         b,
         h,
-        north_a(44.0, 56.0),
-        pal::WALL_TAN,
+        row_a(36.0, 46.0, false),
+        pal::WALL_GREEN,
         pal::ROOF_GREY,
-        Some(48.0),
+        Some(40.0),
     );
-    shop(
+    terrace(b, h, 36.0, 46.0, 5.6);
+    garage(b, h, row_a(49.0, 56.0, false), pal::WALL_WHITE, pal::CAR_C);
+    house(
         b,
         h,
-        north_a(60.0, 72.0),
+        row_a(58.0, 69.0, false),
         pal::WALL_PINK,
+        pal::ROOF_GREY,
+        false,
+    );
+    market_hall(b, h, row_a(22.0, 36.0, true), 26.0);
+    shop(
+        b,
+        h,
+        row_a(39.0, 49.0, true),
+        pal::WALL_BLUE,
         pal::ROOF_RED,
-        Some(68.0),
+        Some(45.0),
     );
     shop(
         b,
         h,
-        north_a(76.0, 84.0),
-        pal::WALL_BLUE,
+        row_a(52.0, 61.0, true),
+        pal::WALL_TAN,
         pal::ROOF_GREY,
         None,
     );
+    garage(b, h, row_a(63.0, 69.0, true), pal::BRICK, pal::CAR_A);
 
-    // ---- back lanes (z 19..25 and −25..−19): laundry, carts, fences, bins
-    laundry(b, h, 33.0, 19.2, 24.8, 0);
-    laundry(b, h, 63.0, 19.2, 24.8, 1);
-    laundry(b, h, 47.0, -24.8, -19.2, 2);
-    laundry(b, h, 77.0, -24.8, -19.2, 3);
-    cart(b, h, 40.0, 21.2, true, 0);
-    cart(b, h, 70.0, -22.6, true, 5);
-    dumpster(b, h, 55.0, 23.6);
-    dumpster(b, h, 28.0, -23.6);
-    dumpster(b, h, 82.0, 20.6);
-    fence_x(b, h, 72.0, 76.5, 22.0);
-    fence_x(b, h, 51.0, 55.0, -22.0);
-    for (x, z, s) in [
-        (36.0, 23.8, 1.2),
-        (37.2, 23.9, 0.9),
-        (60.0, -20.0, 1.1),
-        (84.0, -23.5, 1.2),
-    ] {
+    // ---- back lanes
+    laundry(b, h, 28.0, 16.2, 20.8, 2);
+    laundry(b, h, 52.5, 16.2, 20.8, 0);
+    laundry(b, h, 38.0, -20.8, -16.2, 1);
+    laundry(b, h, 62.0, -20.8, -16.2, 3);
+    cart(b, h, 45.0, 18.6, true, 3);
+    cart(b, h, 30.0, -18.5, true, 1);
+    dumpster(b, h, 64.0, 19.9);
+    dumpster(b, h, 50.0, -19.9);
+    fence_x(b, h, 33.0, 37.0, 18.5);
+    fence_x(b, h, 55.0, 59.0, -18.5);
+    for (x, z, s) in [(40.0, 20.0, 1.2), (24.0, -17.0, 1.0), (25.1, -17.1, 0.8)] {
         let (px, pz) = h.p(x, z);
         b.crate_(px, pz, s, 0.0);
     }
 
-    // ---- row B (z 25..43 and −43..−25): warehouses, apartments, a courtyard site
-    warehouse(
-        b,
-        h,
-        Lot {
-            x0: 26.0,
-            x1: 44.0,
-            front: 25.0,
-            back: 41.0,
-        },
-        pal::WALL_TAN,
-    );
-    let site = courtyard(
-        b,
-        h,
-        48.0,
-        62.0,
-        27.0,
-        40.0,
-        if east { pal::PAD_AXIS } else { pal::PAD_ALLIES },
-    );
-    house(
-        b,
-        h,
-        Lot {
-            x0: 66.0,
-            x1: 80.0,
-            front: 25.0,
-            back: 37.0,
-        },
-        pal::WALL_GREEN,
-        pal::ROOF_RED,
-        true,
-    );
+    // ---- back rows: shops, the site, a long warehouse
     shop(
         b,
         h,
-        Lot {
-            x0: 26.0,
-            x1: 38.0,
-            front: -25.0,
-            back: -37.0,
-        },
-        pal::WALL_BLUE,
+        row_b(22.0, 34.0, false, 10.0),
+        pal::WALL_WHITE,
         pal::ROOF_RED,
-        Some(34.0),
+        Some(30.0),
     );
-    warehouse(
-        b,
-        h,
-        Lot {
-            x0: 44.0,
-            x1: 62.0,
-            front: -25.0,
-            back: -41.0,
-        },
-        pal::BRICK,
-    );
+    let site = courtyard(b, h, 39.0, 51.0, 22.5, 33.5, pal::PAD_ALLIES);
     house(
         b,
         h,
-        Lot {
-            x0: 66.0,
-            x1: 78.0,
-            front: -25.0,
-            back: -37.0,
-        },
-        pal::WALL_PINK,
+        row_b(55.0, 67.0, false, 12.0),
+        pal::WALL_BLUE,
         pal::ROOF_GREY,
         false,
     );
+    warehouse(b, h, row_b(22.0, 40.0, true, 13.0), pal::WALL_GREEN);
     shop(
         b,
         h,
-        Lot {
-            x0: 80.0,
-            x1: 86.0,
-            front: -25.0,
-            back: -35.0,
-        },
-        pal::WALL_WHITE,
+        row_b(44.0, 54.0, true, 10.0),
+        pal::WALL_PINK,
+        pal::ROOF_GREY,
+        Some(49.0),
+    );
+    house(
+        b,
+        h,
+        row_b(57.0, 68.0, true, 12.0),
+        pal::WALL_TAN,
         pal::ROOF_RED,
-        None,
+        false,
     );
 
-    // ---- parking strips along the outer walls
-    for (x, z, c, along) in [
-        (30.0, 47.5, pal::CAR_B, false),
-        (36.0, 47.5, pal::CAR_C, false),
-        (54.0, 47.5, pal::CAR_A, false),
-        (72.0, 47.0, pal::CAR_B, true),
-        (40.0, -47.5, pal::CAR_A, false),
-        (66.0, -47.5, pal::CAR_C, false),
+    // ---- behind the square: a little park and a newsstand
+    for (x, z) in [(5.0, 27.0), (12.0, 31.0), (16.0, 25.0)] {
+        let (px, pz) = h.p(x, z);
+        b.tree(px, pz, false);
+    }
+    h.wood(b, 7.0, 0.0, 27.5, 10.0, 0.5, 28.1, pal::WOOD);
+    h.wood(b, 11.0, 0.0, 24.0, 14.0, 0.5, 24.6, pal::WOOD);
+    kiosk(b, h, 9.0, -27.0, pal::WALL_PINK);
+    for (x, z) in [(14.0, -30.0), (4.0, -24.0)] {
+        let (px, pz) = h.p(x, z);
+        b.crate_(px, pz, 1.2, 0.0);
+    }
+
+    // ---- outer strips: a car wreck lot one side, parked cars the other
+    for (x, z, c) in [
+        (30.0, 39.5, pal::CAR_C),
+        (44.0, 39.5, pal::CAR_A),
+        (60.0, 39.5, pal::CAR_B),
     ] {
         let (px, pz) = h.p(x, z);
-        b.car(px, pz, along, c);
+        b.car(px, pz, false, c);
     }
-    let (px, pz) = h.p(84.0, -47.0);
-    b.container(px, pz, true, 0.0, pal::CONT_ORANGE);
-    for (x, z) in [(46.0, 49.5), (62.0, -49.5), (22.0, 46.0), (22.0, -46.0)] {
-        b.tree(h.x(x), h.x(z), false);
+    for (x, z, c) in [(28.0, -39.0, pal::CONT_BLUE), (50.0, -39.0, pal::CONT_RED)] {
+        let (px, pz) = h.p(x, z);
+        b.container(px, pz, true, 0.0, c);
     }
-    // the square's back ends: low walls with planters
-    h.block(b, 4.0, 0.0, 30.0, 20.0, 0.9, 31.0, STONE);
-    h.block(b, 4.0, 0.0, -31.0, 20.0, 0.9, -30.0, STONE);
-    dumpster(b, h, 12.0, 38.0);
-    cart(b, h, 10.0, -36.0, false, 2);
+    let (px, pz) = h.p(40.0, -40.5);
+    b.burnt_car(px, pz, true);
+    let (px, pz) = h.p(62.0, -40.0);
+    b.tree(px, pz, false);
 
-    // ---- bus station at the end (x 86..100): the team's spawn
-    bus(b, h, 92.0, -14.0);
-    bus(b, h, 92.0, 16.0);
-    kiosk(b, h, 90.0, 33.0, pal::WALL_WHITE);
-    for z in [-30.0f32, 0.0, 30.0] {
-        let (px, pz) = h.p(87.0, z + 4.0);
+    // ---- lorry depot: the team's yard
+    lorry(b, h, 77.0, -14.0, pal::CONT_RED);
+    lorry(b, h, 77.0, 12.0, pal::CONT_BLUE);
+    let (px, pz) = h.p(76.0, 30.0);
+    b.container(px, pz, false, 0.0, pal::CONT_GREEN);
+    let (px, pz) = h.p(76.0, -30.0);
+    b.container(px, pz, false, 0.0, pal::CONT_YELLOW);
+    for z in [-4.0f32, 22.0] {
+        let (px, pz) = h.p(71.0, z);
         b.barrier(px, pz, false);
     }
-    h.decal(b, 86.0, -52.0, 100.0, 52.0, 0.0, pal::ASPHALT);
+    h.decal(b, 70.0, -44.0, 84.0, 44.0, 0.0, pal::CONCRETE_DARK);
     site
 }
 
@@ -951,23 +1230,23 @@ pub fn market() -> Map {
     let max = vec2(HALF_X, HALF_Z);
     let mut b = MapBuilder::new();
     b.ground_and_bounds(min, max, pal::DIRT, pal::WALL_TAN, 7.0);
-    // street, sidewalks and the square's paving
-    b.decal(-HALF_X, -6.0, HALF_X, 6.0, 0.0, pal::ASPHALT);
-    b.decal(-HALF_X, -7.5, HALF_X, -6.0, 0.01, pal::CONCRETE);
-    b.decal(-HALF_X, 6.0, HALF_X, 7.5, 0.01, pal::CONCRETE);
-    b.decal(-24.0, -19.0, 24.0, -7.5, 0.0, STONE);
-    b.decal(-24.0, 7.5, 24.0, 19.0, 0.0, STONE);
-    for z in [-1.0f32, 1.0] {
-        let z0 = z * 21.5;
-        b.decal(-86.0, z0 - 3.0, 86.0, z0 + 3.0, 0.0, pal::SAND);
+    // street, sidewalks, the square's paving, the back lanes
+    b.decal(-HALF_X, -5.0, HALF_X, 5.0, 0.0, pal::ASPHALT);
+    b.decal(-HALF_X, -6.5, HALF_X, -5.0, 0.01, pal::CONCRETE);
+    b.decal(-HALF_X, 5.0, HALF_X, 6.5, 0.01, pal::CONCRETE);
+    b.decal(-20.0, -16.0, 20.0, -6.5, 0.0, STONE);
+    b.decal(-20.0, 6.5, 20.0, 16.0, 0.0, STONE);
+    for s in [-1.0f32, 1.0] {
+        let (z0, z1) = (s * LANE.0, s * LANE.1);
+        b.decal(-70.0, z0.min(z1), 70.0, z0.max(z1), 0.0, pal::SAND);
     }
-    let site_east = half(&mut b, Half { s: 1.0 });
-    let site_west = half(&mut b, Half { s: -1.0 });
+    let site_east = east(&mut b);
+    let site_west = west(&mut b);
 
-    // allies start in the west, axis in the east, all across the bus station
-    let zs = [-38.0, -27.0, -16.0, -5.0, 5.0, 16.0, 27.0, 38.0];
-    let allies = zs.iter().map(|&z| spawn(-96.0, z, -FRAC_PI_2)).collect();
-    let axis = zs.iter().map(|&z| spawn(96.0, -z, FRAC_PI_2)).collect();
+    // allies start in the west, axis in the east, spread across their yards
+    let zs = [-32.0, -23.0, -14.0, -5.0, 5.0, 14.0, 23.0, 32.0];
+    let allies = zs.iter().map(|&z| spawn(-80.0, z, -FRAC_PI_2)).collect();
+    let axis = zs.iter().map(|&z| spawn(80.0, z, FRAC_PI_2)).collect();
 
     Map {
         id: MapId::Market,
