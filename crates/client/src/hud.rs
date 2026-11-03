@@ -1,5 +1,6 @@
 //! 2D HUD and in-game menus.
 
+use crate::binds::{key, Action};
 use crate::game::{GameClient, Overlay};
 use crate::models::team_color;
 use crate::render::{NameTag, View};
@@ -156,7 +157,12 @@ impl GameClient {
                         w.def().name
                     )
                 } else {
-                    tr!("F — підібрати {}", "F — pick up {}", w.def().name)
+                    tr!(
+                        "{} — підібрати {}",
+                        "{} — pick up {}",
+                        key(Action::Use),
+                        w.def().name
+                    )
                 };
                 ui.centered(&text, cx, cy + 90.0, 20, TEXT);
             }
@@ -240,9 +246,10 @@ impl GameClient {
                 Color::new(0.6, 0.85, 1.0, 1.0),
             );
             ui.centered(
-                t(
-                    "із захистом атакувати не можна · ЛКМ — зняти захист і битися",
-                    "you cannot attack while protected · LMB — drop protection and fight",
+                &tr!(
+                    "із захистом атакувати не можна · {} — зняти захист і битися",
+                    "you cannot attack while protected · {} — drop protection and fight",
+                    key(Action::Fire)
                 ),
                 cx,
                 h * 0.78 + 22.0,
@@ -278,7 +285,7 @@ impl GameClient {
                     self.me.respawn_in.ceil()
                 )
             } else if self.has_class {
-                t("Клацни ЛКМ, щоб відродитися", "Click LMB to respawn").to_string()
+                tr!("{} — відродитися", "{} — respawn", key(Action::Fire))
             } else {
                 t("Обери клас (Esc)", "Choose a class (Esc)").to_string()
             };
@@ -293,9 +300,16 @@ impl GameClient {
         }
         if self.team == Team::Spectator && self.overlay == Overlay::None {
             ui.centered(
-                t(
-                    "Режим глядача — WASD, Space/C, Shift. Esc — меню",
-                    "Spectating — WASD, Space/C, Shift. Esc — menu",
+                &tr!(
+                    "Режим глядача — {}{}{}{}, {}/{}, {}. Esc — меню",
+                    "Spectating — {}{}{}{}, {}/{}, {}. Esc — menu",
+                    key(Action::Forward),
+                    key(Action::Left),
+                    key(Action::Back),
+                    key(Action::Right),
+                    key(Action::Jump),
+                    key(Action::Crouch),
+                    key(Action::Sprint)
                 ),
                 cx,
                 h - 40.0,
@@ -346,7 +360,7 @@ impl GameClient {
         }
 
         // match end / scoreboard
-        let tab = is_key_down(KeyCode::Tab) && self.chat_input.is_none();
+        let tab = crate::binds::down(crate::binds::Action::Scoreboard) && self.chat_input.is_none();
         if let Some((text, winner, _)) = self.match_end.clone() {
             let c = match winner {
                 Some(t) if t == self.team => GOOD,
@@ -497,7 +511,11 @@ impl GameClient {
             let enemy_site = self.map.sites[me.enemy().index()];
             if carrying && self.body.pos.distance(enemy_site) < SAB_SITE_RADIUS {
                 ui.centered(
-                    t("Тримай F, щоб закласти бомбу", "Hold F to plant the bomb"),
+                    &tr!(
+                        "Тримай {}, щоб закласти бомбу",
+                        "Hold {} to plant the bomb",
+                        key(Action::Use)
+                    ),
                     w / 2.0,
                     h * 0.7,
                     22,
@@ -507,9 +525,10 @@ impl GameClient {
                 && self.body.pos.distance(Vec3::from_array(b.pos)) < SAB_DEFUSE_RADIUS
             {
                 ui.centered(
-                    t(
-                        "Тримай F, щоб знешкодити бомбу",
-                        "Hold F to defuse the bomb",
+                    &tr!(
+                        "Тримай {}, щоб знешкодити бомбу",
+                        "Hold {} to defuse the bomb",
+                        key(Action::Use)
                     ),
                     w / 2.0,
                     h * 0.7,
@@ -868,12 +887,17 @@ impl GameClient {
         if !k.final_cam {
             let hint = if self.me.respawn_in > 0.0 {
                 tr!(
-                    "ЛКМ або Esc — пропустити · відродження через {:.0}",
-                    "LMB or Esc — skip · respawn in {:.0}",
+                    "{} або Esc — пропустити · відродження через {:.0}",
+                    "{} or Esc — skip · respawn in {:.0}",
+                    key(Action::Fire),
                     self.me.respawn_in.ceil()
                 )
             } else {
-                t("ЛКМ або Esc — пропустити", "LMB or Esc — skip").to_string()
+                tr!(
+                    "{} або Esc — пропустити",
+                    "{} or Esc — skip",
+                    key(Action::Fire)
+                )
             };
             ui.text(
                 &hint,
@@ -1023,9 +1047,10 @@ impl GameClient {
         }
         if self.smoke_held {
             ui.centered(
-                t(
-                    "Димова: відпусти Q, щоб кинути",
-                    "Smoke: release Q to throw",
+                &tr!(
+                    "Димова: відпусти {}, щоб кинути",
+                    "Smoke: release {} to throw",
+                    key(Action::Smoke)
                 ),
                 w / 2.0,
                 h * 0.62,
@@ -1054,7 +1079,7 @@ impl GameClient {
         );
         ui.shadowed(&streak_txt, x, y + 92.0, 13, MUTED);
         if let Some(r) = self.me.rewards.last() {
-            let t = format!("[5] {}", r.name());
+            let t = format!("[{}] {}", key(Action::Killstreak), r.name());
             let tw = ui.width(&t, 18, true);
             draw_rectangle(
                 w - tw - 30.0,
@@ -1076,9 +1101,11 @@ impl GameClient {
             ui.centered(t("Перезарядка…", "Reloading…"), w / 2.0, h * 0.58, 18, TEXT);
         } else if mag == 0 && res == 0 {
             ui.centered(
-                t(
-                    "Немає набоїв — 1/2 змінити зброю",
-                    "Out of ammo — 1/2 to switch weapons",
+                &tr!(
+                    "Немає набоїв — {}/{} змінити зброю",
+                    "Out of ammo — {}/{} to switch weapons",
+                    key(Action::Primary),
+                    key(Action::Secondary)
                 ),
                 w / 2.0,
                 h * 0.58,
@@ -1634,9 +1661,21 @@ impl GameClient {
                     ACCENT,
                 );
                 crate::menu::settings_widgets(ui, settings, x + 24.0, y + 90.0, pw - 48.0);
+                if ui.button2(t("Клавіші", "Controls"), x + 24.0, y + 510.0, 156.0, 44.0) {
+                    self.overlay = Overlay::Controls;
+                }
                 if ui.button(t("Готово", "Done"), x + pw - 180.0, y + 510.0, 156.0, 44.0) {
                     settings.save();
                     self.overlay = Overlay::Pause;
+                }
+                None
+            }
+            Overlay::Controls => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                let pw = 760.0f32.min(w - 20.0);
+                let (x, y) = ((w - pw) / 2.0, (h - crate::menu::CONTROLS_H).max(0.0) / 2.0);
+                if crate::menu::controls_page(ui, &mut self.binds_editor, settings, x, y, pw) {
+                    self.overlay = Overlay::Settings;
                 }
                 None
             }

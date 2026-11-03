@@ -4,6 +4,7 @@
 //! Like the soldier, the vehicle moves on this client at once and the server checks it;
 //! `C2S::Drive` carries the position and the held keys.
 
+use crate::binds::{self, Action};
 use crate::game::GameClient;
 use crate::ui::{Ui, ACCENT, BAD, GOOD, TEXT};
 use macroquad::prelude::*;
@@ -134,33 +135,33 @@ impl GameClient {
 
     /// Keys and movement of the vehicle for this frame.
     pub fn update_piloting(&mut self, dt: f32, can_act: bool) {
-        let key = |k: KeyCode| can_act && is_key_down(k);
+        let key = |a: Action| can_act && binds::down(a);
         let link = self.eye();
         let st = self.tuning.streaks.clone();
         let Some(p) = &mut self.piloting else { return };
         let mut fwd = 0.0;
         let mut right = 0.0;
-        if key(KeyCode::W) {
+        if key(Action::Forward) {
             fwd += 1.0;
         }
-        if key(KeyCode::S) {
+        if key(Action::Back) {
             fwd -= 1.0;
         }
-        if key(KeyCode::D) {
+        if key(Action::Right) {
             right += 1.0;
         }
-        if key(KeyCode::A) {
+        if key(Action::Left) {
             right -= 1.0;
         }
         let mut keys = 0;
         // left mouse button, or Space where Space does not mean "up"
         if can_act
-            && (is_mouse_button_down(MouseButton::Left)
-                || (p.kind != VehicleKind::Fpv && is_key_down(KeyCode::Space)))
+            && (binds::down(Action::Fire)
+                || (p.kind != VehicleKind::Fpv && binds::down(Action::Jump)))
         {
             keys |= keys::FIRE;
         }
-        if can_act && is_key_pressed(KeyCode::E) {
+        if can_act && binds::pressed(Action::Leave) {
             keys |= keys::EXIT;
         }
         let dt = dt.min(0.1);
@@ -169,13 +170,13 @@ impl GameClient {
         match p.kind {
             VehicleKind::Fpv => {
                 let mut up = 0.0;
-                if key(KeyCode::Space) {
+                if key(Action::Jump) {
                     up += 1.0;
                 }
-                if key(KeyCode::LeftControl) || key(KeyCode::C) {
+                if key(Action::Prone) || key(Action::Crouch) {
                     up -= 1.0;
                 }
-                let boost = key(KeyCode::LeftShift);
+                let boost = key(Action::Sprint);
                 if boost {
                     keys |= keys::BOOST;
                 }
@@ -360,18 +361,35 @@ impl GameClient {
             if hp > 0.35 { GOOD } else { BAD },
         );
         draw_rectangle(bx + 12.0, 90.0, (bw - 24.0) * left, 4.0, ACCENT);
+        use crate::binds::key as k;
+        let (f, b, l, r) = (
+            k(Action::Forward),
+            k(Action::Back),
+            k(Action::Left),
+            k(Action::Right),
+        );
+        let (fire, up, down, gas, exit) = (
+            k(Action::Fire),
+            k(Action::Jump),
+            k(Action::Prone),
+            k(Action::Sprint),
+            k(Action::Leave),
+        );
         let help = match p.kind {
-            VehicleKind::Fpv => {
-                toon_shared::lang::t("W/S — вперед/назад · A/D — вбік · Пробіл/Ctrl — вгору/вниз · Shift — газ · ЛКМ або E — підірвати",
-                  "W/S — forward/back · A/D — sideways · Space/Ctrl — up/down · Shift — throttle · LMB or E — detonate")
-            }
-            VehicleKind::Bomber => {
-                toon_shared::lang::t("WASD — летіти · миша — розворот · ЛКМ/Пробіл — скинути · E — вийти",
-                  "WASD — fly · mouse — turn · LMB/Space — drop · E — leave")
-            }
-            VehicleKind::Nrk => toon_shared::lang::t("WASD — їхати · ЛКМ/Пробіл — кулемет · E — вийти", "WASD — drive · LMB/Space — machine gun · E — leave"),
+            VehicleKind::Fpv => tr!(
+                "{f}/{b} — вперед/назад · {l}/{r} — вбік · {up}/{down} — вгору/вниз · {gas} — газ · {fire} або {exit} — підірвати",
+                "{f}/{b} — forward/back · {l}/{r} — sideways · {up}/{down} — up/down · {gas} — throttle · {fire} or {exit} — detonate"
+            ),
+            VehicleKind::Bomber => tr!(
+                "{f}{l}{b}{r} — летіти · миша — розворот · {fire}/{up} — скинути · {exit} — вийти",
+                "{f}{l}{b}{r} — fly · mouse — turn · {fire}/{up} — drop · {exit} — leave"
+            ),
+            VehicleKind::Nrk => tr!(
+                "{f}{l}{b}{r} — їхати · {fire}/{up} — кулемет · {exit} — вийти",
+                "{f}{l}{b}{r} — drive · {fire}/{up} — machine gun · {exit} — leave"
+            ),
         };
-        ui.centered(help, cx, h - 24.0, 16, TEXT);
+        ui.centered(&help, cx, h - 24.0, 16, TEXT);
     }
 
     /// The FPV goggles: scanlines and the reticle, plus interference that grows as the

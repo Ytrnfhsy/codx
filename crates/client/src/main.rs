@@ -2,6 +2,7 @@
 //! Toon Warfare — game client.
 
 mod audio;
+mod binds;
 mod character;
 mod effects;
 mod game;
@@ -265,6 +266,7 @@ async fn amain(args: Args) {
     let fonts = ui::Fonts::load();
     let mats = mesh::Materials::new();
     let mut settings = Settings::load();
+    binds::use_binds(&settings.binds);
     match args.lang.as_deref() {
         Some("en") => settings.lang = toon_shared::lang::Lang::En,
         Some("uk") => settings.lang = toon_shared::lang::Lang::Uk,
@@ -583,24 +585,30 @@ async fn amain(args: Args) {
                         g.chat_input = None;
                     }
                 } else if g.overlay == Overlay::None {
-                    if is_key_pressed(KeyCode::T) {
+                    use binds::Action;
+                    if binds::pressed(Action::ChatAll) {
                         g.chat_input = Some((String::new(), false));
-                    } else if is_key_pressed(KeyCode::Y) {
+                    } else if binds::pressed(Action::ChatTeam) {
                         g.chat_input = Some((String::new(), true));
                     } else if is_key_pressed(KeyCode::Escape) {
                         // Esc first skips a killcam (like a click), then opens the pause menu
                         if !g.skip_killcam() {
                             g.overlay = Overlay::Pause;
                         }
-                    } else if is_key_pressed(KeyCode::M) && g.team.is_playing() {
+                    } else if binds::pressed(Action::Class) && g.team.is_playing() {
                         g.overlay = Overlay::Class;
                     }
                 } else {
                     chars_for_ui = chars.clone();
-                    if is_key_pressed(KeyCode::Escape) {
+                    // (while the Controls page waits for a key, Esc only cancels that)
+                    if is_key_pressed(KeyCode::Escape) && !binds::capturing() {
                         g.overlay = match g.overlay {
                             Overlay::Edit(_) => Overlay::Class,
                             Overlay::Settings => Overlay::Pause,
+                            Overlay::Controls => {
+                                g.binds_editor.close();
+                                Overlay::Settings
+                            }
                             // before a class is chosen, Esc must still lead somewhere: the
                             // pause menu (settings, disconnect) instead of doing nothing
                             Overlay::Team | Overlay::Class if !g.has_class => Overlay::Pause,

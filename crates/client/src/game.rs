@@ -1,6 +1,7 @@
 //! In-game client: networking, prediction, weapons and interpolation of other players.
 
 use crate::audio::{Audio, Sfx};
+use crate::binds::{self, Action};
 use crate::effects::Effects;
 use crate::killcam::{has_killcam, Event, Frame, KillInfo, Killcam, Recorder};
 use crate::mesh::{MeshBuilder, ToonMesh};
@@ -75,6 +76,8 @@ pub enum Overlay {
     /// The ground robot: steer it or let it fight on its own.
     RobotMode,
     Settings,
+    /// Key bindings.
+    Controls,
 }
 
 pub struct Welcome {
@@ -162,6 +165,8 @@ pub struct GameClient {
     pub steady: f32,
     /// Q is held with a smoke grenade ready: it is thrown when Q comes up.
     pub smoke_held: bool,
+    /// The Controls page (opened from the pause menu's settings).
+    pub binds_editor: crate::binds::Editor,
     pub using: bool,
     last_throw: f64,
     trigger_was_down: bool,
@@ -417,6 +422,7 @@ impl GameClient {
             breath: 4.0,
             steady: 1.0,
             smoke_held: false,
+            binds_editor: Default::default(),
             using: false,
             last_throw: -10.0,
             trigger_was_down: false,
@@ -473,22 +479,50 @@ impl GameClient {
         if !w.motd.is_empty() {
             g.push_chat(format!("[{}] {}", g.server_name, w.motd), crate::ui::ACCENT);
         }
-        g.push_chat(
-            toon_shared::lang::t(
-                "WASD, Shift — біг, C — присід, Ctrl — лежати, ПКМ — приціл, R — перезарядка",
-                "WASD, Shift — sprint, C — crouch, Ctrl — prone, RMB — aim, R — reload",
-            )
-            .into(),
-            crate::ui::MUTED,
-        );
-        g.push_chat(
-            toon_shared::lang::t(
-                "G — граната, Q — дим, V — ніж, F — дія, 5 — кілстрік, T/Y — чат, Tab — рахунок, M — клас",
-                "G — grenade, Q — smoke, V — knife, F — use, 5 — killstreak, T/Y — chat, Tab — score, M — class",
-            )
-            .into(),
-            crate::ui::MUTED,
-        );
+        {
+            use binds::key as k;
+            let mv = format!(
+                "{}{}{}{}",
+                k(Action::Forward),
+                k(Action::Left),
+                k(Action::Back),
+                k(Action::Right)
+            );
+            let (sp, cr, pr, aim, rl) = (
+                k(Action::Sprint),
+                k(Action::Crouch),
+                k(Action::Prone),
+                k(Action::Aim),
+                k(Action::Reload),
+            );
+            g.push_chat(
+                tr!(
+                    "{mv}, {sp} — біг, {cr} — присід, {pr} — лежати, {aim} — приціл, {rl} — перезарядка",
+                    "{mv}, {sp} — sprint, {cr} — crouch, {pr} — prone, {aim} — aim, {rl} — reload"
+                ),
+                crate::ui::MUTED,
+            );
+            let (gr, sm, kn, us, ks) = (
+                k(Action::Grenade),
+                k(Action::Smoke),
+                k(Action::Knife),
+                k(Action::Use),
+                k(Action::Killstreak),
+            );
+            let (ca, ct, sc, cl) = (
+                k(Action::ChatAll),
+                k(Action::ChatTeam),
+                k(Action::Scoreboard),
+                k(Action::Class),
+            );
+            g.push_chat(
+                tr!(
+                    "{gr} — граната, {sm} — дим, {kn} — ніж, {us} — дія, {ks} — кілстрік, {ca}/{ct} — чат, {sc} — рахунок, {cl} — клас",
+                    "{gr} — grenade, {sm} — smoke, {kn} — knife, {us} — use, {ks} — killstreak, {ca}/{ct} — chat, {sc} — score, {cl} — class"
+                ),
+                crate::ui::MUTED,
+            );
+        }
         let mut audio_dummy = None;
         for m in pending {
             g.handle_msg(m, &mut audio_dummy);
@@ -808,7 +842,12 @@ impl GameClient {
             S2C::Center { text, secs } => self.center_msg(text, secs as f64, crate::ui::TEXT),
             S2C::StreakReady(k) => {
                 self.center_msg(
-                    tr!("{} готовий! Натисни 5", "{} ready! Press 5", k.name()),
+                    tr!(
+                        "{} готовий! Натисни {}",
+                        "{} ready! Press {}",
+                        k.name(),
+                        binds::key(Action::Killstreak)
+                    ),
                     3.0,
                     crate::ui::ACCENT,
                 );
@@ -1554,19 +1593,19 @@ impl GameClient {
         self.update_piloting(dt, steer);
         // while steering a vehicle the soldier just stands there
         let can_act = steer && self.piloting.is_none();
-        let key = |k: KeyCode| can_act && is_key_down(k);
-        let pressed = |k: KeyCode| can_act && is_key_pressed(k);
+        let key = |a: Action| can_act && binds::down(a);
+        let pressed = |a: Action| can_act && binds::pressed(a);
         let def = self.ws().clone();
         let scoped_weapon = self.weapon().def().scoped;
         if self.alive {
-            if pressed(KeyCode::C) {
+            if pressed(Action::Crouch) {
                 self.want_stance = if self.want_stance == Stance::Crouch {
                     Stance::Stand
                 } else {
                     Stance::Crouch
                 };
             }
-            if pressed(KeyCode::LeftControl) || pressed(KeyCode::Z) {
+            if pressed(Action::Prone) {
                 self.want_stance = if self.want_stance == Stance::Prone {
                     Stance::Stand
                 } else {
@@ -1575,25 +1614,25 @@ impl GameClient {
             }
             let mut fwd = 0.0;
             let mut right = 0.0;
-            if key(KeyCode::W) {
+            if key(Action::Forward) {
                 fwd += 1.0;
             }
-            if key(KeyCode::S) {
+            if key(Action::Back) {
                 fwd -= 1.0;
             }
-            if key(KeyCode::D) {
+            if key(Action::Right) {
                 right += 1.0;
             }
-            if key(KeyCode::A) {
+            if key(Action::Left) {
                 right -= 1.0;
             }
-            let jump = pressed(KeyCode::Space);
+            let jump = pressed(Action::Jump);
             if jump {
                 self.want_stance = Stance::Stand;
             }
-            let ads_held = can_act && is_mouse_button_down(MouseButton::Right);
+            let ads_held = can_act && binds::down(Action::Aim);
             let reloading = self.reload_until.is_some();
-            let want_sprint = key(KeyCode::LeftShift)
+            let want_sprint = key(Action::Sprint)
                 && fwd > 0.0
                 && self.body.stance == Stance::Stand
                 && !ads_held
@@ -1611,7 +1650,7 @@ impl GameClient {
                 self.stamina = (self.stamina + dt * self.tuning.movement.sprint_recover)
                     .min(self.sprint_max());
             }
-            let holding = scoped_weapon && self.ads_t > 0.5 && is_key_down(KeyCode::LeftShift);
+            let holding = scoped_weapon && self.ads_t > 0.5 && binds::down(Action::Sprint);
             if holding {
                 self.breath = (self.breath - dt).max(0.0);
             } else {
@@ -1717,10 +1756,10 @@ impl GameClient {
                 }
             }
             let slot_before = self.slot;
-            if pressed(KeyCode::Key1) {
+            if pressed(Action::Primary) {
                 self.switch_to(0);
             }
-            if pressed(KeyCode::Key2) {
+            if pressed(Action::Secondary) {
                 self.switch_to(1);
             }
             let wheel = mouse_wheel().1;
@@ -1733,24 +1772,22 @@ impl GameClient {
                     a.play(Sfx::Raise, 0.45);
                 }
             }
-            if pressed(KeyCode::R) {
+            if pressed(Action::Reload) {
                 self.start_reload();
             }
-            let trig_down = can_act && is_mouse_button_down(MouseButton::Left);
+            let trig_down = can_act && binds::down(Action::Fire);
             // also catch very quick clicks (press + release within one frame)
-            let trig_pressed = can_act
-                && (is_mouse_button_pressed(MouseButton::Left)
-                    || (trig_down && !self.trigger_was_down));
+            let trig_pressed =
+                can_act && (binds::pressed(Action::Fire) || (trig_down && !self.trigger_was_down));
             self.trigger_was_down = trig_down;
             // spawn protection: you can't be hurt, so you can't attack either.
             // Any attack key gives the protection up instead (no shot is fired).
             if self.is_protected() {
                 if trig_pressed
-                    || pressed(KeyCode::G)
-                    || pressed(KeyCode::Q)
-                    || pressed(KeyCode::V)
-                    || pressed(KeyCode::Key5)
-                    || pressed(KeyCode::Key4)
+                    || pressed(Action::Grenade)
+                    || pressed(Action::Smoke)
+                    || pressed(Action::Knife)
+                    || pressed(Action::Killstreak)
                 {
                     self.protection_dropped = true;
                     self.net.send(C2S::DropProtection);
@@ -1798,7 +1835,7 @@ impl GameClient {
             }
             // grenade (hold G to cook)
             if !shielded
-                && pressed(KeyCode::G)
+                && pressed(Action::Grenade)
                 && self.grenades > 0
                 && self.cooking.is_none()
                 && now >= self.throw_until
@@ -1807,7 +1844,7 @@ impl GameClient {
                 self.reload_until = None;
             }
             if let Some(start) = self.cooking {
-                let release = !is_key_down(KeyCode::G)
+                let release = !binds::down(Action::Grenade)
                     || !can_act
                     || now - start > (self.tuning.grenade.fuse - 0.35) as f64;
                 if release {
@@ -1836,7 +1873,7 @@ impl GameClient {
             }
             // smoke grenade (Q): ready on press, thrown on release (no cooking)
             if !shielded
-                && pressed(KeyCode::Q)
+                && pressed(Action::Smoke)
                 && self.smokes > 0
                 && self.cooking.is_none()
                 && now >= self.throw_until
@@ -1844,7 +1881,7 @@ impl GameClient {
                 self.smoke_held = true;
                 self.reload_until = None;
             }
-            let release = self.smoke_held && (!is_key_down(KeyCode::Q) || !can_act);
+            let release = self.smoke_held && (!binds::down(Action::Smoke) || !can_act);
             if release {
                 self.smoke_held = false;
             }
@@ -1868,7 +1905,7 @@ impl GameClient {
                     a.play(Sfx::Knife, 0.4);
                 }
             }
-            if !shielded && pressed(KeyCode::V) && now >= self.melee_ready {
+            if !shielded && pressed(Action::Knife) && now >= self.melee_ready {
                 self.melee_ready = now + MELEE_COOLDOWN as f64;
                 self.melee_until = now + 0.45;
                 self.reload_until = None;
@@ -1877,16 +1914,16 @@ impl GameClient {
                     a.play(Sfx::Knife, 0.7);
                 }
             }
-            self.using = key(KeyCode::F);
+            self.using = key(Action::Use);
             // dropped weapons: F swaps (unless F is needed for the bomb right here)
             self.pickup_target = self.find_pickup();
             if let Some((ent, _)) = self.pickup_target {
-                if pressed(KeyCode::F) && now >= self.next_pickup && !self.near_objective() {
+                if pressed(Action::Use) && now >= self.next_pickup && !self.near_objective() {
                     self.net.send(C2S::PickUp(ent));
                     self.next_pickup = now + 0.6;
                 }
             }
-            if !shielded && (pressed(KeyCode::Key5) || pressed(KeyCode::Key4)) {
+            if !shielded && pressed(Action::Killstreak) {
                 match self.me.rewards.last() {
                     Some(k) if k.needs_target() => self.overlay = Overlay::Airstrike,
                     Some(Killstreak::Nrk) => self.overlay = Overlay::RobotMode,
@@ -1909,7 +1946,7 @@ impl GameClient {
             self.sprinting = false;
             self.using = false;
             // click skips the killcam, then respawns
-            if playing_input && is_mouse_button_pressed(MouseButton::Left) {
+            if playing_input && binds::pressed(Action::Fire) {
                 // a click skips the killcam; once it is over, a click respawns
                 if !self.skip_killcam() && self.team.is_playing() && self.me.respawn_in <= 0.0 {
                     self.net.send(C2S::Spawn);
@@ -2032,26 +2069,26 @@ impl GameClient {
         let (f, r) = yaw_basis(self.yaw);
         let d = look_dir(self.yaw, self.pitch);
         let mut v = Vec3::ZERO;
-        if is_key_down(KeyCode::W) {
+        if binds::down(Action::Forward) {
             v += d;
         }
-        if is_key_down(KeyCode::S) {
+        if binds::down(Action::Back) {
             v -= d;
         }
-        if is_key_down(KeyCode::D) {
+        if binds::down(Action::Right) {
             v += r;
         }
-        if is_key_down(KeyCode::A) {
+        if binds::down(Action::Left) {
             v -= r;
         }
-        if is_key_down(KeyCode::Space) {
+        if binds::down(Action::Jump) {
             v.y += 1.0;
         }
-        if is_key_down(KeyCode::C) {
+        if binds::down(Action::Crouch) {
             v.y -= 1.0;
         }
         let _ = f;
-        let speed = if is_key_down(KeyCode::LeftShift) {
+        let speed = if binds::down(Action::Sprint) {
             25.0
         } else {
             10.0

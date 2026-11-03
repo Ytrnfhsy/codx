@@ -73,6 +73,8 @@ pub struct Settings {
     pub custom: Vec<CustomClass>,
     pub last_class: usize,
     pub recent: Vec<String>,
+    /// Keys and mouse buttons for every action.
+    pub binds: crate::binds::Binds,
     /// Favourite servers, as typed (an IP or a domain, with or without the port).
     pub favorites: Vec<String>,
     pub host: HostSettings,
@@ -122,6 +124,7 @@ impl Settings {
             last_class: 0,
             recent: Vec::new(),
             favorites: Vec::new(),
+            binds: Default::default(),
             host: HostSettings::default(),
         }
     }
