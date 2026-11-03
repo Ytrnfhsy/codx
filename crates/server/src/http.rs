@@ -68,7 +68,12 @@ fn handle(ctx: &mut Ctx, mut req: Request) {
         .remote_addr()
         .map(|a| a.ip().to_string())
         .unwrap_or_default();
-    match (req.method().clone(), url.as_str()) {
+    // HEAD (curl -I, health checks) is answered like GET; the body is left out
+    let method = match req.method() {
+        Method::Head => Method::Get,
+        m => m.clone(),
+    };
+    match (method, url.as_str()) {
         (Method::Get, "/") => respond(req, 200, "text/html; charset=utf-8", INDEX_HTML.to_string()),
         (Method::Get, "/admin") | (Method::Get, "/admin/") => {
             respond(req, 200, "text/html; charset=utf-8", ADMIN_HTML.to_string())
