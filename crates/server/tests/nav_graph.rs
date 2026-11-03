@@ -56,6 +56,18 @@ fn walk(
     from: glam::Vec3,
     to: glam::Vec3,
 ) -> glam::Vec3 {
+    walk_looking(m, w, nav, from, to, None)
+}
+
+/// `walk`, looking at `look` (a fixed yaw) instead of where it goes, if given.
+fn walk_looking(
+    m: &toon_shared::map::Map,
+    w: &World,
+    nav: &Nav,
+    from: glam::Vec3,
+    to: glam::Vec3,
+    look: Option<f32>,
+) -> glam::Vec3 {
     use toon_shared::physics::{Body, MoveInput};
     use toon_shared::tuning::MoveTuning;
     let _ = m;
@@ -81,9 +93,13 @@ fn walk(
             break;
         };
         let d = glam::vec3(wp.x - body.pos.x, 0.0, wp.z - body.pos.z).normalize_or_zero();
-        let yaw = toon_shared::yaw_of(d);
+        // walk towards the waypoint, looking either the same way or (like a bot in a
+        // fight) somewhere else
+        let yaw = look.unwrap_or_else(|| toon_shared::yaw_of(d));
+        let (f, r) = toon_shared::yaw_basis(yaw);
         let inp = MoveInput {
-            forward: 1.0,
+            forward: d.dot(f),
+            right: d.dot(r),
             yaw,
             ..Default::default()
         };
@@ -235,5 +251,35 @@ fn wreck_sides_are_equally_far() {
             (a - b).abs() / a.max(b) < 0.08,
             "{what}: allies walk {a:.0} m, axis {b:.0} m"
         );
+    }
+}
+
+/// Every ladder on Market can be climbed up and down by a body following the bots'
+/// routes, also while it looks the other way (a bot fighting on the ladder).
+#[test]
+fn every_ladder_works_whichever_way_you_look() {
+    let m = toon_shared::maps::build(MapId::Market);
+    let w = World::from_map(&m);
+    let nav = Nav::build(&m, &w);
+    assert!(!m.ladders.is_empty());
+    for (i, l) in m.ladders.iter().enumerate() {
+        let foot = l.base + l.out * 1.2;
+        let top = l.exit();
+        for look in [None, Some(0.0), Some(2.0), Some(-2.4)] {
+            let end = walk_looking(&m, &w, &nav, foot, top, look);
+            assert!(
+                (end.y - top.y).abs() < 0.3
+                    && glam::vec3(end.x - top.x, 0.0, end.z - top.z).length() < 1.5,
+                "ladder {i} at {}: going up looking {look:?} stuck at {end}",
+                l.base
+            );
+            let end = walk_looking(&m, &w, &nav, top + glam::vec3(0.0, 0.01, 0.0), foot, look);
+            assert!(
+                end.y < l.base.y + 0.3
+                    && glam::vec3(end.x - foot.x, 0.0, end.z - foot.z).length() < 1.5,
+                "ladder {i} at {}: going down looking {look:?} stuck at {end}",
+                l.base
+            );
+        }
     }
 }

@@ -157,6 +157,11 @@ pub struct GameClient {
     pub sway: Vec2,
     step_acc: f32,
     pub breath: f32,
+    /// How much the scope sways (1 = freely; eases down to almost nothing while the
+    /// breath is held, and back up after).
+    pub steady: f32,
+    /// Q is held with a smoke grenade ready: it is thrown when Q comes up.
+    pub smoke_held: bool,
     pub using: bool,
     last_throw: f64,
     trigger_was_down: bool,
@@ -410,6 +415,8 @@ impl GameClient {
             sway: Vec2::ZERO,
             step_acc: 0.0,
             breath: 4.0,
+            steady: 1.0,
+            smoke_held: false,
             using: false,
             last_throw: -10.0,
             trigger_was_down: false,
@@ -1321,14 +1328,13 @@ impl GameClient {
             return Vec2::ZERO;
         }
         let scoped = self.weapon().def().scoped;
-        let holding = scoped && is_key_down(KeyCode::LeftShift) && self.breath > 0.0;
         let stance = match self.body.stance {
             Stance::Stand => 1.0,
             Stance::Crouch => 0.7,
             Stance::Prone => 0.4,
         };
         let base = if scoped { 0.007 } else { 0.0018 };
-        let k = base * self.ws().sway * stance * if holding { 0.08 } else { 1.0 };
+        let k = base * self.ws().sway * stance * if scoped { self.steady } else { 1.0 };
         let t = self.now as f32;
         vec2(
             (t * 0.9).sin() * 1.5 + (t * 2.3).sin() * 0.4,
@@ -1605,11 +1611,20 @@ impl GameClient {
                 self.stamina = (self.stamina + dt * self.tuning.movement.sprint_recover)
                     .min(self.sprint_max());
             }
-            if scoped_weapon && self.ads_t > 0.5 && is_key_down(KeyCode::LeftShift) {
+            let holding = scoped_weapon && self.ads_t > 0.5 && is_key_down(KeyCode::LeftShift);
+            if holding {
                 self.breath = (self.breath - dt).max(0.0);
             } else {
                 self.breath = (self.breath + dt * 0.5).min(4.0);
             }
+            // the sway eases off while you hold your breath (the sight drifts back to the
+            // crosshair instead of stopping where it was) and comes back gently after
+            let (want, rate) = if holding && self.breath > 0.0 {
+                (0.05, 3.0)
+            } else {
+                (1.0, 1.2)
+            };
+            self.steady += (want - self.steady) * (dt * rate).min(1.0);
             // after sprinting the weapon has to come back up first (longer for heavy guns)
             let raising = now - self.sprint_end < def.sprint_out_time as f64;
             let ads_ok = ads_held
@@ -1819,13 +1834,21 @@ impl GameClient {
                     }
                 }
             }
-            // smoke grenade (Q): thrown at once, no cooking
+            // smoke grenade (Q): ready on press, thrown on release (no cooking)
             if !shielded
                 && pressed(KeyCode::Q)
                 && self.smokes > 0
                 && self.cooking.is_none()
                 && now >= self.throw_until
             {
+                self.smoke_held = true;
+                self.reload_until = None;
+            }
+            let release = self.smoke_held && (!is_key_down(KeyCode::Q) || !can_act);
+            if release {
+                self.smoke_held = false;
+            }
+            if release && can_act && self.alive && !shielded && self.smokes > 0 {
                 let aim = self.aim_dir();
                 let pitch =
                     aim.y.clamp(-1.0, 1.0).asin() + self.tuning.grenade.throw_arc.to_radians();
@@ -1950,9 +1973,7 @@ impl GameClient {
         // grenade smoke trails
         for e in &self.ents {
             if let EntSnap::Grenade { pos, .. } = e {
-                if self.rng.chance(0.3) {
-                    self.fx.smoke_trail(Vec3::from_array(*pos));
-                }
+                self.fx.smoke_trail(Vec3::from_array(*pos));
             }
         }
         // planted bomb beeps faster near the end

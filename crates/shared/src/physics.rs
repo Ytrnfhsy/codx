@@ -508,12 +508,11 @@ impl Body {
         }
     }
 
-    /// Ladder climbing. W climbs towards where you face (up when facing the wall, down
-    /// when facing away from it or along it), S the other way, A/D shuffle sideways, jump
-    /// lets go. You get on by walking at its foot facing it, or by stepping off the roof
-    /// onto it; walking past its foot does not grab it. You get off at the top by climbing
-    /// on (you step onto the roof) and at the bottom by reaching the ground. Returns true if
-    /// it moved the body.
+    /// Ladder climbing. Moving towards the wall climbs, moving away from it (or along it)
+    /// goes down, whichever way you look; jump lets go. You get on by walking at its foot
+    /// or by stepping off the roof onto it (walking past its foot does not grab it), and
+    /// off at the top by climbing on (you step onto the roof) or at the bottom by reaching
+    /// the ground. Returns true if it moved the body.
     fn climb(&mut self, world: &World, inp: &MoveInput, t: &MoveTuning, dt: f32) -> bool {
         const SPEED: f32 = 3.2;
         let Some(l) = world.ladder_at(self.pos).copied() else {
@@ -524,24 +523,30 @@ impl Body {
             self.climbing = false;
             return false;
         }
+        // which way the keys move you (not where you look: a bot fighting on a ladder
+        // looks at its enemy): towards the wall climbs, away from it or along it goes down
         let (fwd, right) = yaw_basis(inp.yaw);
         let toward = -l.out;
-        // facing the wall W climbs, facing away (or along the wall: heading off somewhere)
-        // it goes down; walking past the foot of a ladder does not grab it
-        let facing = fwd.dot(toward);
-        let up = if facing > 0.3 {
-            inp.forward
-        } else if facing < -0.3 {
-            -inp.forward
+        let wish = fwd * inp.forward + right * inp.right;
+        let push = wish.length().min(1.0);
+        let heading = if push > 0.1 {
+            (wish / wish.length()).dot(toward)
         } else {
-            -inp.forward.abs()
+            0.0
+        };
+        let up = if push < 0.1 {
+            0.0
+        } else if heading > 0.3 {
+            push
+        } else {
+            -push
         };
         if !self.climbing {
             // grab it: walking at it from below, stepping off the roof onto it, or falling
-            // past it
+            // past it; walking past its foot does not
             let at_foot = self.pos.y < l.base.y + 0.5;
-            let grab = (self.on_ground && at_foot && facing > 0.5 && inp.forward > 0.1)
-                || (self.on_ground && !at_foot && facing < -0.3 && inp.forward > 0.1)
+            let grab = (self.on_ground && at_foot && push > 0.1 && heading > 0.5)
+                || (self.on_ground && !at_foot && push > 0.1 && heading < -0.3)
                 || (!self.on_ground && self.vel.y < 0.0 && self.pos.y < l.top - 0.3);
             if !grab {
                 return false;
@@ -556,8 +561,6 @@ impl Body {
             self.vel = l.out * 3.0 + vec3(0.0, t.jump_speed * 0.5, 0.0);
             return false;
         }
-        let side = right.dot(vec3(-l.out.z, 0.0, l.out.x)).signum() * inp.right;
-        let across = vec3(-l.out.z, 0.0, l.out.x) * side * 1.2;
         let along = (self.pos - l.base).dot(l.out);
         self.vel = if up > 0.0 && self.pos.y >= l.top + 0.02 {
             // at the top: step onto the roof
@@ -566,7 +569,7 @@ impl Body {
             // getting on from the roof: out over the edge first, then down
             l.out * 2.5
         } else {
-            vec3(0.0, up * SPEED, 0.0) + across
+            vec3(0.0, up * SPEED, 0.0)
         };
         let delta = self.vel * dt;
         self.on_ground = false;

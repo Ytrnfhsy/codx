@@ -217,18 +217,18 @@ impl Effects {
         }
     }
 
+    /// A thin, short-lived trail behind a flying grenade: just enough to show its arc.
     pub fn smoke_trail(&mut self, pos: Vec3) {
-        let v = self.rv(0.3);
         self.push(Particle {
             pos,
-            vel: v,
+            vel: Vec3::ZERO,
             life: 0.0,
-            max: 0.8,
-            size: 0.2,
-            grow: 1.0,
-            color: [200, 200, 210],
+            max: 0.6,
+            size: 0.07,
+            grow: 0.05,
+            color: [235, 235, 240],
             kind: Kind::Smoke,
-            grav: -0.3,
+            grav: 0.0,
         });
     }
 

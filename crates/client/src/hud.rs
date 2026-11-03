@@ -1021,6 +1021,18 @@ impl GameClient {
             draw_rectangle(sx - 6.0, y + 28.0, 12.0, 4.0, WHITE);
             draw_rectangle_lines(sx - 6.0, y + 21.0, 12.0, 18.0, 2.0, BLACK);
         }
+        if self.smoke_held {
+            ui.centered(
+                t(
+                    "Димова: відпусти Q, щоб кинути",
+                    "Smoke: release Q to throw",
+                ),
+                w / 2.0,
+                h * 0.62,
+                20,
+                TEXT,
+            );
+        }
         if let Some(start) = self.cooking {
             let left = (self.tuning.grenade.fuse as f64 - (self.now - start)).max(0.0);
             ui.centered(
