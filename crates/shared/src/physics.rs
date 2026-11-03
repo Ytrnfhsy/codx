@@ -781,6 +781,7 @@ mod tests {
             sites: [Vec3::ZERO; 2],
             sky: [0; 3],
             fog: [0; 3],
+            tint: [1.0; 3],
         };
         let w = World::from_map(&map);
         let (stop, _, pierced) = w.bullet_trace(vec3(0.0, 1.5, 0.0), vec3(1.0, 0.0, 0.0), 50.0);
@@ -828,6 +829,7 @@ mod tests {
             sites: [Vec3::ZERO; 2],
             sky: [0; 3],
             fog: [0; 3],
+            tint: [1.0; 3],
         };
         let w = World::from_map(&map);
         let t = mt();

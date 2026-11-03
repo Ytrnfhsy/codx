@@ -1259,8 +1259,10 @@ pub fn market() -> Map {
         bomb: vec3(0.0, 0.0, 0.0),
         // each team defends the courtyard on its own side
         sites: [site_west, site_east],
-        sky: [250, 196, 150],
-        fog: [252, 220, 186],
+        // a golden evening: peach sky, warm low sun
+        sky: [250, 190, 140],
+        fog: [250, 214, 176],
+        tint: [1.08, 0.97, 0.86],
     }
 }
 

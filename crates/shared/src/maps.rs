@@ -9,7 +9,7 @@ pub fn build(id: MapId) -> Map {
         MapId::Depot => depot(),
         MapId::Market => crate::maps_market::market(),
         MapId::Cargo => cargo(),
-        MapId::Wreck => crate::maps_extra::wreck(),
+        MapId::Wreck => crate::maps_wreck::wreck(),
         MapId::Site => crate::maps_extra::site(),
     }
 }
@@ -242,8 +242,10 @@ fn depot() -> Map {
         spawns: [allies, axis],
         bomb: vec3(0.0, 0.0, 0.0),
         sites: [site_allies, site_axis],
-        sky: [136, 200, 250],
-        fog: [196, 226, 250],
+        // a fresh, clear morning: deep blue sky, crisp light
+        sky: [120, 186, 246],
+        fog: [196, 224, 244],
+        tint: [0.98, 1.02, 1.0],
     }
 }
 
@@ -307,8 +309,10 @@ fn cargo() -> Map {
         spawns: [allies, axis],
         bomb: vec3(0.0, 0.0, 0.0),
         sites: [site_allies, site_axis],
-        sky: [150, 190, 236],
-        fog: [200, 214, 236],
+        // the port at dusk: teal sea haze, violet sky, cool light
+        sky: [150, 140, 190],
+        fog: [160, 190, 200],
+        tint: [0.9, 0.95, 1.06],
     }
 }
 

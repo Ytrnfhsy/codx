@@ -7,6 +7,7 @@ pub mod map;
 pub mod maps;
 pub mod maps_extra;
 pub mod maps_market;
+pub mod maps_wreck;
 pub mod net;
 pub mod physics;
 pub mod props;

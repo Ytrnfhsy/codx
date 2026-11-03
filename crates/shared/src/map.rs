@@ -143,6 +143,8 @@ pub struct Map {
     pub sites: [Vec3; 2],
     pub sky: [u8; 3],
     pub fog: [u8; 3],
+    /// Colour of the light (multiplies everything lit): warm evening sun, cool overcast…
+    pub tint: [f32; 3],
 }
 
 impl Map {
@@ -326,6 +328,37 @@ impl MapBuilder {
         if let Some(b) = self.boxes.get_mut(n) {
             b.mat = m;
         }
+    }
+
+    /// Builds what `f` adds `h` higher up (houses, cars, trees on a terrace or a hill).
+    pub fn lift(&mut self, h: f32, f: impl FnOnce(&mut Self)) {
+        let (nb, nl) = (self.boxes.len(), self.ladders.len());
+        f(self);
+        for b in &mut self.boxes[nb..] {
+            b.min.y += h;
+            b.max.y += h;
+        }
+        for l in &mut self.ladders[nl..] {
+            l.base.y += h;
+            l.top += h;
+        }
+    }
+
+    /// A raised block of ground from y = 0 up to `h`: its sides are a retaining wall of
+    /// `wall`, its top is paved with `top`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn terrace(
+        &mut self,
+        x0: f32,
+        z0: f32,
+        x1: f32,
+        z1: f32,
+        h: f32,
+        wall: [u8; 3],
+        top: [u8; 3],
+    ) {
+        self.block(x0, 0.0, z0, x1, h, z1, wall);
+        self.decal(x0 + 0.02, z0 + 0.02, x1 - 0.02, z1 - 0.02, h, top);
     }
 
     /// A ladder against a wall: `face` is a point on the wall's outer face at the foot of

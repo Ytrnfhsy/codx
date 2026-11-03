@@ -446,22 +446,26 @@ mod tests {
         let spots: &[(MapId, [f32; 3], &str)] = &[
             (
                 MapId::Wreck,
-                [-30.0, 10.2, -8.0],
-                "roof of the three-storey block",
+                [-46.0, 12.6, -30.0],
+                "roof of the fort on the hill",
+            ),
+            (MapId::Wreck, [-46.0, 9.2, -33.0], "third floor of the fort"),
+            (
+                MapId::Wreck,
+                [-18.25, 3.4, -16.75],
+                "north-west balcony over the square",
             ),
             (
                 MapId::Wreck,
-                [-30.0, 6.8, -14.0],
-                "third floor of the block",
+                [44.0, 9.2, 28.0],
+                "roof of the water-tower house",
             ),
+            (MapId::Wreck, [43.25, 4.6, -22.0], "terrace house balcony"),
             (
                 MapId::Wreck,
-                [21.2, 3.4, -10.0],
-                "market balcony over the square",
+                [-46.25, 4.6, 11.75],
+                "south-west terrace balcony",
             ),
-            (MapId::Wreck, [30.0, 3.4, -8.0], "market house roof"),
-            (MapId::Wreck, [30.0, 3.6, 7.5], "south-east house roof"),
-            (MapId::Wreck, [-25.2, 3.4, 13.0], "south-west balcony"),
             (
                 MapId::Site,
                 [0.0, 3.4, -3.5],

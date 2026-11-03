@@ -106,9 +106,10 @@ fn walk(
 #[test]
 fn bodies_can_walk_up_to_high_ground() {
     let spots: &[(MapId, [f32; 3])] = &[
-        (MapId::Wreck, [-30.0, 10.2, -8.0]),
-        (MapId::Wreck, [21.2, 3.4, -10.0]),
-        (MapId::Wreck, [30.0, 3.6, 7.5]),
+        (MapId::Wreck, [-46.0, 12.6, -30.0]),
+        (MapId::Wreck, [44.0, 9.2, 28.0]),
+        (MapId::Wreck, [43.25, 4.6, -22.0]),
+        (MapId::Wreck, [-46.25, 4.6, 11.75]),
         (MapId::Site, [0.0, 3.4, 7.7]),
         (MapId::Site, [-4.0, 6.8, -3.5]),
         (MapId::Site, [-22.3, 3.4, -16.0]),
@@ -195,6 +196,44 @@ fn market_sides_are_equally_far() {
         assert!(
             (a - b).abs() / a.max(b) < 0.08,
             "{what}: west walks {a:.0} m, east {b:.0} m"
+        );
+    }
+}
+
+/// Wreck's terrain is the same for both teams (turned round), the buildings are not: the
+/// walks from both ends must still be about as long.
+#[test]
+fn wreck_sides_are_equally_far() {
+    let m = toon_shared::maps::build(MapId::Wreck);
+    let w = World::from_map(&m);
+    let nav = Nav::build(&m, &w);
+    let len = |a: glam::Vec3, b: glam::Vec3| -> f32 {
+        let path = nav.path(a, b).expect("path");
+        let mut l = 0.0;
+        let mut p = a;
+        for q in path {
+            l += p.distance(q);
+            p = q;
+        }
+        l
+    };
+    let mut rows = Vec::new();
+    for team in 0..2 {
+        let mut sum = [0.0f32; 3];
+        for s in &m.spawns[team] {
+            sum[0] += len(s.pos, m.bomb);
+            sum[1] += len(s.pos, m.sites[team]);
+            sum[2] += len(s.pos, m.sites[1 - team]);
+        }
+        let n = m.spawns[team].len() as f32;
+        rows.push(sum.map(|x| x / n));
+    }
+    println!("allies {:?}\naxis {:?}", rows[0], rows[1]);
+    for (k, what) in ["bomb", "own site", "enemy site"].iter().enumerate() {
+        let (a, b) = (rows[0][k], rows[1][k]);
+        assert!(
+            (a - b).abs() / a.max(b) < 0.08,
+            "{what}: allies walk {a:.0} m, axis {b:.0} m"
         );
     }
 }

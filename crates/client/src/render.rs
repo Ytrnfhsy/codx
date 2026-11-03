@@ -210,7 +210,8 @@ pub fn render_world(
     mats.set_lighting(&crate::mesh::Lighting {
         shadow: g.shadow.as_ref().filter(|_| settings.shadows),
         textures: settings.textures,
-        tint: Vec3::ONE,
+        // every map has its own light: warm evening, dusty noon, grey morning…
+        tint: Vec3::from_array(g.map.tint),
     });
     set_camera(&view.cam);
     clear_background(fog);
@@ -577,11 +578,12 @@ pub fn render_viewmodel(
     mats.set_lighting(&crate::mesh::Lighting {
         shadow: None,
         textures: false,
-        tint: if in_shade {
-            vec3(0.74, 0.77, 0.9)
-        } else {
-            Vec3::ONE
-        },
+        tint: Vec3::from_array(g.map.tint)
+            * if in_shade {
+                vec3(0.74, 0.77, 0.9)
+            } else {
+                Vec3::ONE
+            },
     });
     set_camera(&cam);
     mats.set_view(Vec3::ZERO, Color::new(0.0, 0.0, 0.0, 1.0), 100.0, 200.0);
