@@ -95,7 +95,7 @@ pub struct GameClient {
     pub server_name: String,
     pub map: Map,
     pub world: World,
-    pub map_mesh: ToonMesh,
+    pub level: crate::level::Level,
     pub sky_mesh: MeshBuilder,
     pub mode: Mode,
     pub gs: GameSettings,
@@ -237,54 +237,7 @@ pub struct GameClient {
 const KILLCAM_DELAY: f64 = 1.1;
 
 pub fn build_map_mesh(map: &Map) -> ToonMesh {
-    let mut m = ToonMesh::new();
-    let mut rng = Rng::new(map.id as u64 + 3);
-    let mut decal_layer = 0;
-    for b in &map.boxes {
-        if !b.visible {
-            continue;
-        }
-        // tiny colour variation per box for a hand-painted feel
-        let j = rng.range(-10.0, 10.0);
-        let c = [
-            (b.color[0] as f32 + j).clamp(0.0, 255.0) as u8,
-            (b.color[1] as f32 + j).clamp(0.0, 255.0) as u8,
-            (b.color[2] as f32 + j * 0.8).clamp(0.0, 255.0) as u8,
-        ];
-        let size = b.max - b.min;
-        if !b.solid && size.y <= 0.035 && b.min.y < 0.3 {
-            // flat paint on the ground: just the top face, drawn as a decal
-            decal_layer += 1;
-            let y = b.max.y + decal_layer as f32 * 0.004;
-            let col = crate::mesh::shade(c, Vec3::Y);
-            m.decals.add_quad_ex(
-                [
-                    vec3(b.min.x, y, b.min.z),
-                    vec3(b.min.x, y, b.max.z),
-                    vec3(b.max.x, y, b.max.z),
-                    vec3(b.max.x, y, b.min.z),
-                ],
-                col,
-                Vec3::Y,
-                crate::textures::material_for(b.color),
-            );
-            continue;
-        }
-        m.fill
-            .add_aabb(b.min, b.max, c, crate::textures::material_for(b.color));
-        let is_ground = b.min.y < -0.5;
-        if b.solid && !is_ground && size.min_element() > 0.15 {
-            let w = Vec3::splat(0.045);
-            m.outline.add_box_ex(
-                &Mat4::from_translation((b.min + b.max) * 0.5),
-                size * 0.5 + w,
-                crate::mesh::OUTLINE,
-                255,
-                true,
-            );
-        }
-    }
-    m
+    crate::level::boxes_mesh(map.boxes.iter(), map.id as u64 + 3, true)
 }
 
 pub fn build_sky(map: &Map) -> MeshBuilder {
@@ -352,7 +305,7 @@ impl GameClient {
     pub fn new(net: NetClient, w: Welcome, settings: &Settings, pending: Vec<S2C>) -> GameClient {
         let map = maps::build(w.map);
         let world = World::from_map(&map);
-        let map_mesh = build_map_mesh(&map);
+        let level = crate::level::Level::build(&map);
         let sky_mesh = build_sky(&map);
         let def = DEFAULT_CLASSES[0].1;
         let spec = vec3(map.center().x, 15.0, map.max.y);
@@ -362,7 +315,7 @@ impl GameClient {
             server_name: w.server_name,
             map,
             world,
-            map_mesh,
+            level,
             sky_mesh,
             mode: w.mode,
             gs: w.settings,
@@ -572,7 +525,7 @@ impl GameClient {
     fn load_map(&mut self, map: MapId, mode: Mode, gs: GameSettings) {
         self.map = maps::build(map);
         self.world = World::from_map(&self.map);
-        self.map_mesh = build_map_mesh(&self.map);
+        self.level = crate::level::Level::build(&self.map);
         self.sky_mesh = build_sky(&self.map);
         self.mode = mode;
         self.gs = gs;

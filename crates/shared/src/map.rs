@@ -10,6 +10,8 @@ pub enum MapId {
     Cargo,
     Wreck,
     Site,
+    /// 1 × 1 km battle royale test island (not in the normal rotation).
+    Island,
 }
 
 impl MapId {
@@ -20,6 +22,15 @@ impl MapId {
         MapId::Market,
         MapId::Cargo,
     ];
+    /// Every map, the big test island included.
+    pub const EVERY: [MapId; 6] = [
+        MapId::Wreck,
+        MapId::Site,
+        MapId::Depot,
+        MapId::Market,
+        MapId::Cargo,
+        MapId::Island,
+    ];
     pub fn short(self) -> &'static str {
         match self {
             MapId::Depot => "depot",
@@ -27,6 +38,7 @@ impl MapId {
             MapId::Cargo => "cargo",
             MapId::Wreck => "wreck",
             MapId::Site => "site",
+            MapId::Island => "island",
         }
     }
     /// The map's name in the current language.
@@ -38,13 +50,16 @@ impl MapId {
             MapId::Cargo => t("Вантаж", "Cargo"),
             MapId::Wreck => t("Аварія", "Wreck"),
             MapId::Site => t("Будмайданчик", "Building Site"),
+            MapId::Island => t("Острів", "Island"),
         }
     }
     pub fn parse(s: &str) -> Option<MapId> {
         let s = s.to_ascii_lowercase();
-        MapId::ALL
-            .into_iter()
-            .find(|m| m.short() == s || crate::maps::build(*m).name.to_lowercase() == s)
+        MapId::EVERY.into_iter().find(|m| {
+            m.short() == s
+                || crate::lang::with(crate::lang::Lang::Uk, || m.name().to_lowercase()) == s
+                || crate::lang::with(crate::lang::Lang::En, || m.name().to_lowercase()) == s
+        })
     }
 }
 

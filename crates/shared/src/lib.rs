@@ -6,6 +6,7 @@ pub mod lang;
 pub mod map;
 pub mod maps;
 pub mod maps_extra;
+pub mod maps_island;
 pub mod maps_market;
 pub mod maps_wreck;
 pub mod net;

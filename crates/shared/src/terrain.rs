@@ -18,6 +18,22 @@ pub struct Heightmap {
     pub heights: Vec<f32>,
     /// Water surface: ground below it is under water (rivers, lakes).
     pub water: f32,
+    /// What covers each grid point (see [`paint`]); 0 lets the renderer choose by height
+    /// and slope (grass, sand, rock, snow).
+    pub paint: Vec<u8>,
+}
+
+/// Ground cover painted onto grid points.
+pub mod paint {
+    pub const AUTO: u8 = 0;
+    pub const ROAD: u8 = 1;
+    pub const DIRT: u8 = 2;
+    pub const FIELD_A: u8 = 3;
+    pub const FIELD_B: u8 = 4;
+    pub const PAVED: u8 = 5;
+    pub const SAND: u8 = 6;
+    pub const FOREST: u8 = 7;
+    pub const MEADOW: u8 = 8;
 }
 
 /// Steepest ground you can walk up (rise over run): about 45°.
@@ -35,6 +51,7 @@ impl Heightmap {
             h,
             heights: vec![y; w * h],
             water: f32::NEG_INFINITY,
+            paint: vec![paint::AUTO; w * h],
         }
     }
 
@@ -43,6 +60,21 @@ impl Heightmap {
         let i = i.clamp(0, self.w as i64 - 1) as usize;
         let j = j.clamp(0, self.h as i64 - 1) as usize;
         self.heights[j * self.w + i]
+    }
+
+    /// Ground cover of grid point (i, j), clamped to the grid.
+    pub fn paint_at(&self, i: i64, j: i64) -> u8 {
+        let i = i.clamp(0, self.w as i64 - 1) as usize;
+        let j = j.clamp(0, self.h as i64 - 1) as usize;
+        self.paint[j * self.w + i]
+    }
+
+    /// Grid point nearest to world (x, z), if inside the grid.
+    pub fn index_of(&self, x: f32, z: f32) -> Option<(usize, usize)> {
+        let i = ((x - self.origin.x) / self.cell).round();
+        let j = ((z - self.origin.y) / self.cell).round();
+        (i >= 0.0 && j >= 0.0 && (i as usize) < self.w && (j as usize) < self.h)
+            .then_some((i as usize, j as usize))
     }
 
     pub fn set(&mut self, i: usize, j: usize, y: f32) {
@@ -236,8 +268,17 @@ mod tests {
         let m = hills();
         let mut rng = crate::rng::Rng::new(5);
         for _ in 0..500 {
-            let o = vec3(rng.range(-40.0, 40.0), rng.range(8.0, 20.0), rng.range(-40.0, 40.0));
-            let d = vec3(rng.range(-1.0, 1.0), rng.range(-1.0, -0.05), rng.range(-1.0, 1.0)).normalize();
+            let o = vec3(
+                rng.range(-40.0, 40.0),
+                rng.range(8.0, 20.0),
+                rng.range(-40.0, 40.0),
+            );
+            let d = vec3(
+                rng.range(-1.0, 1.0),
+                rng.range(-1.0, -0.05),
+                rng.range(-1.0, 1.0),
+            )
+            .normalize();
             if let Some((t, n)) = m.raycast(o, d, 200.0) {
                 let p = o + d * t;
                 assert!((p.y - m.height(p.x, p.z)).abs() < 0.02, "{p}");
@@ -245,8 +286,12 @@ mod tests {
             }
         }
         // straight down always hits, straight up never
-        assert!(m.raycast(vec3(1.0, 30.0, 1.0), vec3(0.0, -1.0, 0.0), 100.0).is_some());
-        assert!(m.raycast(vec3(1.0, 30.0, 1.0), vec3(0.0, 1.0, 0.0), 100.0).is_none());
+        assert!(m
+            .raycast(vec3(1.0, 30.0, 1.0), vec3(0.0, -1.0, 0.0), 100.0)
+            .is_some());
+        assert!(m
+            .raycast(vec3(1.0, 30.0, 1.0), vec3(0.0, 1.0, 0.0), 100.0)
+            .is_none());
     }
 
     #[test]

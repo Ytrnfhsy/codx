@@ -11,6 +11,11 @@ pub fn build(id: MapId) -> Map {
         MapId::Cargo => cargo(),
         MapId::Wreck => crate::maps_wreck::wreck(),
         MapId::Site => crate::maps_extra::site(),
+        // generating the island takes a moment: build it once, hand out copies
+        MapId::Island => {
+            static ISLAND: std::sync::OnceLock<Map> = std::sync::OnceLock::new();
+            ISLAND.get_or_init(crate::maps_island::island).clone()
+        }
     }
 }
 

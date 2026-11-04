@@ -553,7 +553,8 @@ impl GameClient {
     fn draw_minimap(&self, ui: &Ui) {
         let size = (screen_height() * 0.26).clamp(150.0, 240.0);
         let (x0, y0) = (16.0, 16.0);
-        let scale = size / 55.0; // pixels per meter
+        // pixels per metre: big maps show a wider area
+        let scale = size / if self.level.terrain { 200.0 } else { 55.0 };
         let c = vec2(x0 + size / 2.0, y0 + size / 2.0);
         draw_rectangle(
             x0 - 4.0,
@@ -584,7 +585,28 @@ impl GameClient {
             (size * dpi) as i32,
             (size * dpi) as i32,
         )));
+        if let Some(img) = &self.level.image {
+            // big maps: the painted map, turned with the view
+            let corner = |u: f32, v: f32| {
+                let w = img.origin + vec2(u, v) * img.size;
+                Vertex::new2(to_map(vec3(w.x, 0.0, w.y)).extend(0.0), vec2(u, v), WHITE)
+            };
+            let mesh = Mesh {
+                vertices: vec![
+                    corner(0.0, 0.0),
+                    corner(1.0, 0.0),
+                    corner(1.0, 1.0),
+                    corner(0.0, 1.0),
+                ],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                texture: Some(img.tex.clone()),
+            };
+            draw_mesh(&mesh);
+        }
         for b in &self.map.boxes {
+            if self.level.terrain {
+                break;
+            }
             if !b.visible || b.min.y < -0.5 || b.max.y < 0.3 && !b.solid {
                 if b.visible && !b.solid && b.max.y < 0.3 {
                     // floor paint (roads, pads)

@@ -188,24 +188,41 @@ pub fn render_world(
     view: &View,
 ) -> Vec<NameTag> {
     let fog = fog_color(g);
-    if settings.shadows
-        && g.shadow
+    let (fog_near, fog_far) = if g.level.terrain {
+        crate::level::TERRAIN_FOG
+    } else {
+        crate::level::ARENA_FOG
+    };
+    if settings.shadows {
+        // big maps: the shadow map covers the area around the camera and follows it
+        let (lo, hi) = if g.level.terrain {
+            let snap = 64.0;
+            let c = vec2(
+                (view.pos.x / snap).round() * snap,
+                (view.pos.z / snap).round() * snap,
+            );
+            let r = 192.0;
+            (
+                vec3(c.x - r, g.level.min.y, c.y - r),
+                vec3(c.x + r, g.level.max.y, c.y + r),
+            )
+        } else {
+            (g.level.min, g.level.max)
+        };
+        let centre = vec2((lo.x + hi.x) * 0.5, (lo.z + hi.z) * 0.5);
+        if g.shadow
             .as_ref()
-            .is_none_or(|s| s.res != shadow_res(settings))
-    {
-        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-        for b in g.map.boxes.iter().filter(|b| b.visible) {
-            lo = lo.min(b.min);
-            hi = hi.max(b.max);
+            .is_none_or(|s| s.res != shadow_res(settings) || (s.centre - centre).length() > 1.0)
+        {
+            let casters = g.level.casters(lo, hi);
+            g.shadow = Some(crate::mesh::ShadowMap::render(
+                mats,
+                &casters,
+                lo,
+                hi,
+                shadow_res(settings),
+            ));
         }
-        lo.y = lo.y.max(-1.0);
-        g.shadow = Some(crate::mesh::ShadowMap::render(
-            mats,
-            &g.map_mesh,
-            lo,
-            hi,
-            shadow_res(settings),
-        ));
     }
     mats.set_lighting(&crate::mesh::Lighting {
         shadow: g.shadow.as_ref().filter(|_| settings.shadows),
@@ -215,7 +232,7 @@ pub fn render_world(
     });
     set_camera(&view.cam);
     clear_background(fog);
-    mats.set_view(view.pos, fog, 55.0, 230.0);
+    mats.set_view(view.pos, fog, fog_near, fog_far);
 
     // sky (follows the camera, no fog)
     let sky_model = Mat4::from_translation(vec3(view.pos.x, 0.0, view.pos.z));
@@ -231,10 +248,36 @@ pub fn render_world(
         let gl = unsafe { get_internal_gl() }.quad_gl;
         gl.pop_model_matrix();
     }
-    mats.set_view(view.pos, fog, 55.0, 230.0);
+    mats.set_view(view.pos, fog, fog_near, fog_far);
 
-    // far ground outside the playable area
-    {
+    // far ground outside the playable area (the sea around an island)
+    if g.level.terrain {
+        let y = g.map.terrain.as_ref().map(|t| t.water).unwrap_or(0.0) - 0.05;
+        let mut far = crate::mesh::MeshBuilder::new();
+        // a frame round the terrain (inside it the tiles have their own water)
+        let s = 3000.0;
+        let (a, b) = (g.level.min, g.level.max);
+        let sea = [70, 132, 176, 255];
+        for (x0, z0, x1, z1) in [
+            (-s, -s, s, a.z),
+            (-s, b.z, s, s),
+            (-s, a.z, a.x, b.z),
+            (b.x, a.z, s, b.z),
+        ] {
+            far.add_quad(
+                [
+                    vec3(x0, y, z0),
+                    vec3(x0, y, z1),
+                    vec3(x1, y, z1),
+                    vec3(x1, y, z0),
+                ],
+                sea,
+            );
+        }
+        gl_use_material(&mats.world);
+        far.draw();
+        gl_use_default_material();
+    } else {
         let c = g.map.ground_color();
         let mut far = crate::mesh::MeshBuilder::new();
         let s = 600.0;
@@ -254,7 +297,7 @@ pub fn render_world(
     }
 
     // level
-    mats.draw_toon(&g.map_mesh);
+    g.level.draw(mats, view.pos, &view.matrix);
 
     // dynamic objects
     let mut m = std::mem::take(&mut g.frame_mesh);
@@ -494,6 +537,9 @@ pub fn render_world(
         }
     }
     mats.draw_toon(&m);
+
+    // rivers, lakes and the sea
+    g.level.draw_water(mats, view.pos);
 
     // shadows + particles (blended)
     let fx = kc.map(|k| &k.fx).unwrap_or(&g.fx);

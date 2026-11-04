@@ -8,6 +8,7 @@ mod effects;
 mod game;
 mod hud;
 mod killcam;
+mod level;
 mod menu;
 mod mesh;
 mod models;

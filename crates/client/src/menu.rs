@@ -458,12 +458,12 @@ pub fn draw_menu(
             if d != 0 {
                 hs.mode = modes[((mi as i32 + d).rem_euclid(2)) as usize].into();
             }
-            let maps = MapId::ALL;
+            let maps = MapId::EVERY;
             let cur = MapId::parse(&hs.map).unwrap_or(MapId::Depot);
             let ci = maps.iter().position(|m| *m == cur).unwrap_or(0);
             let d = ui.stepper(
                 t("Карта", "Map"),
-                toon_shared::maps::build(cur).name,
+                cur.name(),
                 x + 36.0 + (pw - 60.0) / 2.0,
                 y + 214.0,
                 (pw - 60.0) / 2.0,

@@ -813,7 +813,8 @@ impl Game {
             for _ in 0..48 {
                 let p = self.nav.random_point(&mut self.rng);
                 // ground floor only (no spawning on roofs or balconies), with room to stand
-                if p.y > 0.6
+                let floor = self.world.ground(p.x, p.z).unwrap_or(0.0);
+                if p.y > floor + 0.6
                     || !toon_shared::physics::fits(
                         &self.world,
                         p + vec3(0.0, 0.05, 0.0),

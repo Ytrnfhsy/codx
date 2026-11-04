@@ -11,6 +11,8 @@ use toon_shared::physics::{Aabb, World};
 use toon_shared::rng::Rng;
 
 const CELL: f32 = 0.5;
+/// Grid on big terrain maps (a 0.5 m grid over a square kilometre would not fit in memory).
+const TERRAIN_CELL: f32 = 2.0;
 const CLEAR_R: f32 = 0.4;
 /// Highest step a bot climbs between neighbouring cells (stairs are 0.34).
 const MAX_UP: f32 = 0.55;
@@ -22,11 +24,16 @@ struct NavNode {
     links: Vec<(u32, f32)>,
     /// Reachable from the spawn areas (rooftops without stairs are not).
     reachable: bool,
+    /// Stands on the terrain (not on a box).
+    ground: bool,
 }
 
 pub struct Nav {
     ox: f32,
     oz: f32,
+    cell: f32,
+    /// Big terrain map (hills: steeper links, longer straight walks).
+    terrain: bool,
     pub w: i32,
     pub h: i32,
     /// Node ids per column, sorted by height.
@@ -52,13 +59,31 @@ impl Ord for Open {
     }
 }
 
+/// Nothing solid in the way of a body walking straight from `a` to `b`.
+fn walkable_between(world: &World, a: Vec3, b: Vec3) -> bool {
+    (1..4).all(|k| {
+        let p = a.lerp(b, k as f32 / 4.0);
+        let y = world
+            .ground(p.x, p.z)
+            .map(|g| g.max(p.y.min(a.y.max(b.y))))
+            .unwrap_or(p.y);
+        let bb = Aabb {
+            min: vec3(p.x - 0.3, y + 0.55, p.z - 0.3),
+            max: vec3(p.x + 0.3, y + 1.7, p.z + 0.3),
+        };
+        !world.overlaps(&bb)
+    })
+}
+
 impl Nav {
     pub fn build(map: &Map, world: &World) -> Nav {
         let ox = map.min.x;
         let oz = map.min.y;
-        let w = ((map.max.x - map.min.x) / CELL).ceil() as i32;
-        let h = ((map.max.y - map.min.y) / CELL).ceil() as i32;
-        let center = |i: i32, j: i32| (ox + (i as f32 + 0.5) * CELL, oz + (j as f32 + 0.5) * CELL);
+        let ground = world.terrain.clone();
+        let cell = if ground.is_some() { TERRAIN_CELL } else { CELL };
+        let w = ((map.max.x - map.min.x) / cell).ceil() as i32;
+        let h = ((map.max.y - map.min.y) / cell).ceil() as i32;
+        let center = |i: i32, j: i32| (ox + (i as f32 + 0.5) * cell, oz + (j as f32 + 0.5) * cell);
 
         // candidate floor heights: the top of every solid box under a column's centre
         let mut tops: Vec<Vec<f32>> = vec![Vec::new(); (w * h) as usize];
@@ -66,13 +91,29 @@ impl Nav {
             if b.max.y > 30.0 || !m.blocks_movement() {
                 continue; // invisible clip ceilings, and cloth nobody can stand on
             }
-            let i0 = (((b.min.x - ox) / CELL) - 0.5).ceil().max(0.0) as i32;
-            let i1 = (((b.max.x - ox) / CELL) - 0.5).floor().min((w - 1) as f32) as i32;
-            let j0 = (((b.min.z - oz) / CELL) - 0.5).ceil().max(0.0) as i32;
-            let j1 = (((b.max.z - oz) / CELL) - 0.5).floor().min((h - 1) as f32) as i32;
+            let i0 = (((b.min.x - ox) / cell) - 0.5).ceil().max(0.0) as i32;
+            let i1 = (((b.max.x - ox) / cell) - 0.5).floor().min((w - 1) as f32) as i32;
+            let j0 = (((b.min.z - oz) / cell) - 0.5).ceil().max(0.0) as i32;
+            let j1 = (((b.max.z - oz) / cell) - 0.5).floor().min((h - 1) as f32) as i32;
             for j in j0..=j1 {
                 for i in i0..=i1 {
                     tops[(j * w + i) as usize].push(b.max.y);
+                }
+            }
+        }
+        // the ground itself, where it is not too steep to walk; tops buried in it go
+        let mut on_ground = vec![f32::NAN; (w * h) as usize];
+        if let Some(t) = &ground {
+            for j in 0..h {
+                for i in 0..w {
+                    let (x, z) = center(i, j);
+                    let y = t.height(x, z);
+                    let k = (j * w + i) as usize;
+                    tops[k].retain(|&top| top > y + 0.1);
+                    if t.slope(x, z) <= toon_shared::terrain::MAX_WALK_SLOPE * 1.05 {
+                        tops[k].push(y);
+                        on_ground[k] = y;
+                    }
                 }
             }
         }
@@ -98,6 +139,7 @@ impl Nav {
                             pos: vec3(x, y, z),
                             links: Vec::new(),
                             reachable: false,
+                            ground: on_ground[k] == y,
                         });
                     }
                 }
@@ -107,6 +149,8 @@ impl Nav {
         let mut nav = Nav {
             ox,
             oz,
+            cell,
+            terrain: ground.is_some(),
             w,
             h,
             cols,
@@ -131,25 +175,34 @@ impl Nav {
                         (-1, -1),
                     ] {
                         let diag = di != 0 && dj != 0;
-                        let Some(m) = nav.step_target(i + di, j + dj, y, !diag) else {
+                        let Some(m) = nav.step_target(n, i + di, j + dj, !diag) else {
                             continue;
                         };
                         if diag
-                            && (nav.step_target(i + di, j, y, false).is_none()
-                                || nav.step_target(i, j + dj, y, false).is_none())
+                            && (nav.step_target(n, i + di, j, false).is_none()
+                                || nav.step_target(n, i, j + dj, false).is_none())
                         {
                             continue;
                         }
-                        let dy = nav.nodes[m as usize].pos.y - y;
-                        let flat = if diag { CELL * 1.414 } else { CELL };
-                        let cost = flat
+                        let (pa, pb) = (nav.nodes[n as usize].pos, nav.nodes[m as usize].pos);
+                        // on the coarse grid a wall can stand between two free cells
+                        if nav.cell > CELL && !walkable_between(world, pa, pb) {
+                            continue;
+                        }
+                        let dy = pb.y - y;
+                        let flat = if diag { nav.cell * 1.414 } else { nav.cell };
+                        let mut cost = flat
                             + if dy > 0.0 {
                                 dy * 0.6
-                            } else if dy < -MAX_UP {
+                            } else if dy < -MAX_UP && !nav.nodes[m as usize].ground {
                                 1.0 - dy * 0.3
                             } else {
                                 0.0
                             };
+                        // wading is slow
+                        if ground.as_ref().is_some_and(|t| pb.y < t.water - 0.35) {
+                            cost *= 2.5;
+                        }
                         links.push((m, cost));
                     }
                     nav.nodes[n as usize].links = links;
@@ -193,13 +246,22 @@ impl Nav {
         nav
     }
 
-    /// Node in column (i, j) reachable from height `y` (by stepping, or dropping if allowed).
-    fn step_target(&self, i: i32, j: i32, y: f32, allow_drop: bool) -> Option<u32> {
+    /// Node in column (i, j) reachable from node `from` (by stepping, or dropping if allowed).
+    fn step_target(&self, from: u32, i: i32, j: i32, allow_drop: bool) -> Option<u32> {
         let col = self.col(i, j)?;
+        let a = &self.nodes[from as usize];
+        let y = a.pos.y;
         let mut best: Option<(u32, f32)> = None;
         for &m in col {
-            let dy = self.nodes[m as usize].pos.y - y;
-            let ok = dy.abs() <= MAX_UP || (allow_drop && dy < 0.0 && dy >= -MAX_DROP);
+            let b = &self.nodes[m as usize];
+            let dy = b.pos.y - y;
+            // walking over the hills: as steep as the ground may be
+            let up = if a.ground && b.ground {
+                self.cell * toon_shared::terrain::MAX_WALK_SLOPE
+            } else {
+                MAX_UP
+            };
+            let ok = dy.abs() <= up || (allow_drop && dy < 0.0 && dy >= -MAX_DROP);
             if ok && best.map(|b| dy.abs() < b.1).unwrap_or(true) {
                 best = Some((m, dy.abs()));
             }
@@ -217,8 +279,8 @@ impl Nav {
 
     pub fn cell_of(&self, p: Vec3) -> (i32, i32) {
         (
-            ((p.x - self.ox) / CELL).floor() as i32,
-            ((p.z - self.oz) / CELL).floor() as i32,
+            ((p.x - self.ox) / self.cell).floor() as i32,
+            ((p.z - self.oz) / self.cell).floor() as i32,
         )
     }
 
@@ -284,10 +346,12 @@ impl Nav {
         let d = b - a;
         let len = vec3(d.x, 0.0, d.z).length();
         // nothing walkable is steeper than stairs (stacked flights share the same footprint)
-        if d.y.abs() > len * 0.75 + 0.3 {
+        let steep = if self.terrain { 1.05 } else { 0.75 };
+        if d.y.abs() > len * steep + 0.3 {
             return false;
         }
-        let n = (len / 0.25).ceil().max(1.0) as i32;
+        let tol = (self.cell * 0.5).max(0.6);
+        let n = (len / (self.cell * 0.5)).ceil().max(1.0) as i32;
         for k in 0..=n {
             let t = k as f32 / n as f32;
             let p = a + d * t;
@@ -297,7 +361,7 @@ impl Nav {
             };
             if !col
                 .iter()
-                .any(|&m| (self.nodes[m as usize].pos.y - p.y).abs() < 0.6)
+                .any(|&m| (self.nodes[m as usize].pos.y - p.y).abs() < tol)
             {
                 return false;
             }
@@ -360,7 +424,8 @@ impl Nav {
         let mut k = 1;
         while k < pts.len() {
             let mut far = k;
-            for m in (k..pts.len()).rev() {
+            // look a limited way ahead (long paths over a big map)
+            for m in (k..pts.len().min(k + 40)).rev() {
                 if self.clear_line(anchor, pts[m]) {
                     far = m;
                     break;
@@ -518,5 +583,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn island_paths_cross_the_hills_and_the_river() {
+        let m = maps::build(MapId::Island);
+        let w = World::from_map(&m);
+        let t = std::time::Instant::now();
+        let nav = Nav::build(&m, &w);
+        eprintln!(
+            "island nav: {} nodes, {} reachable, built in {:?}",
+            nav.node_count(),
+            nav.reachable_count(),
+            t.elapsed()
+        );
+        assert!(nav.reachable_count() > 100_000);
+        let a = m.spawns[0][0].pos;
+        let b = m.spawns[1][0].pos;
+        let t = std::time::Instant::now();
+        let p = nav.path(a, b).expect("no path across the island");
+        eprintln!("path of {} points in {:?}", p.len(), t.elapsed());
+        let end = *p.last().unwrap();
+        assert!(vec3(end.x - b.x, 0.0, end.z - b.z).length() < 3.0);
+        // across the river to the port town in the south-east
+        let port = vec3(150.0, 0.0, 330.0);
+        assert!(nav.path(a, port).is_some(), "no path to the port");
     }
 }

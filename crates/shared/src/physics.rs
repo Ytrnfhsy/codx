@@ -335,7 +335,11 @@ impl World {
     /// Height of the floor below `p` (searching down to `p.y - max_drop`).
     pub fn floor_below(&self, p: Vec3, max_drop: f32) -> Option<f32> {
         let boxes = self
-            .box_ray(p + vec3(0.0, 0.05, 0.0), vec3(0.0, -1.0, 0.0), max_drop + 0.05)
+            .box_ray(
+                p + vec3(0.0, 0.05, 0.0),
+                vec3(0.0, -1.0, 0.0),
+                max_drop + 0.05,
+            )
             .map(|(t, _)| p.y + 0.05 - t);
         // the ground straight under p (if it is not above p)
         let ground = self.terrain.as_ref().and_then(|t| {
@@ -529,8 +533,14 @@ impl Body {
         self.vel.y = self.vel.y.max(0.0);
     }
 
-    fn step_in_world(&mut self, world: &World, inp: &MoveInput, t: &MoveTuning, dt: f32, wish: Vec3) {
-
+    fn step_in_world(
+        &mut self,
+        world: &World,
+        inp: &MoveInput,
+        t: &MoveTuning,
+        dt: f32,
+        wish: Vec3,
+    ) {
         let hv = vec3(self.vel.x, 0.0, self.vel.z);
         let new_hv = if self.on_ground {
             // heavier weapons = more inertia (slower to speed up and to stop)
@@ -970,7 +980,8 @@ mod tests {
 
     /// A map with only terrain: a gentle ramp up to x = 20, then a cliff.
     fn slope_world() -> World {
-        let mut hm = crate::terrain::Heightmap::flat(vec2(-30.0, -30.0), vec2(40.0, 30.0), 1.0, 0.0);
+        let mut hm =
+            crate::terrain::Heightmap::flat(vec2(-30.0, -30.0), vec2(40.0, 30.0), 1.0, 0.0);
         for j in 0..hm.h {
             for i in 0..hm.w {
                 let p = hm.point(i, j);
@@ -1021,22 +1032,42 @@ mod tests {
             };
             b.step(&w, &inp, &t, 1.0 / 60.0);
             let g = w.ground(b.pos.x, b.pos.z).unwrap();
-            assert!(b.pos.y >= g - 1e-3, "never inside the ground: {} < {g}", b.pos.y);
+            assert!(
+                b.pos.y >= g - 1e-3,
+                "never inside the ground: {} < {g}",
+                b.pos.y
+            );
             highest = highest.max(b.pos.y);
         }
         assert!(highest > 7.5, "walked up the ramp: {highest}");
-        assert!(b.pos.x < 20.5 && b.pos.y < 9.0, "stopped at the cliff: {}", b.pos);
+        assert!(
+            b.pos.x < 20.5 && b.pos.y < 9.0,
+            "stopped at the cliff: {}",
+            b.pos
+        );
         // a jump lands back on the slope, and walking down it stays on the ground
         let mut b = Body {
             pos: vec3(10.0, 4.0, 0.0),
             on_ground: true,
             ..Default::default()
         };
-        b.step(&w, &MoveInput { jump: true, ..Default::default() }, &t, 1.0 / 60.0);
+        b.step(
+            &w,
+            &MoveInput {
+                jump: true,
+                ..Default::default()
+            },
+            &t,
+            1.0 / 60.0,
+        );
         for _ in 0..60 {
             b.step(&w, &MoveInput::default(), &t, 1.0 / 60.0);
         }
-        assert!(b.on_ground && (b.pos.y - 4.0).abs() < 0.05, "landed: {}", b.pos);
+        assert!(
+            b.on_ground && (b.pos.y - 4.0).abs() < 0.05,
+            "landed: {}",
+            b.pos
+        );
         let mut airborne = 0;
         for _ in 0..160 {
             let inp = MoveInput {
@@ -1049,7 +1080,10 @@ mod tests {
                 airborne += 1;
             }
         }
-        assert!(airborne < 5, "ran down the slope without bouncing: {airborne} frames in the air");
+        assert!(
+            airborne < 5,
+            "ran down the slope without bouncing: {airborne} frames in the air"
+        );
         assert!(b.pos.x < 2.0, "{}", b.pos);
     }
 

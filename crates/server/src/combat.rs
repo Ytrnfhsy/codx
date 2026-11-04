@@ -700,7 +700,7 @@ impl Game {
                     let mut p = tgt + dir * off + side;
                     p.y = self
                         .world
-                        .floor_below(vec3(p.x, 30.0, p.z), 40.0)
+                        .floor_below(vec3(p.x, 120.0, p.z), 140.0)
                         .unwrap_or(0.0)
                         + 0.3;
                     self.blasts.push(PendingBlast {

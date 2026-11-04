@@ -672,6 +672,8 @@ pub struct ShadowMap {
     /// Depth units per metre along the sun direction.
     pub depth_per_m: f32,
     pub res: u32,
+    /// Middle of the area it covers (x, z).
+    pub centre: Vec2,
 }
 
 struct SunCamera<'a> {
@@ -695,8 +697,14 @@ impl macroquad::camera::Camera for SunCamera<'_> {
 }
 
 impl ShadowMap {
-    /// Renders the static level from the sun. `bounds` is the level's AABB.
-    pub fn render(mats: &Materials, level: &ToonMesh, min: Vec3, max: Vec3, res: u32) -> ShadowMap {
+    /// Renders the static level (`casters`) from the sun over the box `min..max`.
+    pub fn render(
+        mats: &Materials,
+        casters: &[&MeshBuilder],
+        min: Vec3,
+        max: Vec3,
+        res: u32,
+    ) -> ShadowMap {
         let l = LIGHT_DIR.normalize();
         let centre = (min + max) * 0.5;
         let view = Mat4::look_at_rh(centre + l * 200.0, centre, Vec3::Y);
@@ -729,7 +737,9 @@ impl ShadowMap {
         });
         clear_background(WHITE);
         gl_use_material(&mats.depth);
-        level.fill.draw();
+        for c in casters {
+            c.draw();
+        }
         gl_use_default_material();
         set_default_camera();
         ShadowMap {
@@ -737,6 +747,7 @@ impl ShadowMap {
             matrix,
             depth_per_m: 1.0 / (far - near),
             res,
+            centre: vec2(centre.x, centre.z),
         }
     }
 }
