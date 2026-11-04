@@ -306,5 +306,6 @@ pub fn site() -> Map {
         sky: [176, 188, 200],
         fog: [198, 204, 210],
         tint: [0.93, 0.96, 1.03],
+        terrain: None,
     }
 }

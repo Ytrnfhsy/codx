@@ -649,5 +649,6 @@ pub fn wreck() -> Map {
         sky: [200, 222, 236],
         fog: [232, 214, 180],
         tint: [1.06, 1.0, 0.9],
+        terrain: None,
     }
 }

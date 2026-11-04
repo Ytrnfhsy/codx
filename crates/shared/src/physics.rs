@@ -41,6 +41,8 @@ pub struct World {
     /// What each box is made of (parallel to `boxes`).
     pub mats: Vec<Mat>,
     pub ladders: Vec<Ladder>,
+    /// Hills and valleys under everything (big outdoor maps).
+    pub terrain: Option<std::sync::Arc<crate::terrain::Heightmap>>,
     origin: (f32, f32),
     dims: (i32, i32),
     cells: Vec<Vec<u32>>,
@@ -68,6 +70,7 @@ impl World {
             boxes,
             mats,
             ladders: map.ladders.clone(),
+            terrain: map.terrain.clone(),
             origin,
             dims,
             cells: Vec::new(),
@@ -197,8 +200,22 @@ impl World {
     }
 
     /// Raycast against world geometry. Returns distance and surface normal.
-    /// Everything counts here, cloth too (it hides what is behind it).
+    /// Everything counts here, cloth too (it hides what is behind it), and the ground.
     pub fn raycast(&self, o: Vec3, d: Vec3, max_dist: f32) -> Option<(f32, Vec3)> {
+        let mut best = self.box_ray(o, d, max_dist);
+        let limit = best.map_or(max_dist, |b| b.0);
+        if let Some(t) = &self.terrain {
+            if let Some((tt, n)) = t.raycast(o, d, limit) {
+                if best.is_none_or(|b| tt < b.0) {
+                    best = Some((tt, n));
+                }
+            }
+        }
+        best
+    }
+
+    /// `raycast` against the boxes only.
+    fn box_ray(&self, o: Vec3, d: Vec3, max_dist: f32) -> Option<(f32, Vec3)> {
         let mut best: Option<(f32, Vec3)> = None;
         let inv = vec3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z);
         let mut limit = max_dist;
@@ -249,6 +266,13 @@ impl World {
             }
             stop <= leave
         });
+        // the ground stops it too
+        if let Some(t) = &self.terrain {
+            if let Some((tt, n)) = t.raycast(o, d, stop) {
+                stop = tt;
+                normal = n;
+            }
+        }
         let mut pierced: Vec<Pierced> = soft
             .into_iter()
             .map(|(_, p)| p)
@@ -298,17 +322,35 @@ impl World {
             }
             false
         });
+        if let Some(t) = &self.terrain {
+            let g = t.height(c.x, c.z);
+            if c.y - r < g {
+                c.y = g + r;
+                normal += t.normal(c.x, c.z);
+            }
+        }
         (normal != Vec3::ZERO).then(|| (c, normal.normalize_or_zero()))
     }
 
     /// Height of the floor below `p` (searching down to `p.y - max_drop`).
     pub fn floor_below(&self, p: Vec3, max_drop: f32) -> Option<f32> {
-        self.raycast(
-            p + vec3(0.0, 0.05, 0.0),
-            vec3(0.0, -1.0, 0.0),
-            max_drop + 0.05,
-        )
-        .map(|(t, _)| p.y + 0.05 - t)
+        let boxes = self
+            .box_ray(p + vec3(0.0, 0.05, 0.0), vec3(0.0, -1.0, 0.0), max_drop + 0.05)
+            .map(|(t, _)| p.y + 0.05 - t);
+        // the ground straight under p (if it is not above p)
+        let ground = self.terrain.as_ref().and_then(|t| {
+            let g = t.height(p.x, p.z);
+            (g <= p.y + 0.05 && g >= p.y - max_drop).then_some(g)
+        });
+        match (boxes, ground) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// The ground's height at (x, z), if the map has terrain.
+    pub fn ground(&self, x: f32, z: f32) -> Option<f32> {
+        self.terrain.as_ref().map(|t| t.height(x, z))
     }
 }
 
@@ -446,11 +488,48 @@ impl Body {
             1.0
         };
         let wish = (fwd * f + right * r) * self.max_speed(inp, t) * dir_mult;
+        // wading through rivers and shallow sea is slow
+        let wish = match &world.terrain {
+            Some(m) if self.pos.y < m.water - 0.35 => wish * 0.55,
+            _ => wish,
+        };
 
         self.ladder_free = (self.ladder_free - dt).max(0.0);
         if self.climb(world, inp, t, dt) {
             return;
         }
+        let start = self.pos;
+        let was_grounded = self.on_ground;
+        self.step_in_world(world, inp, t, dt, wish);
+        self.stand_on_ground(world, start, was_grounded);
+    }
+
+    /// Keeps the body on the terrain: it cannot sink into the ground or walk up slopes
+    /// steeper than `MAX_WALK_SLOPE`, and it lands on it when falling.
+    fn stand_on_ground(&mut self, world: &World, start: Vec3, was_grounded: bool) {
+        let Some(tr) = &world.terrain else { return };
+        let g = tr.height(self.pos.x, self.pos.z);
+        if self.pos.y >= g {
+            return;
+        }
+        let moved = vec3(self.pos.x - start.x, 0.0, self.pos.z - start.z).length();
+        let rise = g - start.y;
+        if was_grounded && rise > moved * crate::terrain::MAX_WALK_SLOPE + 0.04 {
+            // too steep to walk up: stay where we were
+            self.pos.x = start.x;
+            self.pos.z = start.z;
+            let g0 = tr.height(start.x, start.z);
+            if self.pos.y < g0 {
+                self.pos.y = g0;
+            }
+        } else {
+            self.pos.y = g;
+        }
+        self.on_ground = true;
+        self.vel.y = self.vel.y.max(0.0);
+    }
+
+    fn step_in_world(&mut self, world: &World, inp: &MoveInput, t: &MoveTuning, dt: f32, wish: Vec3) {
 
         let hv = vec3(self.vel.x, 0.0, self.vel.z);
         let new_hv = if self.on_ground {
@@ -785,6 +864,7 @@ mod tests {
             sky: [0; 3],
             fog: [0; 3],
             tint: [1.0; 3],
+            terrain: None,
         };
         let w = World::from_map(&map);
         let (stop, _, pierced) = w.bullet_trace(vec3(0.0, 1.5, 0.0), vec3(1.0, 0.0, 0.0), 50.0);
@@ -833,6 +913,7 @@ mod tests {
             sky: [0; 3],
             fog: [0; 3],
             tint: [1.0; 3],
+            terrain: None,
         };
         let w = World::from_map(&map);
         let t = mt();
@@ -885,6 +966,91 @@ mod tests {
             "back on the ground: {}",
             body.pos
         );
+    }
+
+    /// A map with only terrain: a gentle ramp up to x = 20, then a cliff.
+    fn slope_world() -> World {
+        let mut hm = crate::terrain::Heightmap::flat(vec2(-30.0, -30.0), vec2(40.0, 30.0), 1.0, 0.0);
+        for j in 0..hm.h {
+            for i in 0..hm.w {
+                let p = hm.point(i, j);
+                let y = if p.x < 0.0 {
+                    0.0
+                } else if p.x < 20.0 {
+                    p.x * 0.4 // 22°
+                } else {
+                    8.0 + (p.x - 20.0) * 3.0 // 72°: a cliff
+                };
+                hm.set(i, j, y);
+            }
+        }
+        let map = Map {
+            id: MapId::Depot,
+            name: "slope",
+            min: vec2(-30.0, -30.0),
+            max: vec2(40.0, 30.0),
+            boxes: Vec::new(),
+            ladders: Vec::new(),
+            spawns: [Vec::new(), Vec::new()],
+            bomb: Vec3::ZERO,
+            sites: [Vec3::ZERO; 2],
+            sky: [0; 3],
+            fog: [0; 3],
+            tint: [1.0; 3],
+            terrain: Some(std::sync::Arc::new(hm)),
+        };
+        World::from_map(&map)
+    }
+
+    #[test]
+    fn walks_up_gentle_slopes_but_not_cliffs() {
+        let w = slope_world();
+        let t = mt();
+        let east = -std::f32::consts::FRAC_PI_2;
+        let mut b = Body {
+            pos: vec3(-5.0, 0.0, 0.0),
+            on_ground: true,
+            ..Default::default()
+        };
+        let mut highest = 0.0f32;
+        for _ in 0..(8.0 * 60.0) as usize {
+            let inp = MoveInput {
+                forward: 1.0,
+                yaw: east,
+                ..Default::default()
+            };
+            b.step(&w, &inp, &t, 1.0 / 60.0);
+            let g = w.ground(b.pos.x, b.pos.z).unwrap();
+            assert!(b.pos.y >= g - 1e-3, "never inside the ground: {} < {g}", b.pos.y);
+            highest = highest.max(b.pos.y);
+        }
+        assert!(highest > 7.5, "walked up the ramp: {highest}");
+        assert!(b.pos.x < 20.5 && b.pos.y < 9.0, "stopped at the cliff: {}", b.pos);
+        // a jump lands back on the slope, and walking down it stays on the ground
+        let mut b = Body {
+            pos: vec3(10.0, 4.0, 0.0),
+            on_ground: true,
+            ..Default::default()
+        };
+        b.step(&w, &MoveInput { jump: true, ..Default::default() }, &t, 1.0 / 60.0);
+        for _ in 0..60 {
+            b.step(&w, &MoveInput::default(), &t, 1.0 / 60.0);
+        }
+        assert!(b.on_ground && (b.pos.y - 4.0).abs() < 0.05, "landed: {}", b.pos);
+        let mut airborne = 0;
+        for _ in 0..160 {
+            let inp = MoveInput {
+                forward: 1.0,
+                yaw: -east,
+                ..Default::default()
+            };
+            b.step(&w, &inp, &t, 1.0 / 60.0);
+            if !b.on_ground {
+                airborne += 1;
+            }
+        }
+        assert!(airborne < 5, "ran down the slope without bouncing: {airborne} frames in the air");
+        assert!(b.pos.x < 2.0, "{}", b.pos);
     }
 
     fn mt() -> MoveTuning {

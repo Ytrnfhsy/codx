@@ -14,6 +14,7 @@ pub mod props;
 pub mod protocol;
 pub mod ray;
 pub mod rng;
+pub mod terrain;
 pub mod tuning;
 pub mod vehicles;
 pub mod weapons;

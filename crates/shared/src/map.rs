@@ -145,6 +145,8 @@ pub struct Map {
     pub fog: [u8; 3],
     /// Colour of the light (multiplies everything lit): warm evening sun, cool overcast…
     pub tint: [f32; 3],
+    /// Hills and valleys (big outdoor maps); None = flat ground.
+    pub terrain: Option<std::sync::Arc<crate::terrain::Heightmap>>,
 }
 
 impl Map {
