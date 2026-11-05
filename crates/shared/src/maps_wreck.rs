@@ -650,5 +650,6 @@ pub fn wreck() -> Map {
         fog: [232, 214, 180],
         tint: [1.06, 1.0, 0.9],
         terrain: None,
+        loot: Vec::new(),
     }
 }

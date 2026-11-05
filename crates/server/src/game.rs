@@ -90,6 +90,10 @@ pub struct Player {
     pub progress: f32,
     pub joined_at: f64,
     pub chat_budget: f32,
+    /// Battle royale: still riding the plane.
+    pub in_plane: bool,
+    /// Battle royale body armour (0..100).
+    pub armor: f32,
 }
 
 impl Player {
@@ -158,6 +162,8 @@ impl Player {
             progress: 0.0,
             joined_at: now,
             chat_budget: 5.0,
+            in_plane: false,
+            armor: 0.0,
         }
     }
     pub fn is_bot(&self) -> bool {
@@ -295,6 +301,7 @@ pub struct Game {
     pub next_ent: u16,
     pub uav_until: [f64; 2],
     pub sab: Sab,
+    pub br: crate::br::BrState,
     pub rotation_idx: usize,
     pub outbox: Vec<(Dest, S2C, bool)>,
     pub shots: Vec<ShotFx>,
@@ -369,6 +376,7 @@ impl Game {
             next_ent: 1,
             uav_until: [0.0; 2],
             sab,
+            br: Default::default(),
             rotation_idx: 0,
             outbox: Vec::new(),
             shots: Vec::new(),
@@ -454,7 +462,7 @@ impl Game {
         GameSettings {
             score_limit: self.cfg.tdm.score_limit,
             time_limit: match self.mode {
-                Mode::Tdm => self.cfg.tdm.time_limit,
+                Mode::Tdm | Mode::Br => self.cfg.tdm.time_limit,
                 Mode::Sab => self.cfg.sab.time_limit,
             },
             rounds_to_win: self.cfg.sab.rounds_to_win,
@@ -665,6 +673,10 @@ impl Game {
     }
 
     pub fn auto_team(&self, id: u8) -> Team {
+        // battle royale: no sides, everybody goes on the same list
+        if self.mode.solo() {
+            return Team::Allies;
+        }
         let count = |t: Team| {
             self.players
                 .iter()
@@ -784,14 +796,16 @@ impl Game {
         }
         match self.state {
             MatchState::PostMatch | MatchState::RoundEnd => false,
-            MatchState::Playing => !(self.mode == Mode::Sab && self.overtime),
+            MatchState::Playing => {
+                !(self.mode == Mode::Sab && self.overtime || self.mode == Mode::Br)
+            }
             _ => true,
         }
     }
 
     pub fn respawn_delay(&self) -> f32 {
         match self.mode {
-            Mode::Tdm => self.cfg.tdm.respawn_delay,
+            Mode::Tdm | Mode::Br => self.cfg.tdm.respawn_delay,
             Mode::Sab => self.cfg.sab.respawn_delay,
         }
     }
@@ -1031,6 +1045,7 @@ impl Game {
             ),
             C2S::Melee => self.melee(id),
             C2S::PickUp(ent) => self.pick_up(id, ent),
+            C2S::BrJump => self.br_jump(id),
             C2S::UseKillstreak { target, pilot } => self.use_killstreak(id, target, pilot),
             C2S::Drive {
                 pos,
@@ -1143,7 +1158,8 @@ impl Game {
         let old = p.body.pos;
         let dh = vec3(new.x - old.x, 0.0, new.z - old.z).length();
         let dy = (new.y - old.y).abs();
-        let mut ok = dh <= p.move_budget + 0.25 && dy <= 4.0;
+        let skydiving = p.body.chute != toon_shared::physics::Chute::None;
+        let mut ok = dh <= p.move_budget + 0.25 && (dy <= 4.0 || skydiving && dy <= 8.0);
         if frozen && dh > 0.05 {
             ok = false;
         }
@@ -1161,6 +1177,12 @@ impl Game {
             p.body.vel = Vec3::from_array(inp.vel);
             p.body.stance = stance;
             p.body.on_ground = inp.flags & flags::ON_GROUND != 0;
+            if p.body.on_ground {
+                p.body.chute = toon_shared::physics::Chute::None;
+            } else if skydiving && p.body.vel.y > -12.0 {
+                // sinking slowly: the canopy is open
+                p.body.chute = toon_shared::physics::Chute::Open;
+            }
         } else {
             let life = p.life;
             let pos = p.body.pos.to_array();
@@ -1286,7 +1308,7 @@ impl Game {
         let (mode, map, round) = (self.mode, self.map.id, self.round);
         self.center_all(
             || match mode {
-                Mode::Tdm => format!("{} — {}", mode.name(), map.name()),
+                Mode::Tdm | Mode::Br => format!("{} — {}", mode.name(), map.name()),
                 Mode::Sab => tr!("{} — раунд {round}", "{} — round {round}", mode.name()),
             },
             pre as f32,
@@ -1301,6 +1323,20 @@ impl Game {
         self.sab.plant = None;
         self.sab.defuse = None;
         self.sab.dropped_since = self.time;
+    }
+
+    /// Ends the match with a free-form text (the battle royale's winner).
+    pub fn end_match_text(&mut self, text: impl Fn() -> String) {
+        if self.state == MatchState::PostMatch {
+            return;
+        }
+        self.state = MatchState::PostMatch;
+        self.state_end = self.time + POSTMATCH_TIME;
+        self.logf(format!("Матч завершено: {}", text()));
+        self.say(Dest::All, || S2C::MatchEnd {
+            winner: None,
+            text: text(),
+        });
     }
 
     pub fn end_match(&mut self, winner: Option<Team>, reason: Text) {
@@ -1377,7 +1413,9 @@ impl Game {
         self.pickups.clear();
         self.blasts.clear();
         self.reset_bomb();
+        self.br = Default::default();
         for p in self.players.iter_mut().flatten() {
+            p.in_plane = false;
             p.alive = false;
             p.respawn_at = 0.0;
             p.kills = 0;
@@ -1423,9 +1461,15 @@ impl Game {
                     let limit = match self.mode {
                         Mode::Tdm => self.cfg.tdm.time_limit,
                         Mode::Sab => self.cfg.sab.time_limit,
+                        // the zone decides when it ends
+                        Mode::Br => 1.0e6,
                     };
                     self.round_end = self.time + limit as f64 * 60.0;
-                    self.center_all(|| t("В БІЙ!", "FIGHT!").into(), 1.5);
+                    if self.mode == Mode::Br {
+                        self.br_start();
+                    } else {
+                        self.center_all(|| t("В БІЙ!", "FIGHT!").into(), 1.5);
+                    }
                 }
             }
             MatchState::Playing => {
@@ -1435,6 +1479,7 @@ impl Game {
                 }
                 if self.time >= self.round_end && !self.overtime {
                     match self.mode {
+                        Mode::Br => {}
                         Mode::Tdm => {
                             let w = if self.scores[0] > self.scores[1] {
                                 Some(Team::Allies)
@@ -1461,6 +1506,9 @@ impl Game {
                 }
                 if self.mode == Mode::Sab {
                     self.update_sab();
+                }
+                if self.mode == Mode::Br {
+                    self.update_br();
                 }
             }
             MatchState::RoundEnd => {
@@ -1510,8 +1558,15 @@ impl Game {
         let mut auto_spawn = Vec::new();
         let tuning = &self.tuning;
         let max_speed = tuning.max_sprint_speed() * 1.2;
+        let br_round = self.br.running;
         for p in self.players.iter_mut().flatten() {
-            p.move_budget = (p.move_budget + max_speed * dt).min(3.0);
+            // gliding under a parachute is faster than running
+            let speed = if p.body.chute != toon_shared::physics::Chute::None {
+                20.0
+            } else {
+                max_speed
+            };
+            p.move_budget = (p.move_budget + speed * dt).min(3.0);
             p.chat_budget = (p.chat_budget + dt * 0.5).min(5.0);
             if !p.alive {
                 if p.team.is_playing() && p.has_loadout {
@@ -1534,7 +1589,8 @@ impl Game {
                     p.reload_end = None;
                 }
             }
-            if time - p.last_damage > REGEN_DELAY as f64 && p.hp < MAX_HEALTH {
+            // no healing by itself in the battle royale (medkits do that)
+            if time - p.last_damage > REGEN_DELAY as f64 && p.hp < MAX_HEALTH && !br_round {
                 p.hp = (p.hp + REGEN_RATE * dt).min(MAX_HEALTH);
             }
             if p.body.pos.y < -15.0 {
@@ -1636,7 +1692,11 @@ impl Game {
             .iter()
             .flatten()
             .filter(|p| p.team.is_playing())
-            .filter(|p| p.id == id || p.team == my_team && my_team.is_playing() || near(p.body.pos, INTEREST_RANGE))
+            .filter(|p| {
+                p.id == id
+                    || p.team == my_team && my_team.is_playing() && !self.mode.solo()
+                    || near(p.body.pos, INTEREST_RANGE)
+            })
             .map(|p| {
                 let mut f = p.flags;
                 if p.reload_end.is_some() {
@@ -1648,7 +1708,7 @@ impl Game {
                 if self.time - p.last_shot < 0.15 {
                     f |= flags::FIRING;
                 }
-                if p.team != my_team && p.alive {
+                if (p.team != my_team || self.mode.solo()) && p.id != id && p.alive {
                     let uav_vis = uav && !p.has_perk2(Perk2::UavJammer);
                     if uav_vis || self.time - p.last_shot < RADAR_PING_TIME as f64 {
                         f |= flags::ON_RADAR;
@@ -1665,7 +1725,12 @@ impl Game {
                     stance: p.body.stance.to_u8()
                         | if p.has_perk3(Perk3::DeadSilence) { stance_bits::SILENT } else { 0 }
                         // only teammates see the shield: it must not give away enemies
-                        | if p.alive && p.team == my_team && p.protected_until > self.time { stance_bits::PROTECTED } else { 0 },
+                        | if p.alive && p.team == my_team && !self.mode.solo() && p.protected_until > self.time { stance_bits::PROTECTED } else { 0 }
+                        | match p.body.chute {
+                            toon_shared::physics::Chute::None => 0,
+                            toon_shared::physics::Chute::FreeFall => stance_bits::FREEFALL,
+                            toon_shared::physics::Chute::Open => stance_bits::CHUTE,
+                        },
                     weapon: p.weapon().id,
                     flags: f,
                 }
@@ -1730,6 +1795,7 @@ impl Game {
         for pk in &self.pickups {
             ents.push(pk.snap());
         }
+        ents.extend(self.br_loot_snaps());
         for h in &self.helis {
             ents.push(EntSnap::Heli {
                 id: h.id,
@@ -1761,7 +1827,8 @@ impl Game {
                 | EntSnap::Smoke { pos, .. }
                 | EntSnap::Vehicle { pos, .. }
                 | EntSnap::Drop { pos, .. }
-                | EntSnap::Weapon { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
+                | EntSnap::Weapon { pos, .. }
+                | EntSnap::Loot { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
             });
         }
         // gunshots carry further than you can see
@@ -1782,6 +1849,7 @@ impl Game {
             ents,
             bomb,
             shots,
+            br: self.br_snap(id),
         }
     }
 }

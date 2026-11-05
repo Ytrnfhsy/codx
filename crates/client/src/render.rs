@@ -34,6 +34,8 @@ pub struct Actor {
     pub reload: Option<f32>,
     /// Spawn protection bubble (shown to teammates only).
     pub protected: bool,
+    /// Skydiving: 0 no, 1 free fall, 2 under the parachute.
+    pub chute: u8,
 }
 
 /// Everything the first-person weapon animation needs.
@@ -306,7 +308,12 @@ pub fn render_world(
     shadows.clear();
     let mut tags = Vec::new();
     let now = g.now;
-    let my_team = g.team;
+    // in the battle royale nobody is on your side
+    let my_team = if g.mode.solo() {
+        Team::Spectator
+    } else {
+        g.team
+    };
     let kc = g.killcam.as_ref();
     let ents = kc.map(|k| &k.ents).unwrap_or(&g.ents);
     let bomb = match kc {
@@ -382,7 +389,17 @@ pub fn render_world(
                 let target = g.pickup_target.map(|t| t.0) == Some(*id) && kc.is_none();
                 models::add_dropped_gun(&mut m, Vec3::from_array(*pos), *yaw, *weapon, age, target);
             }
+            EntSnap::Loot { id, kind, pos } => models::add_loot(
+                &mut m,
+                Vec3::from_array(*pos),
+                *kind,
+                now as f32 + *id as f32,
+            ),
         }
+    }
+    // the battle royale plane
+    if let Some((p, yaw)) = g.br.as_ref().and_then(|b| b.plane) {
+        models::add_transport(&mut m, Vec3::from_array(p), yaw, now as f32);
     }
     // our own vehicle; the bomber also marks where a bomb would land
     if let (Some(p), None) = (&g.piloting, kc) {
@@ -485,6 +502,9 @@ pub fn render_world(
             outline: soldier::outline_at(a.pos.distance(view.pos)),
         };
         let muzzle = soldier::add_soldier(&mut m, &pose);
+        if a.chute == 2 {
+            models::add_parachute(&mut m, a.pos, a.yaw, now as f32 + a.id as f32);
+        }
 
         let floor = g
             .world
@@ -540,6 +560,36 @@ pub fn render_world(
 
     // rivers, lakes and the sea
     g.level.draw_water(mats, view.pos);
+    // the battle royale zone: a shimmering wall round the safe circle
+    if let Some(br) = g.br.as_ref().filter(|b| b.zone[2] > 0.0 && kc.is_none()) {
+        let (c, r) = (vec2(br.zone[0], br.zone[1]), br.zone[2]);
+        let mut wall = crate::mesh::MeshBuilder::new();
+        let n = 96;
+        let a = ((now * 0.6).sin() * 0.15 + 0.35) as f32;
+        for k in 0..n {
+            let a0 = k as f32 / n as f32 * std::f32::consts::TAU;
+            let a1 = (k + 1) as f32 / n as f32 * std::f32::consts::TAU;
+            let p0 = c + vec2(a0.cos(), a0.sin()) * r;
+            let p1 = c + vec2(a1.cos(), a1.sin()) * r;
+            // only the part that is not lost in the fog
+            let mid = (p0 + p1) * 0.5;
+            if mid.distance(vec2(view.pos.x, view.pos.z)) > crate::level::TERRAIN_FOG.1 + 60.0 {
+                continue;
+            }
+            wall.add_quad(
+                [
+                    vec3(p0.x, -10.0, p0.y),
+                    vec3(p0.x, 180.0, p0.y),
+                    vec3(p1.x, 180.0, p1.y),
+                    vec3(p1.x, -10.0, p1.y),
+                ],
+                [90, 150, 255, (a * 255.0) as u8],
+            );
+        }
+        gl_use_material(&mats.fx);
+        wall.draw();
+        gl_use_default_material();
+    }
 
     // shadows + particles (blended)
     let fx = kc.map(|k| &k.fx).unwrap_or(&g.fx);

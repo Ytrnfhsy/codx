@@ -252,6 +252,7 @@ fn depot() -> Map {
         fog: [196, 224, 244],
         tint: [0.98, 1.02, 1.0],
         terrain: None,
+        loot: Vec::new(),
     }
 }
 
@@ -320,6 +321,7 @@ fn cargo() -> Map {
         fog: [160, 190, 200],
         tint: [0.9, 0.95, 1.06],
         terrain: None,
+        loot: Vec::new(),
     }
 }
 

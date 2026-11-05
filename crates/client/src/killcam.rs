@@ -533,6 +533,11 @@ impl Killcam {
                 },
                 reload: tr.reload_since.map(|s| (self.pt - s) as f32),
                 protected: false,
+                chute: if b.stance & stance_bits::CHUTE != 0 {
+                    2
+                } else {
+                    0
+                },
             });
             let _ = stance_bits::PROTECTED;
         }

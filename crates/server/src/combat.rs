@@ -83,6 +83,13 @@ impl Game {
         let Some(cur) = self.p(id).map(|p| p.weapon().id) else {
             return;
         };
+        // nobody shoots while skydiving
+        if self
+            .p(id)
+            .is_some_and(|p| p.body.chute != toon_shared::physics::Chute::None)
+        {
+            return;
+        }
         let cur_mag = self.tuning.weapon(cur).mag;
         let def = self.tuning.weapon(weapon).clone();
         let Some(p) = self.players[id as usize].as_mut() else {
@@ -224,7 +231,7 @@ impl Game {
         {
             return;
         }
-        let ff = self.cfg.friendly_fire;
+        let ff = self.cfg.friendly_fire || self.mode.solo();
         let time = self.time;
         let att_team = attacker.and_then(|a| self.p(a)).map(|a| a.team);
         let Some(v) = self.pm(victim) else { return };
@@ -243,6 +250,12 @@ impl Game {
         let mut amount = amount;
         if v.has_perk2(Perk2::Juggernaut) {
             amount *= 0.75;
+        }
+        // body armour soaks up half of it while it lasts
+        if v.armor > 0.0 && cause != Cause::Zone {
+            let soak = (amount * 0.5).min(v.armor);
+            v.armor -= soak;
+            amount -= soak;
         }
         v.hp -= amount;
         v.last_damage = time;
@@ -311,6 +324,15 @@ impl Game {
         self.drop_bomb_if_carrier(victim);
         if self.state != MatchState::PostMatch {
             self.drop_weapon(dropped, vpos);
+            // battle royale: everything they carried is up for grabs
+            if self.mode.solo() {
+                let other = self
+                    .p(victim)
+                    .and_then(|v| v.weapons.iter().find(|w| w.id != dropped.id).copied());
+                if let Some(w) = other {
+                    self.drop_weapon(w, vpos + vec3(0.6, 0.0, 0.3));
+                }
+            }
         }
         if martyr && !matches!(cause, Cause::Bomb | Cause::Fall) {
             let id = self.new_ent_id();
@@ -324,6 +346,7 @@ impl Game {
             });
         }
 
+        let solo = self.mode.solo();
         let mut killer_name = String::new();
         let mut killer_team = Team::Spectator;
         let counts = self.state == MatchState::Playing;
@@ -335,7 +358,7 @@ impl Game {
                 if let Some(k) = self.pm(a) {
                     killer_name = k.name.clone();
                     killer_team = k.team;
-                    if k.team != vteam {
+                    if k.team != vteam || solo {
                         k.kills += 1;
                         k.streak += 1;
                         let pts = SCORE_KILL + if headshot { SCORE_HEADSHOT_BONUS } else { 0 };
@@ -348,7 +371,10 @@ impl Game {
                                 ("Вбивство", "Kill")
                             },
                         ));
-                        reward = Killstreak::for_streak(k.streak, &streaks);
+                        // no killstreaks in the battle royale
+                        if !solo {
+                            reward = Killstreak::for_streak(k.streak, &streaks);
+                        }
                         if let Some(r) = reward {
                             if !k.rewards.contains(&r) {
                                 k.rewards.push(r);
@@ -374,7 +400,7 @@ impl Game {
         }
         for aid in assist_list {
             if let Some(p) = self.pm(aid) {
-                if p.team != vteam {
+                if p.team != vteam || solo {
                     p.assists += 1;
                     p.score += SCORE_ASSIST;
                     self.say(Dest::One(aid), || S2C::ScorePopup {
@@ -411,6 +437,9 @@ impl Game {
         }
         if counts && self.mode == Mode::Sab && self.overtime {
             self.check_elimination();
+        }
+        if self.mode == Mode::Br {
+            self.br_on_death(victim);
         }
     }
 
@@ -635,7 +664,7 @@ impl Game {
         let eye = p.eye();
         let fwd = look_dir(p.yaw, p.pitch);
         let team = p.team;
-        let ff = self.cfg.friendly_fire;
+        let ff = self.cfg.friendly_fire || self.mode.solo();
         let target = self
             .players
             .iter()

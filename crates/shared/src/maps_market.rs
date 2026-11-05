@@ -1264,6 +1264,7 @@ pub fn market() -> Map {
         fog: [250, 214, 176],
         tint: [1.08, 0.97, 0.86],
         terrain: None,
+        loot: Vec::new(),
     }
 }
 

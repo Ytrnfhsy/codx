@@ -3,6 +3,7 @@
 
 pub mod admin;
 pub mod bots;
+pub mod br;
 pub mod combat;
 pub mod config;
 pub mod game;

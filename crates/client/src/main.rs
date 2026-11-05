@@ -597,7 +597,12 @@ async fn amain(args: Args) {
                             g.overlay = Overlay::Pause;
                         }
                     } else if binds::pressed(Action::Class) && g.team.is_playing() {
-                        g.overlay = Overlay::Class;
+                        if g.mode == toon_shared::Mode::Br {
+                            // no classes in the battle royale: the key opens the map
+                            g.big_map = !g.big_map;
+                        } else {
+                            g.overlay = Overlay::Class;
+                        }
                     }
                 } else {
                     chars_for_ui = chars.clone();

@@ -72,6 +72,9 @@ pub enum Mode {
     Tdm,
     /// Sabotage — «Саботаж».
     Sab,
+    /// Battle royale — «Королівська битва»: everyone for themselves, one life, a
+    /// shrinking zone; the last one standing wins.
+    Br,
 }
 
 impl Mode {
@@ -79,18 +82,25 @@ impl Mode {
         match self {
             Mode::Tdm => t("Командний бій", "Team Deathmatch"),
             Mode::Sab => t("Саботаж", "Sabotage"),
+            Mode::Br => t("Королівська битва", "Battle Royale"),
         }
     }
     pub fn short(self) -> &'static str {
         match self {
             Mode::Tdm => "tdm",
             Mode::Sab => "sab",
+            Mode::Br => "br",
         }
+    }
+    /// Everyone fights everyone (no teams).
+    pub fn solo(self) -> bool {
+        self == Mode::Br
     }
     pub fn parse(s: &str) -> Option<Mode> {
         match s.to_ascii_lowercase().as_str() {
             "tdm" | "war" | "teamdeathmatch" => Some(Mode::Tdm),
             "sab" | "sabotage" => Some(Mode::Sab),
+            "br" | "royale" | "battleroyale" => Some(Mode::Br),
             _ => None,
         }
     }

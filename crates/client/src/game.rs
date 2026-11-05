@@ -32,6 +32,8 @@ pub struct Remote {
     pub weapon: WeaponId,
     pub flags: u8,
     pub silent: bool,
+    /// Skydiving: 0 no, 1 free fall, 2 under the parachute.
+    pub chute: u8,
     /// Spawn protection active.
     pub protected: bool,
     pub alive: bool,
@@ -106,6 +108,10 @@ pub struct GameClient {
     pub overtime: bool,
     pub me: MeSnap,
     pub bomb: Option<BombSnap>,
+    /// Battle royale state (plane, zone, players left).
+    pub br: Option<BrSnap>,
+    /// Battle royale: the big map is open.
+    pub big_map: bool,
     pub ents: Vec<EntSnap>,
     pub scoreboard: Vec<ScoreRow>,
     latest_tick: u32,
@@ -325,6 +331,8 @@ impl GameClient {
             overtime: false,
             me: MeSnap::default(),
             bomb: None,
+            br: None,
+            big_map: false,
             ents: Vec::new(),
             scoreboard: Vec::new(),
             latest_tick: 0,
@@ -576,6 +584,18 @@ impl GameClient {
                     stance: Stance::Stand,
                     ..Default::default()
                 };
+                // battle royale: out of the plane, falling
+                let p = Vec3::from_array(pos);
+                let ground = self
+                    .world
+                    .floor_below(p, 400.0)
+                    .into_iter()
+                    .chain(self.world.ground(p.x, p.z))
+                    .fold(f32::MIN, f32::max);
+                if self.mode == Mode::Br && p.y > ground + 20.0 {
+                    self.body.chute = toon_shared::physics::Chute::FreeFall;
+                    self.body.on_ground = false;
+                }
                 self.cam_smooth = Vec3::ZERO;
                 self.want_stance = Stance::Stand;
                 self.yaw = yaw;
@@ -621,7 +641,10 @@ impl GameClient {
             }
             S2C::TeamSet(t) => {
                 self.team = t;
-                if t.is_playing() {
+                if t.is_playing() && self.mode == Mode::Br && !self.has_class {
+                    // no classes in the battle royale: you find your weapons
+                    self.choose_class(toon_shared::weapons::DEFAULT_CLASSES[0].1);
+                } else if t.is_playing() {
                     if !self.has_class {
                         self.overlay = Overlay::Class;
                     }
@@ -675,6 +698,8 @@ impl GameClient {
                     self.alive = false;
                     self.death_time = now;
                     self.death_pos = self.eye();
+                    self.spec_pos = self.death_pos + vec3(0.0, 4.0, 0.0);
+                    self.spec_pos = self.death_pos + vec3(0.0, 4.0, 0.0);
                     self.death_info =
                         Some((killer_name.clone(), cause, killer.filter(|k| *k != victim)));
                     self.cooking = None;
@@ -946,6 +971,7 @@ impl GameClient {
                 weapon: p.weapon,
                 flags: p.flags,
                 silent: false,
+                chute: 0,
                 protected: false,
                 alive: p.alive,
                 phase: 0.0,
@@ -1011,6 +1037,15 @@ impl GameClient {
         self.sync_piloting(if self.alive { me.vehicle.clone() } else { None });
         self.me = me;
         self.bomb = s.bomb;
+        if s.br.as_ref().is_some_and(|b| b.in_plane) && self.br.as_ref().is_none_or(|b| !b.in_plane)
+        {
+            // boarding: look along the plane's course
+            if let Some((_, yaw)) = s.br.as_ref().and_then(|b| b.plane) {
+                self.yaw = yaw;
+                self.pitch = -0.25;
+            }
+        }
+        self.br = s.br;
         self.ents = s.ents;
         let mut present = Vec::new();
         for e in &self.ents {
@@ -1215,6 +1250,17 @@ impl GameClient {
         crate::soldier::arm_colors(team, id)
     }
 
+    /// Battle royale: we are out of the round and fly around watching (a few seconds
+    /// after dying, once the death cam has had its moment).
+    pub fn br_out(&self) -> bool {
+        self.mode == Mode::Br
+            && self.state == MatchState::Playing
+            && !self.alive
+            && self.br.as_ref().is_some_and(|b| !b.in_plane)
+            && self.killcam.is_none()
+            && self.now - self.death_time > 4.0
+    }
+
     /// Living remote players, interpolated for this frame.
     pub fn live_actors(&self) -> Vec<Actor> {
         let now = self.now;
@@ -1240,6 +1286,7 @@ impl GameClient {
                 },
                 reload: r.reload_since.map(|t| (now - t) as f32),
                 protected: r.protected,
+                chute: r.chute,
             })
             .collect()
     }
@@ -1537,8 +1584,18 @@ impl GameClient {
 
         if !self.team.is_playing()
             || (!self.alive && self.state != MatchState::PostMatch && self.team == Team::Spectator)
+            || self.br_out()
         {
             self.update_spectator(dt, playing_input);
+        }
+
+        // battle royale: riding the plane, the jump key gets you out
+        if !self.alive
+            && playing_input
+            && self.br.as_ref().is_some_and(|b| b.in_plane)
+            && binds::pressed(Action::Jump)
+        {
+            self.net.send(C2S::BrJump);
         }
 
         // ---- local player
@@ -1728,6 +1785,8 @@ impl GameClient {
             if pressed(Action::Reload) {
                 self.start_reload();
             }
+            // nobody shoots while skydiving
+            let can_act = can_act && self.body.chute == toon_shared::physics::Chute::None;
             let trig_down = can_act && binds::down(Action::Fire);
             // also catch very quick clicks (press + release within one frame)
             let trig_pressed =
@@ -2087,6 +2146,13 @@ impl GameClient {
             r.pitch = sa.pitch + (sb.pitch - sa.pitch) * k;
             r.stance = Stance::from_u8(sb.stance & 3);
             r.silent = sb.stance & stance_bits::SILENT != 0;
+            r.chute = if sb.stance & stance_bits::CHUTE != 0 {
+                2
+            } else if sb.stance & stance_bits::FREEFALL != 0 {
+                1
+            } else {
+                0
+            };
             r.protected = sb.alive && sb.stance & stance_bits::PROTECTED != 0;
             r.weapon = sb.weapon;
             r.flags = sb.flags;
@@ -2231,7 +2297,7 @@ impl GameClient {
 
     pub fn join_team(&mut self, t: Option<Team>) {
         self.net.send(C2S::JoinTeam(t));
-        self.overlay = if t == Some(Team::Spectator) {
+        self.overlay = if t == Some(Team::Spectator) || self.mode == Mode::Br {
             Overlay::None
         } else {
             Overlay::Class
@@ -2281,8 +2347,22 @@ impl GameClient {
                 self.pitch + s.y + shake.y,
             );
         }
-        if !self.team.is_playing() {
+        if !self.team.is_playing() || self.br_out() {
             return (self.spec_pos, self.yaw, self.pitch);
+        }
+        // battle royale: in the plane, the camera follows it from behind
+        if let Some((p, _)) = self
+            .br
+            .as_ref()
+            .filter(|b| b.in_plane)
+            .and_then(|b| b.plane)
+        {
+            let dir = look_dir(self.yaw, self.pitch);
+            return (
+                Vec3::from_array(p) - dir * 42.0 + vec3(0.0, 12.0, 0.0),
+                self.yaw,
+                self.pitch,
+            );
         }
         // death cam: rise and look at the killer if visible
         let t = ((self.now - self.death_time) as f32 / 1.2).min(1.0);

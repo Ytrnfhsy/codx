@@ -12,7 +12,7 @@ use toon_shared::lang::t;
 use toon_shared::protocol::{flags, EntSnap, MatchState};
 use toon_shared::tr;
 use toon_shared::weapons::{Cause, Killstreak, Perk1, Perk2, Perk3, WeaponId};
-use toon_shared::{wrap_angle, yaw_of, Mode, Team};
+use toon_shared::{look_dir, wrap_angle, yaw_of, Mode, Team};
 
 pub enum HudAction {
     Leave,
@@ -141,8 +141,12 @@ impl GameClient {
         }
         self.draw_minimap(ui);
         self.draw_score_panel(ui);
+        self.draw_br_alerts(ui);
         self.draw_killfeed(ui);
         self.draw_chat(ui);
+        if self.big_map && self.mode == Mode::Br {
+            self.draw_big_map(ui);
+        }
         if self.alive && self.piloting.is_none() {
             self.draw_weapon_panel(ui);
         }
@@ -259,7 +263,32 @@ impl GameClient {
         }
 
         // death screen
-        if !self.alive
+        let br_round = self.mode == Mode::Br && self.state == MatchState::Playing;
+        if br_round && !self.alive && !self.br.as_ref().is_some_and(|b| b.in_plane) {
+            if let Some((killer, cause, _)) = &self.death_info {
+                let text = if killer.is_empty() {
+                    tr!("Ти вибув ({})", "You are out ({})", cause.name())
+                } else {
+                    tr!(
+                        "Тебе вибив {killer} — {}",
+                        "Knocked out by {killer} — {}",
+                        cause.name()
+                    )
+                };
+                ui.centered(&text, cx, h * 0.18, 22, TEXT);
+            }
+            ui.centered(
+                t(
+                    "Можеш літати й дивитися, як закінчиться раунд",
+                    "Fly around and watch how the round ends",
+                ),
+                cx,
+                h * 0.18 + 26.0,
+                16,
+                MUTED,
+            );
+        } else if !self.alive
+            && !br_round
             && self.team.is_playing()
             && self.state != MatchState::PostMatch
             && self.overlay == Overlay::None
@@ -603,6 +632,18 @@ impl GameClient {
             };
             draw_mesh(&mesh);
         }
+        if let Some(br) = self.br.as_ref().filter(|b| b.zone[2] > 0.0) {
+            let c = to_map(vec3(br.zone[0], 0.0, br.zone[1]));
+            draw_circle_lines(
+                c.x,
+                c.y,
+                br.zone[2] * scale,
+                3.0,
+                Color::new(0.3, 0.55, 1.0, 1.0),
+            );
+            let n = to_map(vec3(br.next[0], 0.0, br.next[1]));
+            draw_circle_lines(n.x, n.y, br.next[2] * scale, 2.0, WHITE);
+        }
         for b in &self.map.boxes {
             if self.level.terrain {
                 break;
@@ -749,7 +790,235 @@ impl GameClient {
         }
     }
 
+    /// Battle royale: players left, kills, the zone clock, health and armour.
+    fn draw_br_panel(&self, ui: &Ui) {
+        let Some(br) = &self.br else { return };
+        let size = (screen_height() * 0.26).clamp(150.0, 240.0);
+        let (x, y) = (16.0, 16.0 + size + 12.0);
+        let w = size;
+        let panel_h = if self.alive { 112.0 } else { 60.0 };
+        draw_rectangle(
+            x - 4.0,
+            y - 4.0,
+            w + 8.0,
+            panel_h,
+            Color::new(0.0, 0.0, 0.0, 0.55),
+        );
+        let kills = self
+            .scoreboard
+            .iter()
+            .find(|r| r.id == self.my_id)
+            .map(|r| r.kills)
+            .unwrap_or(0);
+        let at = tr!("Живих: {}", "Alive: {}", br.alive);
+        ui.shadowed(&at, x + 4.0, y + 20.0, 18, TEXT);
+        let kt = tr!("Вбивств: {kills}", "Kills: {kills}");
+        let kw = ui.width(&kt, 15, true);
+        if ui.width(&at, 18, true) + kw + 16.0 < w {
+            ui.shadowed(&kt, x + w - kw - 4.0, y + 20.0, 15, ACCENT);
+        }
+        let secs = br.timer.max(0.0) as u32;
+        let clock = format!("{}:{:02}", secs / 60, secs % 60);
+        let (zt, zc) = if self.state != MatchState::Playing || br.zone[2] <= 0.0 {
+            (String::new(), MUTED)
+        } else if br.shrinking {
+            (
+                tr!("Зона звужується! {clock}", "Zone closing! {clock}"),
+                BAD,
+            )
+        } else if br.next[2] < br.zone[2] - 0.5 {
+            (
+                tr!("Зона рушить через {clock}", "Zone moves in {clock}"),
+                TEXT,
+            )
+        } else {
+            (t("Остання зона", "Final zone").into(), BAD)
+        };
+        ui.shadowed(&zt, x + 4.0, y + 46.0, 16, zc);
+        // health and armour
+        if self.alive {
+            let bar = |yy: f32, k: f32, c: Color| {
+                draw_rectangle(x + 4.0, yy, w - 8.0, 10.0, Color::new(0.0, 0.0, 0.0, 0.5));
+                draw_rectangle(x + 4.0, yy, (w - 8.0) * k.clamp(0.0, 1.0), 10.0, c);
+            };
+            ui.shadowed(t("Здоров'я", "Health"), x + 4.0, y + 66.0, 12, MUTED);
+            bar(y + 70.0, self.me.hp / toon_shared::consts::MAX_HEALTH, GOOD);
+            ui.shadowed(t("Броня", "Armour"), x + 4.0, y + 94.0, 12, MUTED);
+            bar(y + 96.0, br.armor / 100.0, Color::new(0.4, 0.6, 1.0, 1.0));
+        }
+    }
+
+    /// Battle royale prompts: leaving the plane, the parachute, being outside the zone.
+    fn draw_br_alerts(&self, ui: &Ui) {
+        let Some(br) = &self.br else { return };
+        let (w, h) = (screen_width(), screen_height());
+        if br.in_plane {
+            ui.centered(
+                &tr!(
+                    "{} — стрибнути з літака",
+                    "{} — jump out of the plane",
+                    key(Action::Jump)
+                ),
+                w / 2.0,
+                h * 0.8,
+                26,
+                ACCENT,
+            );
+            ui.centered(
+                &tr!("{} — карта", "{} — map", key(Action::Class)),
+                w / 2.0,
+                h * 0.8 + 30.0,
+                18,
+                MUTED,
+            );
+            return;
+        }
+        if !self.alive {
+            return;
+        }
+        if self.body.chute != toon_shared::physics::Chute::None {
+            let ground = self
+                .world
+                .floor_below(self.body.pos, 400.0)
+                .into_iter()
+                .chain(self.world.ground(self.body.pos.x, self.body.pos.z))
+                .fold(f32::MIN, f32::max);
+            let alt = (self.body.pos.y - ground).max(0.0);
+            let text = if self.body.chute == toon_shared::physics::Chute::FreeFall {
+                tr!(
+                    "Висота {alt:.0} м — парашут розкриється сам ({} — раніше)",
+                    "Altitude {alt:.0} m — the parachute opens by itself ({} — sooner)",
+                    key(Action::Jump)
+                )
+            } else {
+                tr!("Висота {alt:.0} м", "Altitude {alt:.0} m")
+            };
+            ui.centered(&text, w / 2.0, h * 0.8, 20, TEXT);
+        }
+        let (c, r) = (vec2(br.zone[0], br.zone[1]), br.zone[2]);
+        let me = vec2(self.body.pos.x, self.body.pos.z);
+        let out = me.distance(c) - r;
+        if self.state == MatchState::Playing && r > 0.0 && out > 0.0 {
+            let pulse = 0.6 + 0.4 * ((self.now * 6.0).sin() as f32).abs();
+            ui.centered(
+                &tr!(
+                    "ТИ ПОЗА ЗОНОЮ! −{:.0} HP/с · до зони {:.0} м",
+                    "OUTSIDE THE ZONE! −{:.0} HP/s · {:.0} m to safety",
+                    br.dps,
+                    out
+                ),
+                w / 2.0,
+                110.0,
+                24,
+                Color::new(1.0, 0.35, 0.3, pulse),
+            );
+            // an arrow towards the zone
+            let to = c - me;
+            let rel = wrap_angle(yaw_of(vec3(to.x, 0.0, to.y)) - self.yaw);
+            let d = vec2(-rel.sin(), -rel.cos());
+            let p = vec2(w / 2.0, 150.0) + d * 22.0;
+            let perp = vec2(-d.y, d.x);
+            draw_triangle(p + d * 16.0, p + perp * 12.0, p - perp * 12.0, BAD);
+        }
+    }
+
+    /// Battle royale: the whole island, north up, with the zone and the plane's course.
+    pub fn draw_big_map(&self, ui: &Ui) {
+        let (Some(br), Some(img)) = (&self.br, &self.level.image) else {
+            return;
+        };
+        let (w, h) = (screen_width(), screen_height());
+        let side = (h * 0.86).min(w * 0.9);
+        let (x0, y0) = ((w - side) / 2.0, (h - side) / 2.0);
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        draw_texture_ex(
+            &img.tex,
+            x0,
+            y0,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(side, side)),
+                ..Default::default()
+            },
+        );
+        let k = side / img.size;
+        // circles and the plane's course stay inside the map
+        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let dpi = screen_dpi_scale();
+        gl.scissor(Some((
+            (x0 * dpi) as i32,
+            (y0 * dpi) as i32,
+            (side * dpi) as i32,
+            (side * dpi) as i32,
+        )));
+        let to_map =
+            |x: f32, z: f32| vec2(x0 + (x - img.origin.x) * k, y0 + (z - img.origin.y) * k);
+        if br.zone[2] > 0.0 {
+            let c = to_map(br.zone[0], br.zone[1]);
+            draw_circle_lines(
+                c.x,
+                c.y,
+                br.zone[2] * k,
+                3.0,
+                Color::new(0.3, 0.55, 1.0, 1.0),
+            );
+            let n = to_map(br.next[0], br.next[1]);
+            draw_circle_lines(n.x, n.y, br.next[2] * k, 2.0, WHITE);
+        }
+        if let Some((p, yaw)) = br.plane {
+            let d = look_dir(yaw, 0.0);
+            let a = to_map(p[0] - d.x * 1500.0, p[2] - d.z * 1500.0);
+            let b = to_map(p[0] + d.x * 1500.0, p[2] + d.z * 1500.0);
+            draw_line(a.x, a.y, b.x, b.y, 2.0, Color::new(1.0, 1.0, 1.0, 0.5));
+            let pp = to_map(p[0], p[2]);
+            draw_circle(pp.x, pp.y, 6.0, ACCENT);
+        }
+        // me
+        let pos = if br.in_plane {
+            br.plane
+                .map(|p| Vec3::from_array(p.0))
+                .unwrap_or(self.body.pos)
+        } else {
+            self.body.pos
+        };
+        let m = to_map(pos.x, pos.z);
+        let d = look_dir(self.yaw, 0.0);
+        let f = vec2(d.x, d.z);
+        let perp = vec2(-f.y, f.x);
+        draw_triangle(
+            m + f * 12.0,
+            m - f * 7.0 + perp * 7.0,
+            m - f * 7.0 - perp * 7.0,
+            ACCENT,
+        );
+        draw_triangle_lines(
+            m + f * 12.0,
+            m - f * 7.0 + perp * 7.0,
+            m - f * 7.0 - perp * 7.0,
+            2.0,
+            BLACK,
+        );
+        let gl = unsafe { get_internal_gl() }.quad_gl;
+        gl.scissor(None);
+        draw_rectangle_lines(x0, y0, side, side, 3.0, BLACK);
+        ui.centered(
+            &tr!(
+                "{} — закрити карту",
+                "{} — close the map",
+                key(Action::Class)
+            ),
+            w / 2.0,
+            y0 + side + 24.0,
+            16,
+            TEXT,
+        );
+    }
+
     fn draw_score_panel(&self, ui: &Ui) {
+        if self.mode == Mode::Br {
+            self.draw_br_panel(ui);
+            return;
+        }
         let size = (screen_height() * 0.26).clamp(150.0, 240.0);
         let y = 16.0 + size + 12.0;
         let x = 16.0;
@@ -770,7 +1039,7 @@ impl GameClient {
             team_color(Team::Axis)
         };
         let limit = match self.mode {
-            Mode::Tdm => self.gs.score_limit,
+            Mode::Tdm | Mode::Br => self.gs.score_limit,
             Mode::Sab => self.gs.rounds_to_win as i32,
         };
         let bw = size;
@@ -1099,7 +1368,10 @@ impl GameClient {
             next.name(),
             left
         );
-        ui.shadowed(&streak_txt, x, y + 92.0, 13, MUTED);
+        // (no killstreaks in the battle royale)
+        if self.mode != Mode::Br {
+            ui.shadowed(&streak_txt, x, y + 92.0, 13, MUTED);
+        }
         if let Some(r) = self.me.rewards.last() {
             let t = format!("[{}] {}", key(Action::Killstreak), r.name());
             let tw = ui.width(&t, 18, true);
@@ -2001,7 +2273,7 @@ fn draw_cause_icon(c: Cause, x: f32, cy: f32, h: f32, a: f32) -> f32 {
             }
             w
         }
-        Cause::Fall | Cause::World => {
+        Cause::Fall | Cause::World | Cause::Zone => {
             // cartoon skull
             let (sx, sy) = (x + h * 0.5, cy);
             draw_circle(sx, sy - h * 0.05, h * 0.42, fg);

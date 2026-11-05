@@ -478,6 +478,7 @@ fn cottage(
     ];
     let h = 3.1;
     b.building(x0, z0, x1, z1, 0.0, h, &ops, wall, Some(roof));
+    b.loot.push(vec3(cx, 0.3, cz));
     // stepped "pitched" roof
     let (w, d) = (x1 - x0, z1 - z0);
     let (ix, iz) = if w > d {
@@ -536,6 +537,11 @@ fn house(
         upper: &upper,
         roof_access,
     });
+    // something to find on every floor (and on the roof)
+    let levels = floors + roof_access as u32;
+    for k in 0..levels {
+        b.loot.push(vec3(cx + 0.8, k as f32 * 3.4 + 0.4, cz));
+    }
 }
 
 /// A barn: tall, wide doors at both ends, hay inside.
@@ -547,6 +553,7 @@ fn barn(b: &mut MapBuilder, x0: f32, z0: f32, x1: f32, z1: f32) {
     ];
     let c = [168, 70, 56];
     b.building(x0, z0, x1, z1, 0.0, 5.0, &ops, c, Some(pal::ROOF_GREY));
+    b.loot.push(vec3(cx, 0.3, (z0 + z1) / 2.0));
     b.block(
         x0 + 1.0,
         5.35,
@@ -674,6 +681,12 @@ fn settle(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
             // a fountain square in the middle of the crossroads
             b.cbox(pl.x, pl.z, 5.0, 5.0, 0.0, 0.7, pal::CONCRETE);
             b.cbox(pl.x, pl.z, 1.0, 1.0, 0.7, 1.6, pal::CONCRETE_DARK);
+        }
+        // a few things lying about in the streets
+        for k in 0..3 {
+            let a = k as f32 * 2.1 + rng.range(0.0, 1.0);
+            b.loot
+                .push(vec3(pl.x + a.cos() * 10.0, 0.3, pl.z + a.sin() * 10.0));
         }
     });
 }
@@ -838,6 +851,7 @@ pub fn island() -> Map {
         fog: [196, 214, 226],
         tint: [1.0, 1.0, 1.0],
         terrain: Some(Arc::new(m)),
+        loot: b.loot,
     }
 }
 

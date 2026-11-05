@@ -406,7 +406,25 @@ pub struct Body {
     pub climbing: bool,
     /// Seconds before a ladder can be grabbed again (after jumping off one).
     pub ladder_free: f32,
+    /// Dropping from the battle royale plane.
+    pub chute: Chute,
 }
+
+/// Skydiving: free fall first, then the parachute opens near the ground.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Chute {
+    #[default]
+    None,
+    FreeFall,
+    Open,
+}
+
+/// The parachute opens by itself this high above the ground.
+pub const CHUTE_OPEN_HEIGHT: f32 = 70.0;
+const FREEFALL_SPEED: f32 = 48.0;
+const FREEFALL_GLIDE: f32 = 16.0;
+const CHUTE_SINK: f32 = 5.5;
+const CHUTE_GLIDE: f32 = 9.0;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MoveInput {
@@ -498,6 +516,10 @@ impl Body {
             _ => wish,
         };
 
+        if self.chute != Chute::None {
+            self.skydive(world, inp, dt);
+            return;
+        }
         self.ladder_free = (self.ladder_free - dt).max(0.0);
         if self.climb(world, inp, t, dt) {
             return;
@@ -506,6 +528,55 @@ impl Body {
         let was_grounded = self.on_ground;
         self.step_in_world(world, inp, t, dt, wish);
         self.stand_on_ground(world, start, was_grounded);
+    }
+
+    /// Falling from the plane: steer with the movement keys; the parachute opens by itself
+    /// (or with the jump key once low enough) and the dive ends on landing.
+    fn skydive(&mut self, world: &World, inp: &MoveInput, dt: f32) {
+        let ground = world
+            .floor_below(self.pos, 400.0)
+            .into_iter()
+            .chain(world.ground(self.pos.x, self.pos.z))
+            .fold(f32::MIN, f32::max);
+        let above = self.pos.y - ground;
+        if self.chute == Chute::FreeFall && (above < CHUTE_OPEN_HEIGHT || inp.jump && above < 200.0)
+        {
+            self.chute = Chute::Open;
+        }
+        let (fwd, right) = yaw_basis(inp.yaw);
+        let dir = (fwd * inp.forward + right * inp.right).clamp_length_max(1.0);
+        let (glide, sink) = match self.chute {
+            Chute::FreeFall => (FREEFALL_GLIDE, FREEFALL_SPEED),
+            _ => (CHUTE_GLIDE, CHUTE_SINK),
+        };
+        let hv = vec3(self.vel.x, 0.0, self.vel.z);
+        let hv = approach(hv, dir * glide, 14.0 * dt);
+        self.vel.x = hv.x;
+        self.vel.z = hv.z;
+        // the canopy brakes hard; free fall speeds up to its terminal velocity
+        let target = -sink;
+        self.vel.y = if self.vel.y > target {
+            (self.vel.y - 9.8 * dt).max(target)
+        } else {
+            (self.vel.y + 30.0 * dt).min(target)
+        };
+        self.stance = Stance::Stand;
+        self.climbing = false;
+        let start = self.pos;
+        let delta = self.vel * dt;
+        let steps = (delta.abs().max_element() / 0.2).ceil().max(1.0) as u32;
+        let sub = delta / steps as f32;
+        self.on_ground = false;
+        for _ in 0..steps {
+            self.move_axis(world, 0, sub.x, false);
+            self.move_axis(world, 2, sub.z, false);
+            self.move_axis(world, 1, sub.y, false);
+        }
+        self.stand_on_ground(world, start, false);
+        if self.on_ground {
+            self.chute = Chute::None;
+            self.vel = Vec3::ZERO;
+        }
     }
 
     /// Keeps the body on the terrain: it cannot sink into the ground or walk up slopes
@@ -875,6 +946,7 @@ mod tests {
             fog: [0; 3],
             tint: [1.0; 3],
             terrain: None,
+            loot: Vec::new(),
         };
         let w = World::from_map(&map);
         let (stop, _, pierced) = w.bullet_trace(vec3(0.0, 1.5, 0.0), vec3(1.0, 0.0, 0.0), 50.0);
@@ -924,6 +996,7 @@ mod tests {
             fog: [0; 3],
             tint: [1.0; 3],
             terrain: None,
+            loot: Vec::new(),
         };
         let w = World::from_map(&map);
         let t = mt();
@@ -1009,6 +1082,7 @@ mod tests {
             fog: [0; 3],
             tint: [1.0; 3],
             terrain: Some(std::sync::Arc::new(hm)),
+            loot: Vec::new(),
         };
         World::from_map(&map)
     }

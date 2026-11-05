@@ -162,6 +162,8 @@ pub struct Map {
     pub tint: [f32; 3],
     /// Hills and valleys (big outdoor maps); None = flat ground.
     pub terrain: Option<std::sync::Arc<crate::terrain::Heightmap>>,
+    /// Where battle royale supplies may lie (floors inside buildings and the like).
+    pub loot: Vec<Vec3>,
 }
 
 impl Map {
@@ -290,6 +292,7 @@ pub fn shade(c: [u8; 3], k: f32) -> [u8; 3] {
 pub struct MapBuilder {
     pub boxes: Vec<MapBox>,
     pub ladders: Vec<Ladder>,
+    pub loot: Vec<Vec3>,
 }
 
 impl MapBuilder {
@@ -349,8 +352,11 @@ impl MapBuilder {
 
     /// Builds what `f` adds `h` higher up (houses, cars, trees on a terrace or a hill).
     pub fn lift(&mut self, h: f32, f: impl FnOnce(&mut Self)) {
-        let (nb, nl) = (self.boxes.len(), self.ladders.len());
+        let (nb, nl, no) = (self.boxes.len(), self.ladders.len(), self.loot.len());
         f(self);
+        for p in &mut self.loot[no..] {
+            p.y += h;
+        }
         for b in &mut self.boxes[nb..] {
             b.min.y += h;
             b.max.y += h;

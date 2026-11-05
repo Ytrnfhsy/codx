@@ -10,6 +10,9 @@ pub type V3 = [f32; 3];
 
 /// Extra bits packed into `PlayerSnap::stance` (low 2 bits are the stance).
 pub mod stance_bits {
+    /// Skydiving from the battle royale plane (free fall / under the parachute).
+    pub const FREEFALL: u8 = 0x04;
+    pub const CHUTE: u8 = 0x08;
     pub const PROTECTED: u8 = 0x40;
     pub const SILENT: u8 = 0x80;
 }
@@ -88,6 +91,8 @@ pub enum C2S {
     /// writes its messages to them in it. (Last in the list, and separate from `Hello`, so
     /// servers that do not know it simply skip it.)
     Lang(crate::lang::Lang),
+    /// Jump out of the battle royale plane.
+    BrJump,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -215,6 +220,58 @@ pub enum EntSnap {
         pos: V3,
         yaw: f32,
     },
+    /// Battle royale supplies lying on the ground (taken by walking over them).
+    Loot {
+        id: u16,
+        kind: LootKind,
+        pos: V3,
+    },
+}
+
+/// Battle royale supplies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LootKind {
+    /// Ammunition for both carried guns.
+    Ammo,
+    /// Heals 50.
+    Medkit,
+    /// Body armour: soaks up half the damage until worn out.
+    Armor,
+    /// Two grenades and a smoke.
+    Grenades,
+}
+
+impl LootKind {
+    pub fn name(self) -> &'static str {
+        use crate::lang::t;
+        match self {
+            LootKind::Ammo => t("Набої", "Ammo"),
+            LootKind::Medkit => t("Аптечка", "Medkit"),
+            LootKind::Armor => t("Бронежилет", "Body armour"),
+            LootKind::Grenades => t("Гранати", "Grenades"),
+        }
+    }
+}
+
+/// The battle royale state a player sees.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct BrSnap {
+    /// Players still in the game (in the plane or on the ground).
+    pub alive: u16,
+    /// Safe zone now: centre x, z and radius.
+    pub zone: [f32; 3],
+    /// Where it shrinks to next.
+    pub next: [f32; 3],
+    /// Seconds until the zone starts shrinking (or, while it shrinks, until it stops).
+    pub timer: f32,
+    pub shrinking: bool,
+    /// Damage per second outside the zone.
+    pub dps: f32,
+    /// The plane: position and heading, while it flies.
+    pub plane: Option<(V3, f32)>,
+    /// We are still in the plane (jump to leave it).
+    pub in_plane: bool,
+    pub armor: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -250,6 +307,8 @@ pub struct Snapshot {
     pub ents: Vec<EntSnap>,
     pub bomb: Option<BombSnap>,
     pub shots: Vec<ShotFx>,
+    /// Battle royale only.
+    pub br: Option<BrSnap>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

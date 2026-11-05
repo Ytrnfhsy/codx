@@ -511,6 +511,8 @@ pub enum Cause {
     /// A bomb dropped by a drone.
     Drop,
     Nrk,
+    /// Outside the battle royale zone.
+    Zone,
 }
 
 impl Cause {
@@ -528,6 +530,7 @@ impl Cause {
             Cause::Fpv => t("FPV-дрон", "FPV drone"),
             Cause::Drop => t("Скид з дрона", "Drone drop"),
             Cause::Nrk => t("НРК", "Ground robot"),
+            Cause::Zone => t("Зона", "The zone"),
         }
     }
 }

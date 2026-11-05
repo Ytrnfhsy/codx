@@ -307,5 +307,6 @@ pub fn site() -> Map {
         fog: [198, 204, 210],
         tint: [0.93, 0.96, 1.03],
         terrain: None,
+        loot: Vec::new(),
     }
 }

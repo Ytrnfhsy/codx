@@ -134,6 +134,8 @@ pub fn skill_name(s: f32) -> &'static str {
 pub struct Bot {
     /// Personal deviation from the server-wide skill.
     pub skill_offset: f32,
+    /// Battle royale: when to jump out of the plane.
+    pub br_jump_at: f64,
     /// How close (0..1) the bot is to noticing each enemy.
     awareness: Vec<(u8, f32)>,
     last_percept: f64,
@@ -157,8 +159,8 @@ pub struct Bot {
     stuck_pos: Vec3,
     stuck_at: f64,
     stuck_count: u32,
-    roam_goal: Option<Vec3>,
-    roam_until: f64,
+    pub(crate) roam_goal: Option<Vec3>,
+    pub(crate) roam_until: f64,
     burst_until: f64,
     pause_until: f64,
     next_semi: f64,
@@ -182,6 +184,7 @@ impl Bot {
             path_goal: None,
             repath_at: 0.0,
             path_fail_until: 0.0,
+            br_jump_at: 0.0,
             target: None,
             seen_at: 0.0,
             last_seen: None,
@@ -246,6 +249,7 @@ impl Game {
 
         let me = self.p(id).unwrap();
         let team = me.team;
+        let skydiving = me.body.chute != toon_shared::physics::Chute::None;
         let eye = me.eye();
         let pos = me.body.pos;
         let mut yaw = me.yaw;
@@ -273,8 +277,9 @@ impl Game {
             let fwd = look_dir(yaw, 0.0);
             let mut best: Option<(u8, f32)> = None;
             let mut heard: Option<(Vec3, f32)> = None;
+            let solo = self.mode.solo();
             for o in self.players.iter().flatten() {
-                if !o.alive || o.team == team || !o.team.is_playing() {
+                if !o.alive || o.id == id || o.team == team && !solo || !o.team.is_playing() {
                     continue;
                 }
                 let c = o.chest();
@@ -547,6 +552,9 @@ impl Game {
                 stance = Stance::Crouch;
                 move_dir *= 0.3;
             }
+        } else if let Some(g) = goal.filter(|_| skydiving) {
+            // falling from the plane: steer straight for where we want to land
+            move_dir = vec3(g.x - pos.x, 0.0, g.z - pos.z).normalize_or_zero();
         } else if let Some(g) = goal {
             let flat_d = vec3(g.x - pos.x, 0.0, g.z - pos.z).length();
             // far goals may drift a little before the route is worth planning again
@@ -686,6 +694,9 @@ impl Game {
         pos: Vec3,
     ) -> (Option<Vec3>, bool, bool) {
         let time = self.time;
+        if self.mode == Mode::Br && self.state == MatchState::Playing && self.br.running {
+            return self.br_bot_goal(id, bot, pos);
+        }
         if self.mode == Mode::Sab && self.state == MatchState::Playing {
             let s = &self.sab;
             if let Some(site) = s.planted_at {
@@ -746,7 +757,11 @@ impl Game {
                     .players
                     .iter()
                     .flatten()
-                    .filter(|o| o.alive && o.team == team.enemy())
+                    .filter(|o| {
+                        o.alive
+                            && o.id != id
+                            && (o.team == team.enemy() || self.mode.solo() && o.team.is_playing())
+                    })
                     .map(|o| o.body.pos)
                     .collect();
                 if enemies.is_empty() {

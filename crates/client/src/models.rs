@@ -794,3 +794,138 @@ pub fn add_nrk(
 
 /// Gun height above the turret ring, so the muzzle sits where the server shoots from.
 const NRK_GUN_LOCAL_Y: f32 = toon_shared::vehicles::NRK_GUN_Y - 0.72;
+
+/// Battle royale supplies on the ground: a medkit, an ammo box, a vest or a grenade crate.
+pub fn add_loot(m: &mut ToonMesh, pos: Vec3, kind: toon_shared::protocol::LootKind, t: f32) {
+    use toon_shared::protocol::LootKind;
+    // a slow bob and turn so they catch the eye
+    let base = trs(
+        pos + vec3(0.0, 0.25 + (t * 2.0).sin() * 0.05, 0.0),
+        t * 0.8,
+        0.0,
+        0.0,
+    );
+    match kind {
+        LootKind::Medkit => {
+            m.boxed(&base, vec3(0.3, 0.18, 0.22), [240, 240, 236], 0.02);
+            let cross = [220, 40, 40];
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, 0.181, 0.0))),
+                vec3(0.16, 0.005, 0.05),
+                cross,
+                0.0,
+            );
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, 0.181, 0.0))),
+                vec3(0.05, 0.005, 0.16),
+                cross,
+                0.0,
+            );
+        }
+        LootKind::Ammo => {
+            m.boxed(&base, vec3(0.32, 0.16, 0.2), [96, 112, 64], 0.02);
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, 0.17, 0.0))),
+                vec3(0.08, 0.02, 0.18),
+                [220, 190, 80],
+                0.0,
+            );
+        }
+        LootKind::Armor => {
+            m.boxed(&base, vec3(0.3, 0.34, 0.1), [60, 84, 120], 0.02);
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, 0.0, 0.11))),
+                vec3(0.2, 0.2, 0.02),
+                [80, 110, 150],
+                0.0,
+            );
+        }
+        LootKind::Grenades => {
+            m.boxed(&base, vec3(0.3, 0.14, 0.24), [130, 100, 60], 0.02);
+            for dx in [-0.12f32, 0.12] {
+                m.sphere(
+                    &(base * Mat4::from_translation(vec3(dx, 0.2, 0.0))),
+                    0.09,
+                    [70, 110, 60],
+                    0.01,
+                );
+            }
+        }
+    }
+}
+
+/// A parachute canopy over a falling player.
+pub fn add_parachute(m: &mut ToonMesh, pos: Vec3, yaw: f32, t: f32) {
+    let sway = (t * 1.3).sin() * 0.06;
+    let base = trs(pos + vec3(0.0, 4.6, 0.0), yaw, 0.0, sway);
+    let colours = [[230, 90, 60], [250, 236, 210]];
+    for k in 0..5 {
+        let x = (k as f32 - 2.0) * 0.9;
+        let y = -(k as f32 - 2.0).abs() * 0.25;
+        m.boxed(
+            &(base * Mat4::from_translation(vec3(x, y, 0.0))),
+            vec3(0.46, 0.12, 1.1),
+            colours[k % 2],
+            0.03,
+        );
+    }
+    // lines down to the harness
+    for x in [-1.9f32, 1.9] {
+        for z in [-0.9f32, 0.9] {
+            let top = vec3(x, -0.4, z);
+            let bottom = vec3(0.0, -3.0, 0.0);
+            let mid = (top + bottom) * 0.5;
+            let d = top - bottom;
+            let rot = Quat::from_rotation_arc(Vec3::Y, d.normalize());
+            m.fill.add_box_ex(
+                &(base * Mat4::from_rotation_translation(rot, mid)),
+                vec3(0.015, d.length() * 0.5, 0.015),
+                [40, 40, 44],
+                255,
+                true,
+            );
+        }
+    }
+}
+
+/// The battle royale transport plane (big, slow, propellers).
+pub fn add_transport(m: &mut ToonMesh, pos: Vec3, yaw: f32, t: f32) {
+    let base = trs(pos, yaw, 0.0, 0.0);
+    let body = [176, 182, 168];
+    let dark = [96, 104, 92];
+    // fuselage along -z (forward)
+    m.boxed(&base, vec3(2.2, 2.2, 13.0), body, 0.08);
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 0.4, -13.6))),
+        vec3(1.6, 1.4, 1.2),
+        dark,
+        0.06,
+    );
+    // wings and tail
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 1.6, -2.0))),
+        vec3(18.0, 0.3, 2.6),
+        body,
+        0.06,
+    );
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 1.8, 11.5))),
+        vec3(6.0, 0.25, 1.6),
+        body,
+        0.05,
+    );
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 4.2, 11.8))),
+        vec3(0.25, 2.4, 1.6),
+        dark,
+        0.05,
+    );
+    // engines with spinning propellers
+    for x in [-7.0f32, -3.6, 3.6, 7.0] {
+        let e = base * Mat4::from_translation(vec3(x, 1.0, -3.4));
+        m.boxed(&e, vec3(0.7, 0.7, 1.6), dark, 0.04);
+        let prop =
+            e * Mat4::from_translation(vec3(0.0, 0.0, -1.7)) * Mat4::from_rotation_z(t * 25.0 + x);
+        m.boxed(&prop, vec3(2.0, 0.15, 0.05), [40, 40, 40], 0.0);
+    }
+}

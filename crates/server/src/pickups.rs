@@ -59,8 +59,11 @@ impl Game {
             yaw,
             expire: self.time + PICKUP_LIFETIME,
         });
-        if self.pickups.len() > MAX_PICKUPS {
-            self.pickups.remove(0);
+        // too many dropped guns: the oldest goes (battle royale supplies never do)
+        if self.pickups.iter().filter(|p| p.expire.is_finite()).count() > MAX_PICKUPS {
+            if let Some(i) = self.pickups.iter().position(|p| p.expire.is_finite()) {
+                self.pickups.remove(i);
+            }
         }
     }
 
@@ -76,8 +79,16 @@ impl Game {
         if !p.alive || !near(p.body.pos, pk.pos, PICKUP_RADIUS + 0.3) {
             return;
         }
-        if p.weapons.iter().any(|w| w.id == pk.w.id) {
+        if p.weapons
+            .iter()
+            .any(|w| w.id == pk.w.id && (w.mag > 0 || w.reserve > 0))
+        {
             return;
+        }
+        // an empty slot is filled first (battle royale: you start with a pistol only)
+        let empty = p.weapons.iter().position(|w| w.mag == 0 && w.reserve == 0);
+        if let Some(e) = empty {
+            p.slot = e as u8;
         }
         let old = *p.weapon();
         *p.weapon_mut() = pk.w;

@@ -445,7 +445,7 @@ pub fn draw_menu(
                 true,
                 32,
             );
-            let modes = ["tdm", "sab"];
+            let modes = ["tdm", "sab", "br"];
             let mi = modes.iter().position(|m| *m == hs.mode).unwrap_or(0);
             let mode_name = toon_shared::Mode::parse(modes[mi]).unwrap().name();
             let d = ui.stepper(
@@ -456,7 +456,11 @@ pub fn draw_menu(
                 (pw - 60.0) / 2.0,
             );
             if d != 0 {
-                hs.mode = modes[((mi as i32 + d).rem_euclid(2)) as usize].into();
+                hs.mode = modes[((mi as i32 + d).rem_euclid(modes.len() as i32)) as usize].into();
+                // the battle royale is played on the big island
+                if hs.mode == "br" {
+                    hs.map = MapId::Island.short().into();
+                }
             }
             let maps = MapId::EVERY;
             let cur = MapId::parse(&hs.map).unwrap_or(MapId::Depot);
