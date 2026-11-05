@@ -32,6 +32,8 @@ pub struct Nav {
     ox: f32,
     oz: f32,
     cell: f32,
+    /// Water surface (bots do not wander into rivers and the sea).
+    water: f32,
     /// Big terrain map (hills: steeper links, longer straight walks).
     terrain: bool,
     pub w: i32,
@@ -40,6 +42,18 @@ pub struct Nav {
     cols: Vec<Vec<u32>>,
     nodes: Vec<NavNode>,
     reachable_ids: Vec<u32>,
+    /// A*'s per-node bookkeeping, kept between searches (clearing a quarter of a million
+    /// entries for every path would cost more than the search itself).
+    scratch: std::sync::Mutex<Scratch>,
+}
+
+#[derive(Default)]
+struct Scratch {
+    cost: Vec<f32>,
+    from: Vec<u32>,
+    /// Search that last touched each node; older entries count as unset.
+    stamp: Vec<u32>,
+    search: u32,
 }
 
 #[derive(PartialEq)]
@@ -150,7 +164,12 @@ impl Nav {
             ox,
             oz,
             cell,
+            water: ground
+                .as_ref()
+                .map(|t| t.water)
+                .unwrap_or(f32::NEG_INFINITY),
             terrain: ground.is_some(),
+            scratch: Default::default(),
             w,
             h,
             cols,
@@ -329,12 +348,20 @@ impl Nav {
         self.nearest(p).map(|n| self.nodes[n as usize].pos)
     }
 
-    /// Random reachable point (bots roam over every floor they can actually get to).
+    /// Random reachable point (bots roam over every floor they can actually get to, but
+    /// not into the water).
     pub fn random_point(&self, rng: &mut Rng) -> Vec3 {
         if self.reachable_ids.is_empty() {
             return Vec3::ZERO;
         }
-        self.nodes[self.reachable_ids[rng.below(self.reachable_ids.len())] as usize].pos
+        let mut p = Vec3::ZERO;
+        for _ in 0..8 {
+            p = self.nodes[self.reachable_ids[rng.below(self.reachable_ids.len())] as usize].pos;
+            if p.y > self.water {
+                break;
+            }
+        }
+        p
     }
 
     pub fn reachable_count(&self) -> usize {
@@ -375,30 +402,61 @@ impl Nav {
         let g = self.nearest(b)?;
         let goal = self.nodes[g as usize].pos;
         let n = self.nodes.len();
-        let mut cost = vec![f32::INFINITY; n];
-        let mut from = vec![u32::MAX; n];
+        let mut guard = self.scratch.lock().unwrap_or_else(|e| e.into_inner());
+        let sc = &mut *guard;
+        if sc.stamp.len() != n {
+            sc.cost = vec![f32::INFINITY; n];
+            sc.from = vec![u32::MAX; n];
+            sc.stamp = vec![0; n];
+            sc.search = 0;
+        }
+        sc.search = sc.search.wrapping_add(1);
+        if sc.search == 0 {
+            sc.stamp.fill(0);
+            sc.search = 1;
+        }
+        let search = sc.search;
+        let Scratch {
+            cost, from, stamp, ..
+        } = sc;
+        let mut touch = |i: usize, cost: &mut Vec<f32>, from: &mut Vec<u32>| {
+            if stamp[i] != search {
+                stamp[i] = search;
+                cost[i] = f32::INFINITY;
+                from[i] = u32::MAX;
+            }
+        };
+        // big maps: a greedier search (paths a little longer, found much faster)
+        let greed = if self.terrain { 1.4 } else { 1.0 };
         let mut open = BinaryHeap::new();
+        touch(s as usize, cost, from);
+        touch(g as usize, cost, from);
         cost[s as usize] = 0.0;
         open.push(Open {
-            f: self.nodes[s as usize].pos.distance(goal),
+            f: self.nodes[s as usize].pos.distance(goal) * greed,
             i: s,
         });
         let mut expanded = 0;
-        while let Some(Open { i, .. }) = open.pop() {
+        while let Some(Open { i, f }) = open.pop() {
             if i == g {
                 break;
             }
+            // stale heap entry (a cheaper way here was found later)
+            if f - self.nodes[i as usize].pos.distance(goal) * greed > cost[i as usize] + 1e-3 {
+                continue;
+            }
             expanded += 1;
-            if expanded > 120_000 {
+            if expanded > if self.terrain { 60_000 } else { 120_000 } {
                 return None;
             }
             for &(m, c) in &self.nodes[i as usize].links {
+                touch(m as usize, cost, from);
                 let nc = cost[i as usize] + c;
                 if nc < cost[m as usize] {
                     cost[m as usize] = nc;
                     from[m as usize] = i;
                     open.push(Open {
-                        f: nc + self.nodes[m as usize].pos.distance(goal),
+                        f: nc + self.nodes[m as usize].pos.distance(goal) * greed,
                         i: m,
                     });
                 }
@@ -417,6 +475,7 @@ impl Nav {
             chain.push(cur);
         }
         chain.reverse();
+        drop(guard);
         let pts: Vec<Vec3> = chain.iter().map(|&c| self.nodes[c as usize].pos).collect();
         // string pulling
         let mut out = Vec::new();

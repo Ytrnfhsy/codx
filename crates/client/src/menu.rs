@@ -502,7 +502,7 @@ pub fn draw_menu(
                     t("Макс. гравців", "Max players"),
                     hs.max_players as f32,
                     2.0,
-                    24.0,
+                    toon_shared::consts::MAX_PLAYERS as f32,
                     x + 24.0,
                     y + 380.0,
                     pw - 48.0,

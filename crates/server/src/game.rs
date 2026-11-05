@@ -729,7 +729,10 @@ impl Game {
             .collect();
         let want = self.cfg.bots.saturating_sub(humans_playing);
         if bots.len() < want {
-            self.add_bot();
+            // a few per second (big servers fill up quickly, without a burst of joins)
+            for _ in 0..(want - bots.len()).min(8) {
+                self.add_bot();
+            }
         } else if bots.len() > want {
             // remove a bot from the bigger team
             let big = if self.team_count(Team::Allies) >= self.team_count(Team::Axis) {
@@ -1598,15 +1601,42 @@ impl Game {
     }
 
     /// Builds the snapshot for one recipient.
+    /// Where a player looks from (their body and whatever they steer), on big maps; None
+    /// sees everything (small maps, spectators).
+    fn interest(&self, id: u8) -> Option<Vec<Vec3>> {
+        self.map.terrain.as_ref()?;
+        let p = self.p(id)?;
+        if !p.team.is_playing() {
+            return None;
+        }
+        let mut pts = vec![p.body.pos];
+        pts.extend(
+            self.vehicles
+                .iter()
+                .filter(|v| v.owner == id)
+                .map(|v| v.pos),
+        );
+        Some(pts)
+    }
+
     pub fn snapshot_for(&self, id: u8) -> Snapshot {
         let me = self.p(id);
         let my_team = me.map(|p| p.team).unwrap_or(Team::Spectator);
         let uav = my_team.is_playing() && self.uav_until[my_team.index()] > self.time;
+        // big maps: only what is near enough to matter (the fog hides the rest anyway)
+        let focus = self.interest(id);
+        let near = |q: Vec3, r: f32| {
+            focus.as_ref().is_none_or(|pts| {
+                pts.iter()
+                    .any(|f| vec3(q.x - f.x, 0.0, q.z - f.z).length_squared() < r * r)
+            })
+        };
         let players = self
             .players
             .iter()
             .flatten()
             .filter(|p| p.team.is_playing())
+            .filter(|p| p.id == id || p.team == my_team && my_team.is_playing() || near(p.body.pos, INTEREST_RANGE))
             .map(|p| {
                 let mut f = p.flags;
                 if p.reload_end.is_some() {
@@ -1723,6 +1753,24 @@ impl Game {
         } else {
             None
         };
+        if focus.is_some() {
+            ents.retain(|e| match e {
+                // aircraft are seen (and heard) from afar
+                EntSnap::Heli { .. } | EntSnap::Plane { .. } => true,
+                EntSnap::Grenade { pos, .. }
+                | EntSnap::Smoke { pos, .. }
+                | EntSnap::Vehicle { pos, .. }
+                | EntSnap::Drop { pos, .. }
+                | EntSnap::Weapon { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
+            });
+        }
+        // gunshots carry further than you can see
+        let shots = self
+            .shots
+            .iter()
+            .filter(|s| near(Vec3::from_array(s.from), INTEREST_RANGE + 150.0))
+            .cloned()
+            .collect();
         Snapshot {
             tick: self.tick,
             state: self.state,
@@ -1733,7 +1781,7 @@ impl Game {
             me: me_snap,
             ents,
             bomb,
-            shots: self.shots.clone(),
+            shots,
         }
     }
 }

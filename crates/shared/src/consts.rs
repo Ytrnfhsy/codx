@@ -35,7 +35,9 @@ pub const RELEASE_BUILD: bool = option_env!("TW_VERSION").is_some();
 /// Prefix of a connectionless server info query.
 pub const QUERY_MAGIC: &[u8; 4] = b"TWQ?";
 pub const QUERY_REPLY_MAGIC: &[u8; 4] = b"TWQ!";
-pub const MAX_PLAYERS: usize = 32;
+pub const MAX_PLAYERS: usize = 64;
+/// On big maps a player is told only about what is this close (m); the fog ends sooner.
+pub const INTEREST_RANGE: f32 = 400.0;
 
 pub const PLAYER_RADIUS: f32 = 0.35;
 pub const STAND_HEIGHT: f32 = 1.9;

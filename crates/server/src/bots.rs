@@ -146,6 +146,8 @@ pub struct Bot {
     path: Vec<Vec3>,
     path_goal: Option<Vec3>,
     repath_at: f64,
+    /// The last search for a route failed: do not search again before this.
+    path_fail_until: f64,
     target: Option<u8>,
     seen_at: f64,
     last_seen: Option<(Vec3, f64)>,
@@ -179,6 +181,7 @@ impl Bot {
             path: Vec::new(),
             path_goal: None,
             repath_at: 0.0,
+            path_fail_until: 0.0,
             target: None,
             seen_at: 0.0,
             last_seen: None,
@@ -546,13 +549,26 @@ impl Game {
             }
         } else if let Some(g) = goal {
             let flat_d = vec3(g.x - pos.x, 0.0, g.z - pos.z).length();
+            // far goals may drift a little before the route is worth planning again
+            let slack = (flat_d * 0.08).max(2.5);
             let need_path = bot.path.is_empty()
-                || bot.path_goal.map(|pg| pg.distance(g) > 2.5).unwrap_or(true)
+                || bot
+                    .path_goal
+                    .map(|pg| pg.distance(g) > slack)
+                    .unwrap_or(true)
                 || time >= bot.repath_at;
-            if need_path && flat_d > 1.2 {
-                bot.path = self.nav.path(pos, g).unwrap_or_default();
+            if need_path && flat_d > 1.2 && time >= bot.path_fail_until {
                 bot.path_goal = Some(g);
-                bot.repath_at = time + 2.5;
+                bot.repath_at = time + 2.5 + (flat_d as f64 / 60.0).min(5.0);
+                match self.nav.path(pos, g) {
+                    Some(p) => bot.path = p,
+                    None => {
+                        // no way there: rest a moment and pick somewhere else to go
+                        bot.path.clear();
+                        bot.path_fail_until = time + 1.5;
+                        bot.roam_until = time;
+                    }
+                }
             }
             while let Some(wp) = bot.path.first() {
                 // reached when close horizontally and on (roughly) the same floor
