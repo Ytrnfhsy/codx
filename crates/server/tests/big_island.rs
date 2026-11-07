@@ -52,7 +52,11 @@ fn fifty_players_on_the_island() {
     for _ in 0..ticks {
         let t0 = std::time::Instant::now();
         g.tick(TICK_DT);
-        worst = worst.max(t0.elapsed());
+        let e = t0.elapsed();
+        if e.as_millis() > 10 {
+            eprintln!("slow tick at {:.2} s: {e:?}", g.time);
+        }
+        worst = worst.max(e);
         g.outbox.clear();
         g.shots.clear();
     }

@@ -283,3 +283,54 @@ fn every_ladder_works_whichever_way_you_look() {
         }
     }
 }
+
+/// On the big island the towns have a fine grid: bodies walk from the edge of a town up
+/// the stairs to supplies on upper floors and roofs.
+#[test]
+fn island_upper_floors_are_walkable() {
+    let m = toon_shared::maps::build(MapId::Island);
+    let w = World::from_map(&m);
+    let nav = Nav::build(&m, &w);
+    let t = m.terrain.as_ref().unwrap();
+    // loot up in houses of the middle town
+    let upstairs: Vec<glam::Vec3> = m
+        .loot
+        .iter()
+        .copied()
+        .filter(|p| {
+            p.y > t.height(p.x, p.z) + 3.0
+                && p.x < 10.0
+                && p.x > -130.0
+                && p.z < 20.0
+                && p.z > -100.0
+        })
+        .collect();
+    assert!(
+        upstairs.len() >= 8,
+        "only {} upper-floor spots",
+        upstairs.len()
+    );
+    // start outside the town, on the road to the west
+    let start = nav.snap(glam::vec3(-150.0, 20.0, -25.0)).unwrap();
+    let mut reached = 0;
+    for (k, &goal) in upstairs.iter().enumerate().take(10) {
+        let Some(g) = nav.snap(goal) else { continue };
+        if (g.y - goal.y).abs() > 0.8 {
+            continue;
+        }
+        let Some(path) = nav.path(start, g) else {
+            eprintln!("spot {k}: {g} no path");
+            continue;
+        };
+        let _ = path;
+        let end = walk(&m, &w, &nav, start, g);
+        let ok =
+            glam::vec3(end.x - g.x, 0.0, end.z - g.z).length() < 1.5 && (end.y - g.y).abs() < 0.6;
+        eprintln!(
+            "spot {k}: {g} -> ended at {end} ({})",
+            if ok { "ok" } else { "MISSED" }
+        );
+        reached += ok as usize;
+    }
+    assert!(reached >= 7, "bodies reached only {reached} upper floors");
+}

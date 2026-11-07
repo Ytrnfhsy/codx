@@ -651,5 +651,6 @@ pub fn wreck() -> Map {
         tint: [1.06, 1.0, 0.9],
         terrain: None,
         loot: Vec::new(),
+        nav_detail: Vec::new(),
     }
 }

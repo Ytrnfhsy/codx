@@ -64,6 +64,10 @@ pub struct KillLine {
     pub cause: Cause,
     pub headshot: bool,
     pub time: f64,
+    /// The killer / the victim is us (highlighted in the battle royale, where nobody
+    /// has a team colour).
+    pub kme: bool,
+    pub vme: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -699,7 +703,6 @@ impl GameClient {
                     self.death_time = now;
                     self.death_pos = self.eye();
                     self.spec_pos = self.death_pos + vec3(0.0, 4.0, 0.0);
-                    self.spec_pos = self.death_pos + vec3(0.0, 4.0, 0.0);
                     self.death_info =
                         Some((killer_name.clone(), cause, killer.filter(|k| *k != victim)));
                     self.cooking = None;
@@ -745,6 +748,8 @@ impl GameClient {
                     cause,
                     headshot,
                     time: now,
+                    kme: killer == Some(self.my_id),
+                    vme: victim == self.my_id,
                 });
                 if self.killfeed.len() > 6 {
                     self.killfeed.remove(0);

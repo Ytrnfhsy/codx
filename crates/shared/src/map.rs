@@ -164,6 +164,9 @@ pub struct Map {
     pub terrain: Option<std::sync::Arc<crate::terrain::Heightmap>>,
     /// Where battle royale supplies may lie (floors inside buildings and the like).
     pub loot: Vec<Vec3>,
+    /// Big maps: areas (min x, min z, max x, max z) with buildings, where the bots'
+    /// navigation needs a fine grid (doors, staircases).
+    pub nav_detail: Vec<[f32; 4]>,
 }
 
 impl Map {

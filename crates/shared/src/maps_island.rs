@@ -852,6 +852,14 @@ pub fn island() -> Map {
         tint: [1.0, 1.0, 1.0],
         terrain: Some(Arc::new(m)),
         loot: b.loot,
+        // the towns and villages (a few metres round them for the doors and yards)
+        nav_detail: PLACES
+            .iter()
+            .map(|p| {
+                let (a, b) = (p.min(), p.max());
+                [a.x - 4.0, a.y - 4.0, b.x + 4.0, b.y + 4.0]
+            })
+            .collect(),
     }
 }
 

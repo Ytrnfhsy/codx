@@ -308,5 +308,6 @@ pub fn site() -> Map {
         tint: [0.93, 0.96, 1.03],
         terrain: None,
         loot: Vec::new(),
+        nav_detail: Vec::new(),
     }
 }

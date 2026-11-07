@@ -28,18 +28,63 @@ struct NavNode {
     ground: bool,
 }
 
-pub struct Nav {
+/// A regular grid of columns. Small maps have one fine grid; big terrain maps have a
+/// coarse one over the land and fine ones where the buildings are.
+struct Grid {
     ox: f32,
     oz: f32,
     cell: f32,
+    w: i32,
+    h: i32,
+    /// Node ids per column, sorted by height.
+    cols: Vec<Vec<u32>>,
+}
+
+impl Grid {
+    fn new(ox: f32, oz: f32, x1: f32, z1: f32, cell: f32) -> Grid {
+        let w = ((x1 - ox) / cell).ceil().max(1.0) as i32;
+        let h = ((z1 - oz) / cell).ceil().max(1.0) as i32;
+        Grid {
+            ox,
+            oz,
+            cell,
+            w,
+            h,
+            cols: vec![Vec::new(); (w * h) as usize],
+        }
+    }
+    fn center(&self, i: i32, j: i32) -> (f32, f32) {
+        (
+            self.ox + (i as f32 + 0.5) * self.cell,
+            self.oz + (j as f32 + 0.5) * self.cell,
+        )
+    }
+    fn cell_of(&self, p: Vec3) -> (i32, i32) {
+        (
+            ((p.x - self.ox) / self.cell).floor() as i32,
+            ((p.z - self.oz) / self.cell).floor() as i32,
+        )
+    }
+    fn contains(&self, p: Vec3) -> bool {
+        let (i, j) = self.cell_of(p);
+        i >= 0 && j >= 0 && i < self.w && j < self.h
+    }
+    fn col(&self, i: i32, j: i32) -> Option<&Vec<u32>> {
+        if i < 0 || j < 0 || i >= self.w || j >= self.h {
+            None
+        } else {
+            Some(&self.cols[(j * self.w + i) as usize])
+        }
+    }
+}
+
+pub struct Nav {
+    /// Grid 0 covers the whole map; the others (finer) cut holes into it.
+    grids: Vec<Grid>,
     /// Water surface (bots do not wander into rivers and the sea).
     water: f32,
     /// Big terrain map (hills: steeper links, longer straight walks).
     terrain: bool,
-    pub w: i32,
-    pub h: i32,
-    /// Node ids per column, sorted by height.
-    cols: Vec<Vec<u32>>,
     nodes: Vec<NavNode>,
     reachable_ids: Vec<u32>,
     /// A*'s per-node bookkeeping, kept between searches (clearing a quarter of a million
@@ -91,140 +136,247 @@ fn walkable_between(world: &World, a: Vec3, b: Vec3) -> bool {
 
 impl Nav {
     pub fn build(map: &Map, world: &World) -> Nav {
-        let ox = map.min.x;
-        let oz = map.min.y;
         let ground = world.terrain.clone();
-        let cell = if ground.is_some() { TERRAIN_CELL } else { CELL };
-        let w = ((map.max.x - map.min.x) / cell).ceil() as i32;
-        let h = ((map.max.y - map.min.y) / cell).ceil() as i32;
-        let center = |i: i32, j: i32| (ox + (i as f32 + 0.5) * cell, oz + (j as f32 + 0.5) * cell);
-
-        // candidate floor heights: the top of every solid box under a column's centre
-        let mut tops: Vec<Vec<f32>> = vec![Vec::new(); (w * h) as usize];
-        for (b, m) in world.boxes.iter().zip(&world.mats) {
-            if b.max.y > 30.0 || !m.blocks_movement() {
-                continue; // invisible clip ceilings, and cloth nobody can stand on
+        let mut grids = Vec::new();
+        if ground.is_some() {
+            // a coarse grid over the land, fine ones over the towns (snapped to the coarse
+            // cells so that every spot belongs to exactly one grid)
+            let coarse = Grid::new(map.min.x, map.min.y, map.max.x, map.max.y, TERRAIN_CELL);
+            for r in &map.nav_detail {
+                let snap = |v: f32, o: f32, up: bool| {
+                    let k = (v - o) / TERRAIN_CELL;
+                    o + if up { k.ceil() } else { k.floor() } * TERRAIN_CELL
+                };
+                let x0 = snap(r[0].max(map.min.x), map.min.x, false);
+                let z0 = snap(r[1].max(map.min.y), map.min.y, false);
+                let x1 = snap(r[2].min(map.max.x), map.min.x, true);
+                let z1 = snap(r[3].min(map.max.y), map.min.y, true);
+                grids.push(Grid::new(x0, z0, x1, z1, CELL));
             }
-            let i0 = (((b.min.x - ox) / cell) - 0.5).ceil().max(0.0) as i32;
-            let i1 = (((b.max.x - ox) / cell) - 0.5).floor().min((w - 1) as f32) as i32;
-            let j0 = (((b.min.z - oz) / cell) - 0.5).ceil().max(0.0) as i32;
-            let j1 = (((b.max.z - oz) / cell) - 0.5).floor().min((h - 1) as f32) as i32;
-            for j in j0..=j1 {
-                for i in i0..=i1 {
-                    tops[(j * w + i) as usize].push(b.max.y);
-                }
-            }
+            grids.insert(0, coarse);
+        } else {
+            grids.push(Grid::new(map.min.x, map.min.y, map.max.x, map.max.y, CELL));
         }
-        // the ground itself, where it is not too steep to walk; tops buried in it go
-        let mut on_ground = vec![f32::NAN; (w * h) as usize];
-        if let Some(t) = &ground {
-            for j in 0..h {
-                for i in 0..w {
-                    let (x, z) = center(i, j);
-                    let y = t.height(x, z);
-                    let k = (j * w + i) as usize;
-                    tops[k].retain(|&top| top > y + 0.1);
-                    if t.slope(x, z) <= toon_shared::terrain::MAX_WALK_SLOPE * 1.05 {
-                        tops[k].push(y);
-                        on_ground[k] = y;
+        let fine_rects: Vec<(f32, f32, f32, f32)> = grids[1..]
+            .iter()
+            .map(|g| {
+                (
+                    g.ox,
+                    g.oz,
+                    g.ox + g.w as f32 * g.cell,
+                    g.oz + g.h as f32 * g.cell,
+                )
+            })
+            .collect();
+        let in_fine = |x: f32, z: f32| {
+            fine_rects
+                .iter()
+                .any(|r| x >= r.0 && x < r.2 && z >= r.1 && z < r.3)
+        };
+
+        let mut nodes: Vec<NavNode> = Vec::new();
+        for (gi, grid) in grids.iter_mut().enumerate() {
+            let (ox, oz, cell, w, h) = (grid.ox, grid.oz, grid.cell, grid.w, grid.h);
+            // candidate floor heights: the top of every solid box under a column's centre
+            let mut tops: Vec<Vec<f32>> = vec![Vec::new(); (w * h) as usize];
+            for (b, m) in world.boxes.iter().zip(&world.mats) {
+                if b.max.y > 30.0 && ground.is_none()
+                    || b.max.y - b.min.y > 60.0
+                    || !m.blocks_movement()
+                {
+                    continue; // invisible clip walls, and cloth nobody can stand on
+                }
+                let i0 = (((b.min.x - ox) / cell) - 0.5).ceil().max(0.0) as i32;
+                let i1 = (((b.max.x - ox) / cell) - 0.5).floor().min((w - 1) as f32) as i32;
+                let j0 = (((b.min.z - oz) / cell) - 0.5).ceil().max(0.0) as i32;
+                let j1 = (((b.max.z - oz) / cell) - 0.5).floor().min((h - 1) as f32) as i32;
+                for j in j0..=j1 {
+                    for i in i0..=i1 {
+                        tops[(j * w + i) as usize].push(b.max.y);
                     }
                 }
             }
-        }
-
-        let mut cols: Vec<Vec<u32>> = vec![Vec::new(); (w * h) as usize];
-        let mut nodes: Vec<NavNode> = Vec::new();
-        for j in 0..h {
-            for i in 0..w {
-                let k = (j * w + i) as usize;
-                let t = &mut tops[k];
-                t.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                t.dedup_by(|a, b| (*a - *b).abs() < 0.03);
-                let (x, z) = center(i, j);
-                for &y in t.iter() {
-                    // obstacles lower than a step (stairs, kerbs) are stepped over, so they do not block
-                    let bb = Aabb {
-                        min: vec3(x - CLEAR_R, y + 0.5, z - CLEAR_R),
-                        max: vec3(x + CLEAR_R, y + 1.85, z + CLEAR_R),
-                    };
-                    if !world.overlaps(&bb) {
-                        cols[k].push(nodes.len() as u32);
-                        nodes.push(NavNode {
-                            pos: vec3(x, y, z),
-                            links: Vec::new(),
-                            reachable: false,
-                            ground: on_ground[k] == y,
-                        });
+            // the ground itself, where it is not too steep to walk; tops buried in it go
+            let mut on_ground = vec![f32::NAN; (w * h) as usize];
+            if let Some(t) = &ground {
+                for j in 0..h {
+                    for i in 0..w {
+                        let (x, z) = grid.center(i, j);
+                        let y = t.height(x, z);
+                        let k = (j * w + i) as usize;
+                        tops[k].retain(|&top| top > y + 0.1);
+                        if t.slope(x, z) <= toon_shared::terrain::MAX_WALK_SLOPE * 1.05 {
+                            tops[k].push(y);
+                            on_ground[k] = y;
+                        }
+                    }
+                }
+            }
+            for j in 0..h {
+                for i in 0..w {
+                    let k = (j * w + i) as usize;
+                    let (x, z) = grid.center(i, j);
+                    // the coarse grid leaves the towns to the fine grids
+                    if gi == 0 && in_fine(x, z) {
+                        continue;
+                    }
+                    let t = &mut tops[k];
+                    t.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    t.dedup_by(|a, b| (*a - *b).abs() < 0.03);
+                    for &y in t.iter() {
+                        // obstacles lower than a step (stairs, kerbs) are stepped over, so
+                        // they do not block
+                        let bb = Aabb {
+                            min: vec3(x - CLEAR_R, y + 0.5, z - CLEAR_R),
+                            max: vec3(x + CLEAR_R, y + 1.85, z + CLEAR_R),
+                        };
+                        if !world.overlaps(&bb) {
+                            grid.cols[k].push(nodes.len() as u32);
+                            nodes.push(NavNode {
+                                pos: vec3(x, y, z),
+                                links: Vec::new(),
+                                reachable: false,
+                                ground: on_ground[k] == y,
+                            });
+                        }
                     }
                 }
             }
         }
 
         let mut nav = Nav {
-            ox,
-            oz,
-            cell,
+            grids,
             water: ground
                 .as_ref()
                 .map(|t| t.water)
                 .unwrap_or(f32::NEG_INFINITY),
             terrain: ground.is_some(),
             scratch: Default::default(),
-            w,
-            h,
-            cols,
             nodes,
             reachable_ids: Vec::new(),
         };
-        // links
-        for j in 0..h {
-            for i in 0..w {
-                let ids = nav.cols[(j * w + i) as usize].clone();
-                for n in ids {
-                    let y = nav.nodes[n as usize].pos.y;
-                    let mut links = Vec::new();
-                    for (di, dj) in [
-                        (1, 0),
-                        (-1, 0),
-                        (0, 1),
-                        (0, -1),
-                        (1, 1),
-                        (1, -1),
-                        (-1, 1),
-                        (-1, -1),
-                    ] {
-                        let diag = di != 0 && dj != 0;
-                        let Some(m) = nav.step_target(n, i + di, j + dj, !diag) else {
-                            continue;
-                        };
-                        if diag
-                            && (nav.step_target(n, i + di, j, false).is_none()
-                                || nav.step_target(n, i, j + dj, false).is_none())
-                        {
-                            continue;
-                        }
-                        let (pa, pb) = (nav.nodes[n as usize].pos, nav.nodes[m as usize].pos);
-                        // on the coarse grid a wall can stand between two free cells
-                        if nav.cell > CELL && !walkable_between(world, pa, pb) {
-                            continue;
-                        }
-                        let dy = pb.y - y;
-                        let flat = if diag { nav.cell * 1.414 } else { nav.cell };
-                        let mut cost = flat
-                            + if dy > 0.0 {
-                                dy * 0.6
-                            } else if dy < -MAX_UP && !nav.nodes[m as usize].ground {
-                                1.0 - dy * 0.3
-                            } else {
-                                0.0
+        let link_cost = |nav: &Nav, a: u32, b: u32, flat: f32| {
+            let (pa, pb) = (nav.nodes[a as usize].pos, nav.nodes[b as usize].pos);
+            let dy = pb.y - pa.y;
+            let mut cost = flat
+                + if dy > 0.0 {
+                    dy * 0.6
+                } else if dy < -MAX_UP && !nav.nodes[b as usize].ground {
+                    1.0 - dy * 0.3
+                } else {
+                    0.0
+                };
+            // wading is slow
+            if pb.y < nav.water - 0.35 {
+                cost *= 2.5;
+            }
+            cost
+        };
+        // links inside each grid
+        for gi in 0..nav.grids.len() {
+            let (w, h, cell) = (nav.grids[gi].w, nav.grids[gi].h, nav.grids[gi].cell);
+            for j in 0..h {
+                for i in 0..w {
+                    let ids = nav.grids[gi].cols[(j * w + i) as usize].clone();
+                    for n in ids {
+                        let mut links = Vec::new();
+                        for (di, dj) in [
+                            (1, 0),
+                            (-1, 0),
+                            (0, 1),
+                            (0, -1),
+                            (1, 1),
+                            (1, -1),
+                            (-1, 1),
+                            (-1, -1),
+                        ] {
+                            let diag = di != 0 && dj != 0;
+                            let Some(m) = nav.step_target(n, gi, i + di, j + dj, !diag) else {
+                                continue;
                             };
-                        // wading is slow
-                        if ground.as_ref().is_some_and(|t| pb.y < t.water - 0.35) {
-                            cost *= 2.5;
+                            if diag
+                                && (nav.step_target(n, gi, i + di, j, false).is_none()
+                                    || nav.step_target(n, gi, i, j + dj, false).is_none())
+                            {
+                                continue;
+                            }
+                            let (pa, pb) = (nav.nodes[n as usize].pos, nav.nodes[m as usize].pos);
+                            // on the coarse grid a wall can stand between two free cells
+                            if cell > CELL && !walkable_between(world, pa, pb) {
+                                continue;
+                            }
+                            let flat = if diag { cell * 1.414 } else { cell };
+                            links.push((m, link_cost(&nav, n, m, flat)));
                         }
-                        links.push((m, cost));
+                        nav.nodes[n as usize].links = links;
                     }
-                    nav.nodes[n as usize].links = links;
+                }
+            }
+        }
+        // seams: the edge of every fine grid joins the coarse ground round it
+        for gi in 1..nav.grids.len() {
+            let (w, h) = (nav.grids[gi].w, nav.grids[gi].h);
+            let mut edge = Vec::new();
+            for j in 0..h {
+                for i in 0..w {
+                    let out: Vec<(i32, i32)> = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                        .into_iter()
+                        .filter(|&(di, dj)| {
+                            let (ni, nj) = (i + di, j + dj);
+                            ni < 0 || nj < 0 || ni >= w || nj >= h
+                        })
+                        .collect();
+                    if !out.is_empty() {
+                        for &n in &nav.grids[gi].cols[(j * w + i) as usize] {
+                            edge.push((n, out.clone()));
+                        }
+                    }
+                }
+            }
+            for (n, dirs) in edge {
+                let pa = nav.nodes[n as usize].pos;
+                for (di, dj) in dirs {
+                    let q = pa + vec3(di as f32, 0.0, dj as f32) * (CELL * 0.5 + 0.05);
+                    let Some((g2, ci, cj)) = nav.locate(q) else {
+                        continue;
+                    };
+                    if g2 == gi {
+                        continue;
+                    }
+                    let Some(col) = nav.grids[g2].col(ci, cj) else {
+                        continue;
+                    };
+                    // the closest floor in height that a body can walk to
+                    let best = col
+                        .iter()
+                        .copied()
+                        .filter(|&m| {
+                            let pb = nav.nodes[m as usize].pos;
+                            let dist = vec3(pb.x - pa.x, 0.0, pb.z - pa.z).length();
+                            let up = if nav.nodes[n as usize].ground && nav.nodes[m as usize].ground
+                            {
+                                (dist * toon_shared::terrain::MAX_WALK_SLOPE).max(MAX_UP)
+                            } else {
+                                MAX_UP
+                            };
+                            (pb.y - pa.y).abs() <= up && walkable_between(world, pa, pb)
+                        })
+                        .min_by(|&a, &b| {
+                            let da = (nav.nodes[a as usize].pos.y - pa.y).abs();
+                            let db = (nav.nodes[b as usize].pos.y - pa.y).abs();
+                            da.total_cmp(&db)
+                        });
+                    if let Some(m) = best {
+                        let pb = nav.nodes[m as usize].pos;
+                        let flat = vec3(pb.x - pa.x, 0.0, pb.z - pa.z).length();
+                        let (c1, c2) = (link_cost(&nav, n, m, flat), link_cost(&nav, m, n, flat));
+                        if !nav.nodes[n as usize].links.iter().any(|l| l.0 == m) {
+                            nav.nodes[n as usize].links.push((m, c1));
+                        }
+                        if !nav.nodes[m as usize].links.iter().any(|l| l.0 == n) {
+                            nav.nodes[m as usize].links.push((n, c2));
+                        }
+                    }
                 }
             }
         }
@@ -265,9 +417,19 @@ impl Nav {
         nav
     }
 
-    /// Node in column (i, j) reachable from node `from` (by stepping, or dropping if allowed).
-    fn step_target(&self, from: u32, i: i32, j: i32, allow_drop: bool) -> Option<u32> {
-        let col = self.col(i, j)?;
+    /// The grid a point belongs to (a fine one where there is one) and its column there.
+    fn locate(&self, p: Vec3) -> Option<(usize, i32, i32)> {
+        let g = (1..self.grids.len())
+            .find(|&g| self.grids[g].contains(p))
+            .or_else(|| self.grids[0].contains(p).then_some(0))?;
+        let (i, j) = self.grids[g].cell_of(p);
+        Some((g, i, j))
+    }
+
+    /// Node in column (i, j) of grid `g` reachable from node `from` (by stepping, or
+    /// dropping if allowed).
+    fn step_target(&self, from: u32, g: usize, i: i32, j: i32, allow_drop: bool) -> Option<u32> {
+        let col = self.grids[g].col(i, j)?;
         let a = &self.nodes[from as usize];
         let y = a.pos.y;
         let mut best: Option<(u32, f32)> = None;
@@ -276,7 +438,7 @@ impl Nav {
             let dy = b.pos.y - y;
             // walking over the hills: as steep as the ground may be
             let up = if a.ground && b.ground {
-                self.cell * toon_shared::terrain::MAX_WALK_SLOPE
+                (self.grids[g].cell * toon_shared::terrain::MAX_WALK_SLOPE).max(MAX_UP)
             } else {
                 MAX_UP
             };
@@ -288,28 +450,14 @@ impl Nav {
         best.map(|b| b.0)
     }
 
-    fn col(&self, i: i32, j: i32) -> Option<&Vec<u32>> {
-        if i < 0 || j < 0 || i >= self.w || j >= self.h {
-            None
-        } else {
-            Some(&self.cols[(j * self.w + i) as usize])
-        }
-    }
-
-    pub fn cell_of(&self, p: Vec3) -> (i32, i32) {
-        (
-            ((p.x - self.ox) / self.cell).floor() as i32,
-            ((p.z - self.oz) / self.cell).floor() as i32,
-        )
-    }
-
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Closest walkable node to `p` (same floor preferred).
-    fn nearest(&self, p: Vec3) -> Option<u32> {
-        let (ci, cj) = self.cell_of(p);
+    /// Closest walkable node to `p` in grid `g` (same floor preferred).
+    fn nearest_in(&self, g: usize, p: Vec3) -> Option<(u32, f32)> {
+        let grid = &self.grids[g];
+        let (ci, cj) = grid.cell_of(p);
         for r in 0..10i32 {
             let mut best: Option<(u32, f32)> = None;
             for dj in -r..=r {
@@ -317,7 +465,7 @@ impl Nav {
                     if di.abs() != r && dj.abs() != r {
                         continue;
                     }
-                    let Some(col) = self.col(ci + di, cj + dj) else {
+                    let Some(col) = grid.col(ci + di, cj + dj) else {
                         continue;
                     };
                     for &m in col {
@@ -337,10 +485,33 @@ impl Nav {
                 }
             }
             if best.is_some() {
-                return best.map(|b| b.0);
+                return best;
             }
         }
         None
+    }
+
+    /// Closest walkable node to `p` (same floor preferred), from any grid nearby.
+    fn nearest(&self, p: Vec3) -> Option<u32> {
+        let home = self.locate(p).map(|l| l.0).unwrap_or(0);
+        if let Some((n, d)) = self.nearest_in(home, p) {
+            if d < 1.5 || self.grids.len() == 1 {
+                return Some(n);
+            }
+        }
+        // near the edge of a fine grid the closest floor may lie in the next grid
+        (0..self.grids.len())
+            .filter(|&g| {
+                let gr = &self.grids[g];
+                let m = 10.0 * gr.cell;
+                p.x >= gr.ox - m
+                    && p.z >= gr.oz - m
+                    && p.x <= gr.ox + gr.w as f32 * gr.cell + m
+                    && p.z <= gr.oz + gr.h as f32 * gr.cell + m
+            })
+            .filter_map(|g| self.nearest_in(g, p))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|b| b.0)
     }
 
     /// Snaps a point onto the navigation mesh.
@@ -372,18 +543,33 @@ impl Nav {
     fn clear_line(&self, a: Vec3, b: Vec3) -> bool {
         let d = b - a;
         let len = vec3(d.x, 0.0, d.z).length();
+        // does the line touch a town (fine grid)? then walk it in fine steps
+        let (lo, hi) = (a.min(b), a.max(b));
+        let fine = self.grids[1..].iter().any(|g| {
+            lo.x <= g.ox + g.w as f32 * g.cell
+                && hi.x >= g.ox
+                && lo.z <= g.oz + g.h as f32 * g.cell
+                && hi.z >= g.oz
+        }) || self.grids[0].cell <= CELL;
         // nothing walkable is steeper than stairs (stacked flights share the same footprint)
-        let steep = if self.terrain { 1.05 } else { 0.75 };
+        let steep = if self.terrain && !fine { 1.05 } else { 0.75 };
         if d.y.abs() > len * steep + 0.3 {
             return false;
         }
-        let tol = (self.cell * 0.5).max(0.6);
-        let n = (len / (self.cell * 0.5)).ceil().max(1.0) as i32;
+        let step = if fine {
+            CELL * 0.5
+        } else {
+            self.grids[0].cell * 0.5
+        };
+        let n = (len / step).ceil().max(1.0) as i32;
         for k in 0..=n {
             let t = k as f32 / n as f32;
             let p = a + d * t;
-            let (i, j) = self.cell_of(p);
-            let Some(col) = self.col(i, j) else {
+            let Some((g, i, j)) = self.locate(p) else {
+                return false;
+            };
+            let tol = (self.grids[g].cell * 0.5).max(0.6);
+            let Some(col) = self.grids[g].col(i, j) else {
                 return false;
             };
             if !col
@@ -446,7 +632,7 @@ impl Nav {
                 continue;
             }
             expanded += 1;
-            if expanded > if self.terrain { 60_000 } else { 120_000 } {
+            if expanded > if self.terrain { 25_000 } else { 120_000 } {
                 return None;
             }
             for &(m, c) in &self.nodes[i as usize].links {

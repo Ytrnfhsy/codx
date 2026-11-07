@@ -706,7 +706,8 @@ impl GameClient {
                 continue;
             }
             let p = to_map(r.pos);
-            if r.team == self.team {
+            // battle royale: nobody is on our side
+            if r.team == self.team && !self.mode.solo() {
                 let a = r.yaw - yaw;
                 let d = vec2(-a.sin(), -a.cos());
                 let perp = vec2(-d.y, d.x);
@@ -1107,7 +1108,13 @@ impl GameClient {
                 Color::new(0.0, 0.0, 0.0, 0.35 * a),
             );
             if !suicide {
-                ui.shadowed(&k.killer, x, y, 16, with_alpha(team_color(k.kteam), a));
+                ui.shadowed(
+                    &k.killer,
+                    x,
+                    y,
+                    16,
+                    with_alpha(self.feed_color(k.kteam, k.kme), a),
+                );
                 x += kw + gap;
             }
             let iw = draw_cause_icon(k.cause, x, y - 6.0, ih, a);
@@ -1117,8 +1124,26 @@ impl GameClient {
                 x += ih + 6.0;
             }
             x += gap;
-            ui.shadowed(&k.victim, x, y, 16, with_alpha(team_color(k.vteam), a));
+            ui.shadowed(
+                &k.victim,
+                x,
+                y,
+                16,
+                with_alpha(self.feed_color(k.vteam, k.vme), a),
+            );
             y += 26.0;
+        }
+    }
+
+    /// Name colour in the kill feed: team colours, or in the battle royale (no teams) us in
+    /// yellow and everybody else in red.
+    fn feed_color(&self, team: Team, me: bool) -> Color {
+        if !self.mode.solo() {
+            team_color(team)
+        } else if me {
+            ACCENT
+        } else {
+            BAD
         }
     }
 

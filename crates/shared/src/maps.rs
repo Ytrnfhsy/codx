@@ -253,6 +253,7 @@ fn depot() -> Map {
         tint: [0.98, 1.02, 1.0],
         terrain: None,
         loot: Vec::new(),
+        nav_detail: Vec::new(),
     }
 }
 
@@ -322,6 +323,7 @@ fn cargo() -> Map {
         tint: [0.9, 0.95, 1.06],
         terrain: None,
         loot: Vec::new(),
+        nav_detail: Vec::new(),
     }
 }
 

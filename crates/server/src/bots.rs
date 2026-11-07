@@ -565,9 +565,12 @@ impl Game {
                     .map(|pg| pg.distance(g) > slack)
                     .unwrap_or(true)
                 || time >= bot.repath_at;
-            if need_path && flat_d > 1.2 && time >= bot.path_fail_until {
+            // a few route searches per tick at most, so that fifty bots never plan all at once
+            if need_path && flat_d > 1.2 && time >= bot.path_fail_until && self.path_budget > 0 {
+                self.path_budget -= 1;
                 bot.path_goal = Some(g);
-                bot.repath_at = time + 2.5 + (flat_d as f64 / 60.0).min(5.0);
+                bot.repath_at =
+                    time + 2.5 + (flat_d as f64 / 60.0).min(5.0) + self.rng.range(0.0, 1.5) as f64;
                 match self.nav.path(pos, g) {
                     Some(p) => bot.path = p,
                     None => {

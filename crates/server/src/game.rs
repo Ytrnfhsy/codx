@@ -16,6 +16,8 @@ use toon_shared::weapons::{Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_
 use toon_shared::{maps, tr, Mode, Team};
 
 pub const PREROUND_FIRST: f64 = 8.0;
+/// Most bot route searches in one tick (the rest wait for the next ones).
+pub const PATHS_PER_TICK: u32 = 6;
 pub const PREROUND_NEXT: f64 = 5.0;
 pub const ROUND_END_TIME: f64 = 6.0;
 pub const POSTMATCH_TIME: f64 = 12.0;
@@ -311,6 +313,8 @@ pub struct Game {
     pub kicked: Vec<(u8, String)>,
     pub next_housekeeping: f64,
     pub match_started: bool,
+    /// Route searches bots may still make this tick.
+    pub path_budget: u32,
     /// Where `save` writes the config.
     pub cfg_path: Option<std::path::PathBuf>,
 }
@@ -385,6 +389,7 @@ impl Game {
             kicked: Vec::new(),
             next_housekeeping: 0.0,
             match_started: false,
+            path_budget: 0,
             cfg_path: None,
         };
         g.logf(format!("Карта: {} ({})", g.map.name, g.mode.name()));
@@ -1543,6 +1548,7 @@ impl Game {
     pub fn tick(&mut self, dt: f32) {
         self.time += dt as f64;
         self.tick = self.tick.wrapping_add(1);
+        self.path_budget = PATHS_PER_TICK;
         self.update_state(dt);
         self.update_pickups();
 
@@ -1710,7 +1716,10 @@ impl Game {
                 }
                 if (p.team != my_team || self.mode.solo()) && p.id != id && p.alive {
                     let uav_vis = uav && !p.has_perk2(Perk2::UavJammer);
-                    if uav_vis || self.time - p.last_shot < RADAR_PING_TIME as f64 {
+                    // gunfire shows on the radar (not in the battle royale: nobody has one)
+                    let pinged = self.time - p.last_shot < RADAR_PING_TIME as f64
+                        && !self.mode.solo();
+                    if uav_vis || pinged {
                         f |= flags::ON_RADAR;
                     }
                 }
