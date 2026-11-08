@@ -187,10 +187,8 @@ enum Screen {
 
 /// Whether the window was created with vsync (changing it needs a restart).
 pub static VSYNC_AT_START: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
-/// Whether the window was created with multisampling (changing it needs a restart).
-pub static MSAA_AT_START: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
-fn window_conf(a: &Args, vsync: bool, msaa: bool) -> macroquad::conf::Conf {
+fn window_conf(a: &Args, vsync: bool) -> macroquad::conf::Conf {
     let mut platform = macroquad::miniquad::conf::Platform::default();
     platform.swap_interval = Some(if vsync { 1 } else { 0 });
     macroquad::conf::Conf {
@@ -201,7 +199,9 @@ fn window_conf(a: &Args, vsync: bool, msaa: bool) -> macroquad::conf::Conf {
             window_height: a.height,
             high_dpi: false,
             window_resizable: true,
-            sample_count: if msaa { 4 } else { 1 },
+            // the 3D world is drawn into its own target (with its own smoothing and a
+            // precise depth buffer); the window itself needs neither
+            sample_count: 1,
             ..Default::default()
         },
         draw_call_vertex_capacity: 24000,
@@ -215,8 +215,7 @@ fn main() {
     let loaded = Settings::load();
     let vsync = loaded.vsync && !args.no_vsync;
     VSYNC_AT_START.store(vsync, std::sync::atomic::Ordering::Relaxed);
-    MSAA_AT_START.store(loaded.msaa, std::sync::atomic::Ordering::Relaxed);
-    let conf = window_conf(&args, vsync, loaded.msaa);
+    let conf = window_conf(&args, vsync);
     macroquad::Window::from_config(conf, amain(args));
 }
 
@@ -301,7 +300,7 @@ async fn amain(args: Args) {
     let mut fps = 60.0f32;
     let start = get_time();
     let mut auto_done = false;
-    let mut low_res: Option<RenderTarget> = None;
+    let mut low_res: Option<(RenderTarget, i32)> = None;
     let mut frame_start = std::time::Instant::now();
     let mut fps_window = (std::time::Instant::now(), 0u32);
     let mut worst_frame = 0.0f32;
@@ -674,43 +673,40 @@ async fn amain(args: Args) {
                 }
 
                 g.update(dt, &settings, Some(&audio));
-                // optional low-resolution 3D for weak GPUs
+                // the 3D world goes into its own target: a 32-bit depth buffer whatever the
+                // window got from the system (16 bits on some setups make far walls
+                // flicker and stripe), optional smoothing, and a lower resolution for weak
+                // GPUs
                 let scale = settings.render_scale.clamp(0.4, 1.0);
-                let target = if scale < 0.99 {
-                    let (tw, th) = (
-                        (screen_width() * scale).max(64.0) as u32,
-                        (screen_height() * scale).max(64.0) as u32,
+                let (tw, th) = (
+                    (screen_width() * scale).max(64.0) as u32,
+                    (screen_height() * scale).max(64.0) as u32,
+                );
+                let samples = if settings.msaa { 4 } else { 1 };
+                if low_res
+                    .as_ref()
+                    .map(|(t, s): &(RenderTarget, i32)| {
+                        (t.texture.width() as u32, t.texture.height() as u32, *s)
+                            != (tw, th, samples)
+                    })
+                    .unwrap_or(true)
+                {
+                    let rt = render_target_ex(
+                        tw,
+                        th,
+                        RenderTargetParams {
+                            sample_count: samples,
+                            depth: true,
+                        },
                     );
-                    if low_res
-                        .as_ref()
-                        .map(|t: &RenderTarget| {
-                            (t.texture.width() as u32, t.texture.height() as u32) != (tw, th)
-                        })
-                        .unwrap_or(true)
-                    {
-                        let rt = render_target_ex(
-                            tw,
-                            th,
-                            RenderTargetParams {
-                                // the reduced-resolution picture gets its own smoothing
-                                sample_count: if MSAA_AT_START
-                                    .load(std::sync::atomic::Ordering::Relaxed)
-                                {
-                                    4
-                                } else {
-                                    1
-                                },
-                                depth: true,
-                            },
-                        );
-                        rt.texture.set_filter(FilterMode::Linear);
-                        low_res = Some(rt);
-                    }
-                    low_res.clone()
-                } else {
-                    low_res = None;
-                    None
-                };
+                    rt.texture.set_filter(if scale < 0.99 {
+                        FilterMode::Linear
+                    } else {
+                        FilterMode::Nearest
+                    });
+                    low_res = Some((rt, samples));
+                }
+                let target = low_res.as_ref().map(|l| l.0.clone());
                 let view = render::make_view(g, &settings, target.clone());
                 let tags = render::render_world(g, &mats, &settings, &view);
                 render::render_viewmodel(g, &mats, &settings, target.clone());

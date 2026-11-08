@@ -432,7 +432,9 @@ pub fn render_target_ex(width: u32, height: u32, params: RenderTargetParams) -> 
             get_quad_context().new_render_texture(miniquad::TextureParams {
                 width,
                 height,
-                format: miniquad::TextureFormat::Depth,
+                // 32-bit depth: with 16 bits, far surfaces of a big level fight each other
+                // (stripes, window frames flickering through walls)
+                format: miniquad::TextureFormat::Depth32,
                 sample_count: params.sample_count,
                 ..Default::default()
             }),

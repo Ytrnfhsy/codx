@@ -66,7 +66,7 @@ pub struct Settings {
     pub render_scale: f32,
     /// Vertical sync (FPS locked to the monitor refresh rate). Applied on restart.
     pub vsync: bool,
-    /// Smooth jagged edges (4× multisampling; takes effect after a restart).
+    /// Smooth jagged edges (4× multisampling).
     #[serde(default = "yes")]
     pub msaa: bool,
     /// FPS cap when vsync is off (0 = unlimited).

@@ -161,6 +161,12 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         (Some(p), None) if g.alive && p.kind == VehicleKind::Fpv => p.roll,
         _ => 0.0,
     };
+    // the near plane as far out as it can be without the screen's corners dipping into a
+    // wall the player stands against (the body is 0.35 m round the eye): fewer depth bits
+    // (some GPUs, multisampled windows) then still keep far surfaces from fighting
+    let tv = (fovy * 0.5).tan();
+    let diag = (tv * tv * (1.0 + aspect * aspect)).sqrt();
+    let z_near = (0.32 / (1.0 + diag * diag).sqrt()).clamp(0.1, 0.3);
     let cam = Camera3D {
         position: pos,
         target: pos + dir,
@@ -171,7 +177,7 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         render_target: target,
         viewport: None,
         // a near plane this far keeps the depth buffer precise at range (no shimmering)
-        z_near: 0.15,
+        z_near,
         z_far: 420.0,
     };
     let matrix = cam.matrix();

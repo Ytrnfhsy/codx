@@ -620,7 +620,10 @@ void main() {
     if (Params.x > 0.5 && ndl > 0.08) {
         float lit = 1.0;
         if (vShadow.x > 0.0 && vShadow.x < 1.0 && vShadow.y > 0.0 && vShadow.y < 1.0) {
-            float z = vShadow.z - Params.w;
+            // walls the sun only grazes need a bigger margin, or the shadow map's texels
+            // show up on them as stripes
+            float slope = sqrt(max(1.0 - ndl * ndl, 0.0)) / max(ndl, 0.1);
+            float z = vShadow.z - Params.w * (1.0 + min(slope, 6.0));
             float s = Params.z;
             lit = step(z, occluder(vShadow.xy));
             lit += step(z, occluder(vShadow.xy + vec2(s, 0.0)));
@@ -857,7 +860,7 @@ impl Materials {
     }
 
     pub fn set_lighting(&self, l: &Lighting) {
-        let offset = l.shadow.map(|s| (s.texel * 1.5).max(0.08)).unwrap_or(0.08);
+        let offset = l.shadow.map(|s| (s.texel * 2.2).max(0.1)).unwrap_or(0.08);
         let (tex, matrix, params) = match l.shadow {
             Some(s) => (
                 &s.target.texture,
