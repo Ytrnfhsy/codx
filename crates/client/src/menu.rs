@@ -465,11 +465,9 @@ pub fn draw_menu(
             );
             if d != 0 {
                 hs.mode = modes[((mi as i32 + d).rem_euclid(modes.len() as i32)) as usize].into();
-                // the battle royale is played on the big island, by many
+                // the battle royale is played on the big island
                 if hs.mode == "br" {
                     hs.map = MapId::Island.short().into();
-                    hs.max_players = hs.max_players.max(50);
-                    hs.bots = hs.max_players;
                 }
             }
             let maps = MapId::EVERY;
@@ -487,10 +485,35 @@ pub fn draw_menu(
                     .short()
                     .into();
             }
-            hs.bots = ui
-                .slider(
+            // the battle royale keeps its own bots and player limit (it wants many more;
+            // the team modes in the rotation keep theirs)
+            let br = hs.mode == "br";
+            let (mut bots, mut max) = if br {
+                (hs.br_bots, hs.br_max_players)
+            } else {
+                (hs.bots, hs.max_players)
+            };
+            let (bots_label, max_label) = if br {
+                (
+                    t(
+                        "Боти в королівській битві (до)",
+                        "Battle royale bots (fill up to)",
+                    ),
+                    t(
+                        "Макс. гравців у королівській битві",
+                        "Battle royale max players",
+                    ),
+                )
+            } else {
+                (
                     t("Боти (заповнення до)", "Bots (fill up to)"),
-                    hs.bots as f32,
+                    t("Макс. гравців", "Max players"),
+                )
+            };
+            bots = ui
+                .slider(
+                    bots_label,
+                    bots as f32,
                     0.0,
                     toon_shared::consts::MAX_PLAYERS as f32,
                     x + 24.0,
@@ -511,10 +534,10 @@ pub fn draw_menu(
                 pw - 48.0,
                 "{}",
             );
-            hs.max_players = ui
+            max = ui
                 .slider(
-                    t("Макс. гравців", "Max players"),
-                    hs.max_players as f32,
+                    max_label,
+                    max as f32,
                     2.0,
                     toon_shared::consts::MAX_PLAYERS as f32,
                     x + 24.0,
@@ -524,7 +547,12 @@ pub fn draw_menu(
                 )
                 .round() as usize;
             // bots only fill up free places
-            hs.bots = hs.bots.min(hs.max_players);
+            bots = bots.min(max);
+            if br {
+                (hs.br_bots, hs.br_max_players) = (bots, max);
+            } else {
+                (hs.bots, hs.max_players) = (bots, max);
+            }
             ui.field(
                 13,
                 t(

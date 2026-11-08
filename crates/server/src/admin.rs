@@ -69,14 +69,16 @@ pub const HELP: &str = "Команди:
   endround                   — завершити матч зараз
   team <id|ім'я> <allies|axis|spec> — перевести гравця
   kill <id|ім'я>             — вбити гравця
-  bots <n>                   — заповнювати сервер ботами до n гравців
+  bots <n>                   — заповнювати ботами до n гравців (командні режими)
+  brbots <n>                 — те саме для королівської битви
   givestreak <id|ім'я> <radar|airstrike|artillery|heli|fpv|bomber|nrk> — видати кілстрік
   givebomb <id|ім'я> — дати бомбу гравцю (Саботаж)
   tune [movement|weapons|<зброя>]           — показати параметри руху/зброї
   tune <шлях> <значення>     — змінити: tune movement.sprint_speed 8; tune m249.rpm 850
   tune reset [movement|<зброя>|all]         — повернути заводські значення
   set <ключ> <значення>      — scorelimit, timelimit, sabtime, rounds, bombtimer, planttime,
-                               defusetime, ff, autobalance, maxplayers, password, name, motd,
+                               defusetime, ff, autobalance, maxplayers, brmaxplayers (королівська
+                               битва), password, name, motd,
                                botskill (0..1 або easy/normal/hard/veteran), spawnprotect (секунди)
   save                       — зберегти налаштування у файл
   help                       — ця довідка";
@@ -120,7 +122,7 @@ pub fn status(g: &Game) -> String {
         g.scores[0],
         g.scores[1],
         g.players.iter().flatten().count(),
-        g.cfg.max_players
+        g.max_players()
     );
     s.push_str(" id  ім'я                  команда   рах.  K/D/A     пінг  IP\n");
     for p in g.players.iter().flatten() {
@@ -198,7 +200,8 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 g.bans.save();
             }
             if bot {
-                g.cfg.bots = g.cfg.bots.saturating_sub(1);
+                let (bots, _) = g.limits_mut();
+                *bots = bots.saturating_sub(1);
                 g.remove_player(id, None);
             } else {
                 g.kicked.push((
@@ -333,10 +336,23 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             g.kill(id, None, toon_shared::weapons::Cause::World, false);
             "Готово".into()
         }
+        "brbots" => match args.next().and_then(|v| v.parse::<usize>().ok()) {
+            Some(n) => {
+                g.cfg.br.bots = n.min(g.cfg.br.max_players);
+                format!(
+                    "Королівська битва заповнюватиметься ботами до {} гравців",
+                    g.cfg.br.bots
+                )
+            }
+            None => format!(
+                "Ботів у королівській битві: до {} гравців. Використання: brbots <n>",
+                g.cfg.br.bots
+            ),
+        },
         "bots" | "addbot" | "kickbots" => {
             let n = match cmd.as_str() {
                 "addbot" => {
-                    g.cfg.bots
+                    g.bot_fill()
                         + args
                             .next()
                             .and_then(|v| v.parse::<usize>().ok())
@@ -348,12 +364,20 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                     None => {
                         return format!(
                             "Ботів: заповнення до {} гравців. Використання: bots <n>",
-                            g.cfg.bots
+                            g.bot_fill()
                         )
                     }
                 },
             };
-            g.cfg.bots = n.min(g.cfg.max_players);
+            // `bots` is the team modes' setting; adding or kicking acts on what is played
+            let (bots, max) = if cmd == "bots" {
+                (&mut g.cfg.bots, g.cfg.max_players)
+            } else {
+                let (b, m) = g.limits_mut();
+                let m = *m;
+                (b, m)
+            };
+            *bots = n.min(max);
             if n == 0 {
                 for id in g.ids() {
                     if g.p(id).map(|p| p.is_bot()).unwrap_or(false) {
@@ -361,7 +385,11 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                     }
                 }
             }
-            format!("Сервер заповнюватиметься ботами до {} гравців", g.cfg.bots)
+            format!(
+                "Сервер заповнюватиметься ботами до {} гравців (зараз грається «{}»)",
+                g.bot_fill(),
+                g.mode.name()
+            )
         }
         "givestreak" => {
             let (Some(who), Some(k)) = (args.next(), args.next()) else {
@@ -479,6 +507,13 @@ fn set_var(g: &mut Game, key: &str, v: &str) -> String {
         "maxplayers" => match num {
             Ok(n) if n >= 2.0 => {
                 g.cfg.max_players = (n as usize).min(toon_shared::consts::MAX_PLAYERS)
+            }
+            _ => return bad(),
+        },
+        "brmaxplayers" => match num {
+            Ok(n) if n >= 2.0 => {
+                g.cfg.br.max_players = (n as usize).min(toon_shared::consts::MAX_PLAYERS);
+                g.cfg.br.bots = g.cfg.br.bots.min(g.cfg.br.max_players);
             }
             _ => return bad(),
         },

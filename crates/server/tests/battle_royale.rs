@@ -12,12 +12,12 @@ use toon_shared::{Mode, Team};
 
 #[test]
 fn a_round_of_battle_royale() {
-    let cfg = ServerConfig {
-        bots: 16,
-        max_players: 16,
+    let mut cfg = ServerConfig {
         data_dir: std::env::temp_dir().join("tw-br").to_string_lossy().into(),
         ..Default::default()
     };
+    cfg.br.bots = 16;
+    cfg.br.max_players = 16;
     let mut g = Game::new(cfg);
     g.change_map(MapId::Island, Mode::Br);
     let me = g
@@ -107,4 +107,47 @@ fn a_round_of_battle_royale() {
     assert_eq!(g.state, MatchState::PostMatch, "the round never ended");
     assert!(winner.is_some());
     assert!(g.br_alive() <= 1);
+}
+
+/// The battle royale's player limit and bots are its own: after a round of it the team
+/// modes in the rotation go back to theirs.
+#[test]
+fn battle_royale_keeps_its_own_player_count() {
+    let mut cfg = ServerConfig {
+        bots: 6,
+        max_players: 12,
+        data_dir: std::env::temp_dir().join("tw-br2").to_string_lossy().into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 30;
+    cfg.br.max_players = 30;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Island, Mode::Br);
+    let me = g
+        .connect(
+            "127.0.0.1:5004".parse().unwrap(),
+            "Гравець",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    let run = |g: &mut Game, secs: f32| {
+        for _ in 0..(secs / TICK_DT) as usize {
+            g.tick(TICK_DT);
+            g.outbox.clear();
+            g.shots.clear();
+        }
+    };
+    run(&mut g, 10.0);
+    assert_eq!(
+        g.players.iter().flatten().count(),
+        30,
+        "battle royale not filled"
+    );
+    g.change_map(MapId::Depot, Mode::Tdm);
+    run(&mut g, 10.0);
+    let n = g.players.iter().flatten().count();
+    assert!(n <= 12, "{n} players left in team deathmatch (limit 12)");
+    assert_eq!(n, 6, "team deathmatch should fill to its own 6");
 }

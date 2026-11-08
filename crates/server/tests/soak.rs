@@ -30,7 +30,7 @@ struct Report {
 }
 
 fn soak(map: MapId, mode: Mode, bots: usize, secs: f32) -> Report {
-    let cfg = ServerConfig {
+    let mut cfg = ServerConfig {
         bots,
         max_players: bots.max(2),
         data_dir: std::env::temp_dir()
@@ -39,6 +39,8 @@ fn soak(map: MapId, mode: Mode, bots: usize, secs: f32) -> Report {
             .into(),
         ..Default::default()
     };
+    cfg.br.bots = bots;
+    cfg.br.max_players = bots.max(2);
     let mut g = Game::new(cfg);
     g.rng = toon_shared::rng::Rng::new(map as u64 * 31 + mode as u64);
     g.change_map(map, mode);

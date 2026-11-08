@@ -54,6 +54,23 @@ impl Default for TdmConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
+pub struct BrConfig {
+    pub max_players: usize,
+    /// Fill the server with bots up to this many players.
+    pub bots: usize,
+}
+
+impl Default for BrConfig {
+    fn default() -> Self {
+        BrConfig {
+            max_players: 50,
+            bots: 50,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SabConfig {
     /// Minutes per round before sudden-death overtime.
     pub time_limit: f32,
@@ -96,6 +113,8 @@ pub struct ServerConfig {
     pub rotation: Vec<RotationEntry>,
     pub tdm: TdmConfig,
     pub sab: SabConfig,
+    /// The battle royale has its own player limit and bots (it wants many more).
+    pub br: BrConfig,
     pub friendly_fire: bool,
     pub auto_balance: bool,
     /// Fill the server with bots up to this many players.
@@ -160,6 +179,7 @@ impl Default for ServerConfig {
             ],
             tdm: TdmConfig::default(),
             sab: SabConfig::default(),
+            br: BrConfig::default(),
             friendly_fire: false,
             auto_balance: true,
             bots: 6,
@@ -207,6 +227,11 @@ impl ServerConfig {
     pub fn sanitized(mut self) -> ServerConfig {
         self.max_players = self.max_players.clamp(2, toon_shared::consts::MAX_PLAYERS);
         self.bots = self.bots.min(self.max_players);
+        self.br.max_players = self
+            .br
+            .max_players
+            .clamp(2, toon_shared::consts::MAX_PLAYERS);
+        self.br.bots = self.br.bots.min(self.br.max_players);
         self.bot_skill = self.bot_skill.clamp(0.0, 1.0);
         self.spawn_protection = self.spawn_protection.clamp(0.0, 30.0);
         self.min_players = self.min_players.max(1);

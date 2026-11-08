@@ -313,7 +313,9 @@ async fn amain(args: Args) {
         let mut cfg = toon_server::config::ServerConfig::default();
         cfg.name = hs.name.clone();
         cfg.port = hs.port;
-        cfg.bots = args.bots.unwrap_or(hs.bots);
+        cfg.bots = hs.bots;
+        cfg.br.bots = hs.br_bots;
+        cfg.br.max_players = hs.br_max_players;
         cfg.bot_skill = hs.bot_skill;
         cfg.rcon_password = args.rcon.clone().unwrap_or(hs.rcon.clone());
         cfg.password = hs.password.clone();
@@ -324,6 +326,16 @@ async fn amain(args: Args) {
         }
         let map = args.map.clone().unwrap_or(hs.map.clone());
         let mode = args.mode.clone().unwrap_or(hs.mode.clone());
+        // --bots: for the mode we start with
+        if let Some(n) = args.bots {
+            if toon_shared::Mode::parse(&mode) == Some(toon_shared::Mode::Br) {
+                cfg.br.bots = n;
+                cfg.br.max_players = cfg.br.max_players.max(n);
+            } else {
+                cfg.bots = n;
+                cfg.max_players = cfg.max_players.max(n);
+            }
+        }
         cfg.rotation.retain(|r| !(r.map == map && r.mode == mode));
         cfg.rotation
             .insert(0, toon_server::config::RotationEntry { map, mode });

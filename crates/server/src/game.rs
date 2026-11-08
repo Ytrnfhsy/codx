@@ -584,11 +584,11 @@ impl Game {
         if !self.cfg.password.is_empty() && password != self.cfg.password {
             return Err(t("Невірний пароль сервера", "Wrong server password").into());
         }
-        if self.humans() >= self.cfg.max_players {
+        if self.humans() >= self.max_players() {
             return Err(t("Сервер заповнений", "The server is full").into());
         }
         // make room by removing a bot if needed
-        if self.players.iter().flatten().count() >= self.cfg.max_players {
+        if self.players.iter().flatten().count() >= self.max_players() {
             if let Some(bot) = self
                 .players
                 .iter()
@@ -659,7 +659,7 @@ impl Game {
 
     pub fn add_bot(&mut self) -> Option<u8> {
         let total = self.players.iter().flatten().count();
-        if total >= self.cfg.max_players {
+        if total >= self.max_players() {
             return None;
         }
         let slot = self.players.iter().position(|p| p.is_none())?;
@@ -675,6 +675,33 @@ impl Game {
         let team = self.auto_team(id);
         self.set_team(id, team, false);
         Some(id)
+    }
+
+    /// Player limit of the mode being played (the battle royale has its own).
+    pub fn max_players(&self) -> usize {
+        if self.mode == Mode::Br {
+            self.cfg.br.max_players
+        } else {
+            self.cfg.max_players
+        }
+    }
+
+    /// Bots fill the server up to this many players (per mode, like the limit).
+    pub fn bot_fill(&self) -> usize {
+        if self.mode == Mode::Br {
+            self.cfg.br.bots
+        } else {
+            self.cfg.bots
+        }
+    }
+
+    /// The current mode's bot setting and player limit, to change them.
+    pub fn limits_mut(&mut self) -> (&mut usize, &mut usize) {
+        if self.mode == Mode::Br {
+            (&mut self.cfg.br.bots, &mut self.cfg.br.max_players)
+        } else {
+            (&mut self.cfg.bots, &mut self.cfg.max_players)
+        }
     }
 
     pub fn auto_team(&self, id: u8) -> Team {
@@ -748,25 +775,32 @@ impl Game {
             .filter(|p| p.is_bot())
             .map(|p| p.id)
             .collect();
-        let want = self.cfg.bots.saturating_sub(humans_playing);
+        let want = self.bot_fill().saturating_sub(humans_playing);
         if bots.len() < want {
             // a few per second (big servers fill up quickly, without a burst of joins)
             for _ in 0..(want - bots.len()).min(8) {
                 self.add_bot();
             }
         } else if bots.len() > want {
-            // remove a bot from the bigger team
-            let big = if self.team_count(Team::Allies) >= self.team_count(Team::Axis) {
-                Team::Allies
-            } else {
-                Team::Axis
-            };
-            let victim = bots
-                .iter()
-                .copied()
-                .find(|&b| self.p(b).map(|p| p.team) == Some(big))
-                .unwrap_or(bots[0]);
-            self.remove_player(victim, None);
+            // too many (say, after a battle royale with fifty): a few leave every second,
+            // from the bigger team
+            let mut left = bots.clone();
+            for _ in 0..(bots.len() - want).min(8) {
+                let big = if self.team_count(Team::Allies) >= self.team_count(Team::Axis) {
+                    Team::Allies
+                } else {
+                    Team::Axis
+                };
+                let Some(k) = left
+                    .iter()
+                    .position(|&b| self.p(b).map(|p| p.team) == Some(big))
+                    .or((!left.is_empty()).then_some(0))
+                else {
+                    break;
+                };
+                let victim = left.remove(k);
+                self.remove_player(victim, None);
+            }
         }
         // balance bots between teams (there are none in the battle royale: moving a bot
         // there would knock it out of the round)

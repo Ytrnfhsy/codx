@@ -23,6 +23,9 @@ pub struct HostSettings {
     pub rcon: String,
     pub password: String,
     pub max_players: usize,
+    /// The battle royale's own player limit and bots.
+    pub br_max_players: usize,
+    pub br_bots: usize,
 }
 
 impl Default for HostSettings {
@@ -37,6 +40,8 @@ impl Default for HostSettings {
             rcon: String::new(),
             password: String::new(),
             max_players: 12,
+            br_max_players: 50,
+            br_bots: 50,
         }
     }
 }

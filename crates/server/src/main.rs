@@ -66,13 +66,14 @@ fn main() {
         }
     };
     let mut first: Option<(String, String)> = None;
+    let mut bots: Option<usize> = None;
     for (k, v) in overrides {
         match k.as_str() {
             "port" => cfg.port = v.parse().unwrap_or(cfg.port),
             "name" => cfg.name = v,
             "rcon" => cfg.rcon_password = v,
             "password" => cfg.password = v,
-            "bots" => cfg.bots = v.parse().unwrap_or(cfg.bots),
+            "bots" => bots = v.parse().ok(),
             "map" => first.get_or_insert((String::new(), String::new())).0 = v,
             "mode" => first.get_or_insert((String::new(), String::new())).1 = v,
             _ => {
@@ -80,6 +81,21 @@ fn main() {
                 usage();
                 std::process::exit(2);
             }
+        }
+    }
+    // --bots sets the bots of the mode the server starts with (the battle royale keeps
+    // its own count)
+    if let Some(n) = bots {
+        let start_mode = first
+            .as_ref()
+            .map(|f| f.1.clone())
+            .filter(|m| !m.is_empty())
+            .unwrap_or_else(|| cfg.rotation[0].mode.clone());
+        if toon_shared::Mode::parse(&start_mode) == Some(toon_shared::Mode::Br) {
+            cfg.br.bots = n;
+            cfg.br.max_players = cfg.br.max_players.max(n);
+        } else {
+            cfg.bots = n;
         }
     }
     if let Some((map, mode)) = first {

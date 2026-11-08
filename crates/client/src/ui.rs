@@ -324,8 +324,20 @@ impl<'a> Ui<'a> {
             34.0,
             Color::new(0.07, 0.08, 0.13, 1.0),
         );
-        let tw = self.width(value, 18, true);
-        self.bold(value, x + (w - tw) / 2.0, y + 23.0, 18, TEXT);
+        // a long value gets a smaller font instead of running over the arrows
+        let room = w - 92.0;
+        let mut size = 18u16;
+        while size > 12 && self.width(value, size, true) > room {
+            size -= 1;
+        }
+        let tw = self.width(value, size, true);
+        self.bold(
+            value,
+            x + (w - tw) / 2.0,
+            y + 17.0 + size as f32 / 3.0,
+            size,
+            TEXT,
+        );
         r
     }
 }
