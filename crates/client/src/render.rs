@@ -543,7 +543,8 @@ pub fn render_world(
         // no enemy names through smoke
         let hidden = a.team != my_team
             && toon_shared::ray::smoke_blocks(view.pos, head - vec3(0.0, 0.5, 0.0), &clouds);
-        if kc.is_none() && !hidden {
+        // battle royale: no names over anybody (they would give players away from afar)
+        if kc.is_none() && !hidden && !g.mode.solo() {
             let friendly = a.team == my_team;
             let name = g.name_of(a.id).unwrap_or("?").to_string();
             tags.push(NameTag {

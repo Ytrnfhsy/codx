@@ -188,7 +188,7 @@ enum Screen {
 /// Whether the window was created with vsync (changing it needs a restart).
 pub static VSYNC_AT_START: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
-fn window_conf(a: &Args, vsync: bool) -> macroquad::conf::Conf {
+fn window_conf(a: &Args, vsync: bool, fullscreen: bool) -> macroquad::conf::Conf {
     let mut platform = macroquad::miniquad::conf::Platform::default();
     platform.swap_interval = Some(if vsync { 1 } else { 0 });
     macroquad::conf::Conf {
@@ -199,6 +199,7 @@ fn window_conf(a: &Args, vsync: bool) -> macroquad::conf::Conf {
             window_height: a.height,
             high_dpi: false,
             window_resizable: true,
+            fullscreen,
             // the 3D world is drawn into its own target (with its own smoothing and a
             // precise depth buffer); the window itself needs neither
             sample_count: 1,
@@ -215,7 +216,7 @@ fn main() {
     let loaded = Settings::load();
     let vsync = loaded.vsync && !args.no_vsync;
     VSYNC_AT_START.store(vsync, std::sync::atomic::Ordering::Relaxed);
-    let conf = window_conf(&args, vsync);
+    let conf = window_conf(&args, vsync, loaded.fullscreen);
     macroquad::Window::from_config(conf, amain(args));
 }
 
@@ -364,7 +365,17 @@ async fn amain(args: Args) {
         }
     }
 
+    let mut fullscreen_now = settings.fullscreen;
     loop {
+        // full screen / window switches at once (F11 too)
+        if is_key_pressed(KeyCode::F11) {
+            settings.fullscreen = !settings.fullscreen;
+            settings.save();
+        }
+        if settings.fullscreen != fullscreen_now {
+            fullscreen_now = settings.fullscreen;
+            set_fullscreen(fullscreen_now);
+        }
         // the volume slider works at once, in the menu and in a game
         if (audio.volume() - settings.volume).abs() > 1e-4 {
             audio.set_volume(settings.volume);

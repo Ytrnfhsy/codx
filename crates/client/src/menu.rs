@@ -95,27 +95,31 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         w,
         "{}",
     );
-    ui.toggle(
-        t("Інвертувати Y", "Invert Y"),
-        &mut s.invert_y,
-        x,
-        y + 150.0,
-    );
+    // two columns of switches
     let col2 = x + w * 0.52;
-    ui.toggle(t("Тіні", "Shadows"), &mut s.shadows, col2, y + 150.0);
+    let row = |k: usize| y + 148.0 + k as f32 * 32.0;
+    ui.toggle(t("Інвертувати Y", "Invert Y"), &mut s.invert_y, x, row(0));
+    ui.toggle(t("Тіні", "Shadows"), &mut s.shadows, col2, row(0));
+    ui.toggle(t("FPS і пінг", "FPS and ping"), &mut s.show_fps, x, row(1));
+    ui.toggle(t("Текстури", "Textures"), &mut s.textures, col2, row(1));
+    ui.toggle(t("Контури", "Outlines"), &mut s.outlines, x, row(2));
     ui.toggle(
-        t("FPS і пінг", "FPS and ping"),
-        &mut s.show_fps,
-        x,
-        y + 186.0,
+        t("Згладжування країв", "Anti-aliasing"),
+        &mut s.msaa,
+        col2,
+        row(2),
     );
-    ui.toggle(t("Текстури", "Textures"), &mut s.textures, col2, y + 186.0);
-    ui.toggle(t("Контури", "Outlines"), &mut s.outlines, x, y + 222.0);
+    ui.toggle(
+        t("Повний екран", "Full screen"),
+        &mut s.fullscreen,
+        x,
+        row(3),
+    );
     ui.toggle(
         t("Згладжування миші", "Mouse smoothing"),
         &mut s.mouse_smoothing,
         col2,
-        y + 222.0,
+        row(3),
     );
     s.render_scale = (ui.slider(
         t(
@@ -126,7 +130,7 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         40.0,
         100.0,
         x,
-        y + 280.0,
+        y + 304.0,
         w,
         "{}%",
     ) / 5.0)
@@ -135,26 +139,17 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         / 100.0;
     let was = s.vsync;
     ui.toggle(
-        t("Вертикальна синхронізація", "Vertical sync"),
+        t("Верт. синхронізація", "Vertical sync"),
         &mut s.vsync,
         x,
-        y + 318.0,
-    );
-    ui.toggle(
-        t("Згладжування країв", "Anti-aliasing"),
-        &mut s.msaa,
-        col2,
-        y + 318.0,
+        y + 340.0,
     );
     if s.vsync != was || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed)
     {
         ui.text(
-            t(
-                "Зміниться після перезапуску гри",
-                "Takes effect after restarting the game",
-            ),
+            t("(після перезапуску)", "(after a restart)"),
             x + 36.0,
-            y + 362.0,
+            y + 384.0,
             14,
             ACCENT,
         );
@@ -172,6 +167,7 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         s.lang = Lang::ALL[((li as i32 + d).rem_euclid(Lang::ALL.len() as i32)) as usize];
         toon_shared::lang::set(s.lang);
     }
+    // the FPS cap only matters without vsync: next to its switch
     if !s.vsync {
         const LIMITS: [u32; 6] = [60, 120, 144, 165, 240, 0];
         let i = LIMITS.iter().position(|l| *l == s.fps_limit).unwrap_or(2);
@@ -180,7 +176,13 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         } else {
             format!("{} FPS", s.fps_limit)
         };
-        let d = ui.stepper(t("Обмеження FPS", "FPS limit"), &label, x, y + 390.0, 260.0);
+        let d = ui.stepper(
+            t("Обмеження FPS", "FPS limit"),
+            &label,
+            col2,
+            y + 352.0,
+            x + w - col2,
+        );
         if d != 0 {
             s.fps_limit = LIMITS[((i as i32 + d).rem_euclid(LIMITS.len() as i32)) as usize];
         }
@@ -463,9 +465,11 @@ pub fn draw_menu(
             );
             if d != 0 {
                 hs.mode = modes[((mi as i32 + d).rem_euclid(modes.len() as i32)) as usize].into();
-                // the battle royale is played on the big island
+                // the battle royale is played on the big island, by many
                 if hs.mode == "br" {
                     hs.map = MapId::Island.short().into();
+                    hs.max_players = hs.max_players.max(50);
+                    hs.bots = hs.max_players;
                 }
             }
             let maps = MapId::EVERY;
@@ -488,7 +492,7 @@ pub fn draw_menu(
                     t("Боти (заповнення до)", "Bots (fill up to)"),
                     hs.bots as f32,
                     0.0,
-                    16.0,
+                    toon_shared::consts::MAX_PLAYERS as f32,
                     x + 24.0,
                     y + 280.0,
                     pw - 48.0,
@@ -519,6 +523,8 @@ pub fn draw_menu(
                     "{}",
                 )
                 .round() as usize;
+            // bots only fill up free places
+            hs.bots = hs.bots.min(hs.max_players);
             ui.field(
                 13,
                 t(
