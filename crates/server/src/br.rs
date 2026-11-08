@@ -312,7 +312,15 @@ impl Game {
         if self.mode != Mode::Br || !self.br.running {
             return;
         }
-        let pos = self.br.plane_pos(time) - vec3(0.0, 4.0, 0.0);
+        // the plane starts and ends its run beyond the map's edge: whoever jumps there (or
+        // is pushed out at the end) comes down just inside it
+        let margin = 25.0;
+        let p = self.br.plane_pos(time);
+        let pos = vec3(
+            p.x.clamp(self.map.min.x + margin, self.map.max.x - margin),
+            p.y - 4.0,
+            p.z.clamp(self.map.min.y + margin, self.map.max.y - margin),
+        );
         let yaw = yaw_of(self.br.plane_dir);
         let tuning = &self.tuning;
         let Some(p) = self.players[id as usize].as_mut() else {
@@ -615,13 +623,30 @@ impl Game {
             w.id.def().class != toon_shared::weapons::WeaponClass::Pistol && w.mag + w.reserve > 0
         });
         let (hp, armor) = (me.hp, me.armor);
+        let have: Vec<WeaponId> = me
+            .weapons
+            .iter()
+            .filter(|w| w.mag + w.reserve > 0)
+            .map(|w| w.id)
+            .collect();
+        // ammo is only worth a detour while some gun is running low
+        let low_ammo = me
+            .weapons
+            .iter()
+            .any(|w| w.mag + w.reserve > 0 && w.reserve < self.tuning.weapon(w.id).mag * 2);
         let near = |q: Vec3| vec2(q.x, q.z).distance(flat);
         if !armed {
             let range = if skydiving { 220.0 } else { 90.0 };
             let mut cands: Vec<(u16, Vec3)> = self
                 .pickups
                 .iter()
-                .filter(|pk| near(pk.pos) < range && zone.contains(time, pk.pos))
+                // a real gun we do not have yet (a pickup we cannot take would hold us there)
+                .filter(|pk| {
+                    near(pk.pos) < range
+                        && zone.contains(time, pk.pos)
+                        && pk.w.id.def().class != toon_shared::weapons::WeaponClass::Pistol
+                        && !have.contains(&pk.w.id)
+                })
                 .map(|pk| (pk.id, pk.pos))
                 .collect();
             cands.sort_by(|a, b| near(a.1).total_cmp(&near(b.1)));
@@ -645,7 +670,7 @@ impl Game {
             let want = |k: LootKind| match k {
                 LootKind::Medkit => hp < 75.0,
                 LootKind::Armor => armor < 40.0,
-                LootKind::Ammo => true,
+                LootKind::Ammo => low_ammo,
                 LootKind::Grenades => false,
             };
             let mut cands: Vec<Vec3> = self
@@ -686,5 +711,32 @@ impl Game {
         self.nav.snap(at).is_some_and(|n| {
             (n.y - at.y).abs() < 0.8 && vec2(n.x - at.x, n.z - at.z).length() < 2.5
         })
+    }
+
+    /// Puts a player who joined late onto the plane, if it is still flying.
+    pub fn br_board(&mut self, id: u8) {
+        let time = self.time;
+        if self.mode != Mode::Br || self.state != MatchState::Playing || !self.br.plane_flying(time)
+        {
+            return;
+        }
+        let pos = self.br.plane_pos(time);
+        let left = self.br.plane_time as f64 - (time - self.br.plane_t0);
+        let jump = time + self.rng.range(0.1, 0.8) as f64 * left;
+        let Some(p) = self.pm(id) else { return };
+        if p.in_plane || p.alive {
+            return;
+        }
+        p.in_plane = true;
+        p.body = Body {
+            pos,
+            ..Default::default()
+        };
+        p.armor = 0.0;
+        p.respawn_at = f64::MAX;
+        if let Some(b) = p.bot.as_mut() {
+            b.br_jump_at = jump;
+        }
+        self.br.entrants += 1;
     }
 }

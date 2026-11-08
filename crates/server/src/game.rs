@@ -727,6 +727,10 @@ impl Game {
                 team_only: false,
             });
         }
+        // battle royale: whoever joins while the plane is still over the map boards it
+        if team.is_playing() {
+            self.br_board(id);
+        }
     }
 
     /// Bots fill the server up to `cfg.bots` players, keeping teams balanced.
@@ -764,9 +768,10 @@ impl Game {
                 .unwrap_or(bots[0]);
             self.remove_player(victim, None);
         }
-        // balance bots between teams
+        // balance bots between teams (there are none in the battle royale: moving a bot
+        // there would knock it out of the round)
         let (a, b) = (self.team_count(Team::Allies), self.team_count(Team::Axis));
-        if a.abs_diff(b) > 1 {
+        if a.abs_diff(b) > 1 && !self.mode.solo() {
             let (big, small) = if a > b {
                 (Team::Allies, Team::Axis)
             } else {
@@ -1091,6 +1096,8 @@ impl Game {
     fn on_join_team(&mut self, id: u8, choice: Option<Team>) {
         let target = match choice {
             None => self.auto_team(id),
+            // battle royale: any side means "play"
+            Some(t) if t.is_playing() && self.mode.solo() => self.auto_team(id),
             Some(t) => t,
         };
         if target.is_playing() && self.cfg.auto_balance && choice.is_some() {
@@ -1146,8 +1153,13 @@ impl Game {
             return;
         }
         p.last_seq = inp.seq;
-        p.yaw = inp.yaw;
-        p.pitch = inp.pitch.clamp(-1.55, 1.55);
+        // a broken client must not pass NaN or infinite angles on to everybody else
+        if inp.yaw.is_finite() {
+            p.yaw = toon_shared::wrap_angle(inp.yaw);
+        }
+        if inp.pitch.is_finite() {
+            p.pitch = inp.pitch.clamp(-1.55, 1.55);
+        }
         if !p.alive || inp.life != p.life {
             return;
         }
@@ -1263,8 +1275,8 @@ impl Game {
             .filter(|p| p.team.is_playing())
             .count();
         playing >= self.cfg.min_players
-            && self.team_count(Team::Allies) > 0
-            && self.team_count(Team::Axis) > 0
+            && (self.mode.solo()
+                || self.team_count(Team::Allies) > 0 && self.team_count(Team::Axis) > 0)
             && self.players.iter().flatten().any(|p| !p.is_bot())
     }
 

@@ -458,8 +458,13 @@ impl Nav {
     fn nearest_in(&self, g: usize, p: Vec3) -> Option<(u32, f32)> {
         let grid = &self.grids[g];
         let (ci, cj) = grid.cell_of(p);
+        let mut best: Option<(u32, f32)> = None;
         for r in 0..10i32 {
-            let mut best: Option<(u32, f32)> = None;
+            // farther rings cannot beat what we have (a roof right overhead must not win
+            // over the floor a few steps away)
+            if best.is_some_and(|b| b.1 < (r as f32 - 1.0) * grid.cell) {
+                break;
+            }
             for dj in -r..=r {
                 for di in -r..=r {
                     if di.abs() != r && dj.abs() != r {
@@ -484,11 +489,8 @@ impl Nav {
                     }
                 }
             }
-            if best.is_some() {
-                return best;
-            }
         }
-        None
+        best
     }
 
     /// Closest walkable node to `p` (same floor preferred), from any grid nearby.

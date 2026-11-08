@@ -170,6 +170,20 @@ pub struct Bot {
 }
 
 impl Bot {
+    /// What the bot is up to, for tests and logs.
+    pub fn describe(&self) -> String {
+        format!(
+            "target {:?}, roam {:?}, path {} pts (goal {:?}, fail until {:.1}), last seen {:?}, attacked {:?}",
+            self.target,
+            self.roam_goal,
+            self.path.len(),
+            self.path_goal,
+            self.path_fail_until,
+            self.last_seen,
+            self.attacked_by
+        )
+    }
+
     pub fn new(rng: &mut Rng) -> Bot {
         Bot {
             skill_offset: rng.range(-0.1, 0.1),

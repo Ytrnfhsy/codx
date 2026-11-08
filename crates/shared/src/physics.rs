@@ -44,6 +44,8 @@ pub struct World {
     /// Hills and valleys under everything (big outdoor maps).
     pub terrain: Option<std::sync::Arc<crate::terrain::Heightmap>>,
     origin: (f32, f32),
+    /// The playable rectangle (min x, min z, max x, max z).
+    pub bounds: [f32; 4],
     dims: (i32, i32),
     cells: Vec<Vec<u32>>,
 }
@@ -72,6 +74,7 @@ impl World {
             ladders: map.ladders.clone(),
             terrain: map.terrain.clone(),
             origin,
+            bounds: [map.min.x, map.min.y, map.max.x, map.max.y],
             dims,
             cells: Vec::new(),
         };
@@ -572,6 +575,10 @@ impl Body {
             self.move_axis(world, 2, sub.z, false);
             self.move_axis(world, 1, sub.y, false);
         }
+        // high above the map's walls nothing stops a glider: keep it over the map
+        let [x0, z0, x1, z1] = world.bounds;
+        self.pos.x = self.pos.x.clamp(x0 + 0.5, x1 - 0.5);
+        self.pos.z = self.pos.z.clamp(z0 + 0.5, z1 - 0.5);
         self.stand_on_ground(world, start, false);
         if self.on_ground {
             self.chute = Chute::None;

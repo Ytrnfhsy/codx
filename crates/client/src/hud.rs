@@ -144,7 +144,7 @@ impl GameClient {
         self.draw_br_alerts(ui);
         self.draw_killfeed(ui);
         self.draw_chat(ui);
-        if self.big_map && self.mode == Mode::Br {
+        if self.big_map && self.mode == Mode::Br && self.overlay == Overlay::None {
             self.draw_big_map(ui);
         }
         if self.alive && self.piloting.is_none() {
@@ -1883,22 +1883,27 @@ impl GameClient {
                 if ui.button(t("Продовжити", "Resume"), x + 24.0, y + 90.0, bw, 46.0) {
                     self.overlay = self.after_pause();
                 }
-                if ui.button2(
-                    t("Змінити клас", "Change class"),
-                    x + 24.0,
-                    y + 146.0,
-                    bw,
-                    46.0,
-                ) {
+                // (no classes or sides in the battle royale)
+                if self.mode != Mode::Br
+                    && ui.button2(
+                        t("Змінити клас", "Change class"),
+                        x + 24.0,
+                        y + 146.0,
+                        bw,
+                        46.0,
+                    )
+                {
                     self.overlay = Overlay::Class;
                 }
-                if ui.button2(
-                    t("Змінити команду", "Change team"),
-                    x + 24.0,
-                    y + 202.0,
-                    bw,
-                    46.0,
-                ) {
+                if self.mode != Mode::Br
+                    && ui.button2(
+                        t("Змінити команду", "Change team"),
+                        x + 24.0,
+                        y + 202.0,
+                        bw,
+                        46.0,
+                    )
+                {
                     self.overlay = Overlay::Team;
                 }
                 if ui.button2(t("Налаштування", "Settings"), x + 24.0, y + 258.0, bw, 46.0)

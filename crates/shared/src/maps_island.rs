@@ -318,7 +318,8 @@ fn heightmap() -> Heightmap {
                 let h = m.heights[idx];
                 if s < br.half {
                     // under the deck: never higher than its underside
-                    m.heights[idx] = h + ((DECK - 0.8) - h).min(0.0) * k;
+                    // (room to walk under it along the river: nobody gets stuck there)
+                    m.heights[idx] = h + ((DECK - 2.6) - h).min(0.0) * k;
                 } else {
                     let target = DECK + (s - br.half) * 0.3;
                     let ks = smoothstep(reach, reach - 12.0, s);
@@ -699,7 +700,7 @@ fn bridge(b: &mut MapBuilder, br: &Bridge) {
     };
     let (x0, x1, z0, z1) = (br.c.x - hx, br.c.x + hx, br.c.y - hz, br.c.y + hz);
     let wood = [150, 104, 64];
-    b.block(x0, DECK - 0.5, z0, x1, DECK, z1, wood);
+    b.block(x0, DECK - 0.3, z0, x1, DECK, z1, wood);
     // railings: planks bullets go through
     if br.along_x {
         b.wood(x0, DECK, z0, x1, DECK + 1.0, z0 + 0.2, shade(wood, 0.85));

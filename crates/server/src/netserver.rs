@@ -120,7 +120,8 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                         let _ = socket.send_to(&reply, addr);
                         continue;
                     }
-                    if !conns.contains_key(&addr) {
+                    let fresh = !conns.contains_key(&addr);
+                    if fresh {
                         if conns.len() >= 128 {
                             continue;
                         }
@@ -137,6 +138,10 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                     }
                     let conn = conns.get_mut(&addr).unwrap();
                     let Some(msgs) = conn.chan.receive::<C2S>(data) else {
+                        // junk from an unknown address takes no connection slot
+                        if fresh {
+                            conns.remove(&addr);
+                        }
                         continue;
                     };
                     conn.last_recv = now;

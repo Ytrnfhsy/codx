@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, VecDeque};
 /// Keep datagrams comfortably below a typical MTU.
 pub const RELIABLE_BUDGET: usize = 900;
 const RESEND_AFTER: f64 = 0.12;
+/// Reliable messages further ahead than this of the next expected one are dropped.
+const MAX_AHEAD: u32 = 1024;
 
 #[derive(Serialize, Deserialize, Default)]
 struct Packet {
@@ -57,6 +59,11 @@ impl Channel {
             .push(bincode::serialize(msg).expect("serialize"));
     }
 
+    /// Reliable messages received out of order, waiting for the ones before them.
+    pub fn held_len(&self) -> usize {
+        self.held.len()
+    }
+
     /// Number of reliable messages waiting for an ack (backlog indicator).
     pub fn backlog(&self) -> usize {
         self.out.len()
@@ -99,7 +106,10 @@ impl Channel {
             }
         }
         for (id, d) in p.rel {
-            if !seq_lt(id, self.expected) {
+            // ids far ahead are bogus: a broken or hostile peer could make us hold on to
+            // ever more messages waiting for the gap before them
+            let ahead = id.wrapping_sub(self.expected);
+            if !seq_lt(id, self.expected) && ahead < MAX_AHEAD {
                 self.held.entry(id).or_insert(d);
             }
         }
