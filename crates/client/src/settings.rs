@@ -66,6 +66,9 @@ pub struct Settings {
     pub render_scale: f32,
     /// Vertical sync (FPS locked to the monitor refresh rate). Applied on restart.
     pub vsync: bool,
+    /// Smooth jagged edges (4× multisampling; takes effect after a restart).
+    #[serde(default = "yes")]
+    pub msaa: bool,
     /// FPS cap when vsync is off (0 = unlimited).
     pub fps_limit: u32,
     /// Language of the game (the system's one at first start).
@@ -113,6 +116,7 @@ impl Settings {
             textures: true,
             render_scale: 1.0,
             vsync: true,
+            msaa: true,
             fps_limit: 144,
             lang,
             custom: (1..=3)
@@ -234,4 +238,8 @@ pub fn server_key(addr: &str) -> String {
     } else {
         format!("{a}:{}", toon_shared::consts::DEFAULT_PORT)
     }
+}
+
+fn yes() -> bool {
+    true
 }

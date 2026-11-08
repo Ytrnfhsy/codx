@@ -15,6 +15,8 @@ const TILE_CELLS: usize = 32;
 const LODS: [usize; 4] = [1, 2, 4, 8];
 /// Fog on terrain maps: (starts, opaque).
 pub const TERRAIN_FOG: (f32, f32) = (90.0, 330.0);
+/// The level's outlines fade out between these distances (m).
+const OUTLINE_FADE: (f32, f32) = (35.0, 80.0);
 /// Fog on the small maps.
 pub const ARENA_FOG: (f32, f32) = (55.0, 230.0);
 
@@ -431,9 +433,21 @@ impl Level {
     }
 
     /// Draws the opaque level as seen from `cam` (with the view-projection `matrix`).
-    pub fn draw(&self, mats: &crate::mesh::Materials, cam: Vec3, matrix: &Mat4) {
+    /// The black outlines come last and fade out with distance: far away they would be
+    /// thinner than a pixel and break up into flickering dashes.
+    pub fn draw(&self, mats: &crate::mesh::Materials, cam: Vec3, matrix: &Mat4, outlines: bool) {
         if !self.terrain {
-            mats.draw_toon(&self.tiles[0].near);
+            let t = &self.tiles[0];
+            gl_use_material(&mats.world);
+            t.near.fill.draw_tex(Some(&mats.atlas));
+            t.near.decals.draw_tex(Some(&mats.atlas));
+            if outlines {
+                mats.set_outline_fade(Some(OUTLINE_FADE));
+                gl_use_material(&mats.outline);
+                t.near.outline.draw();
+                mats.set_outline_fade(None);
+            }
+            gl_use_default_material();
             return;
         }
         let far = TERRAIN_FOG.1 + 10.0;
@@ -443,13 +457,6 @@ impl Level {
             .map(|t| (t, Self::dist(t, cam)))
             .filter(|(t, d)| *d < far && (*d < 1.0 || Self::visible(matrix, t.min, t.max)))
             .collect();
-        // outlines of the nearby boxes
-        gl_use_material(&mats.outline);
-        for (t, d) in &shown {
-            if *d < 130.0 {
-                t.near.outline.draw();
-            }
-        }
         gl_use_material(&mats.world);
         for (t, d) in &shown {
             let lod = match *d {
@@ -465,6 +472,16 @@ impl Level {
             } else {
                 t.far.fill.draw_tex(Some(&mats.atlas));
             }
+        }
+        if outlines {
+            mats.set_outline_fade(Some(OUTLINE_FADE));
+            gl_use_material(&mats.outline);
+            for (t, d) in &shown {
+                if *d < OUTLINE_FADE.1 {
+                    t.near.outline.draw();
+                }
+            }
+            mats.set_outline_fade(None);
         }
         gl_use_default_material();
     }

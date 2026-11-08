@@ -187,8 +187,10 @@ enum Screen {
 
 /// Whether the window was created with vsync (changing it needs a restart).
 pub static VSYNC_AT_START: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// Whether the window was created with multisampling (changing it needs a restart).
+pub static MSAA_AT_START: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
-fn window_conf(a: &Args, vsync: bool) -> macroquad::conf::Conf {
+fn window_conf(a: &Args, vsync: bool, msaa: bool) -> macroquad::conf::Conf {
     let mut platform = macroquad::miniquad::conf::Platform::default();
     platform.swap_interval = Some(if vsync { 1 } else { 0 });
     macroquad::conf::Conf {
@@ -199,7 +201,7 @@ fn window_conf(a: &Args, vsync: bool) -> macroquad::conf::Conf {
             window_height: a.height,
             high_dpi: false,
             window_resizable: true,
-            sample_count: 1,
+            sample_count: if msaa { 4 } else { 1 },
             ..Default::default()
         },
         draw_call_vertex_capacity: 24000,
@@ -210,9 +212,11 @@ fn window_conf(a: &Args, vsync: bool) -> macroquad::conf::Conf {
 
 fn main() {
     let args = parse_args();
-    let vsync = Settings::load().vsync && !args.no_vsync;
+    let loaded = Settings::load();
+    let vsync = loaded.vsync && !args.no_vsync;
     VSYNC_AT_START.store(vsync, std::sync::atomic::Ordering::Relaxed);
-    let conf = window_conf(&args, vsync);
+    MSAA_AT_START.store(loaded.msaa, std::sync::atomic::Ordering::Relaxed);
+    let conf = window_conf(&args, vsync, loaded.msaa);
     macroquad::Window::from_config(conf, amain(args));
 }
 
@@ -684,7 +688,14 @@ async fn amain(args: Args) {
                             tw,
                             th,
                             RenderTargetParams {
-                                sample_count: 1,
+                                // the reduced-resolution picture gets its own smoothing
+                                sample_count: if MSAA_AT_START
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    4
+                                } else {
+                                    1
+                                },
                                 depth: true,
                             },
                         );

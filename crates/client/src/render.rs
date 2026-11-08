@@ -198,12 +198,13 @@ pub fn render_world(
     if settings.shadows {
         // big maps: the shadow map covers the area around the camera and follows it
         let (lo, hi) = if g.level.terrain {
-            let snap = 64.0;
+            // a smaller area means finer shadows (and no striped walls)
+            let snap = 32.0;
             let c = vec2(
                 (view.pos.x / snap).round() * snap,
                 (view.pos.z / snap).round() * snap,
             );
-            let r = 192.0;
+            let r = 112.0;
             (
                 vec3(c.x - r, g.level.min.y, c.y - r),
                 vec3(c.x + r, g.level.max.y, c.y + r),
@@ -299,7 +300,8 @@ pub fn render_world(
     }
 
     // level
-    g.level.draw(mats, view.pos, &view.matrix);
+    g.level
+        .draw(mats, view.pos, &view.matrix, settings.outlines);
 
     // dynamic objects
     let mut m = std::mem::take(&mut g.frame_mesh);

@@ -528,8 +528,16 @@ uniform mat4 Projection;
 uniform vec3 CamPos;
 uniform mat4 SunMatrix;
 uniform vec4 Params;
+// x: how far along the normal the shadow lookup moves (about a shadow-map texel)
+uniform vec2 Extra;
+// pushes vertices this far away from the camera (the level's outlines: where two walls
+// meet, an outline pokes out in front of the neighbour and draws a seam line)
+uniform float Push;
 void main() {
     vec4 wp = Model * vec4(position, 1.0);
+    if (Push > 0.0) {
+        wp.xyz += normalize(wp.xyz - CamPos) * Push;
+    }
     gl_Position = Projection * wp;
     color = color0 / 255.0;
     fogd = length(wp.xyz - CamPos);
@@ -537,7 +545,7 @@ void main() {
     vN = normal.xyz;
     vTile = texcoord;
     // offset along the normal so surfaces don't shadow themselves
-    vec4 sp = SunMatrix * vec4(wp.xyz + normal.xyz * 0.08, 1.0);
+    vec4 sp = SunMatrix * vec4(wp.xyz + normal.xyz * Extra.x, 1.0);
     vShadow = sp.xyz * 0.5 + 0.5;
 }
 "#;
@@ -562,6 +570,8 @@ uniform vec3 SunDir;
 // x: shadows on, y: textures on, z: shadow texel size, w: depth bias
 uniform vec4 Params;
 uniform vec3 Tint;
+// outlines fade out between these distances (x >= y: never)
+uniform vec2 Fade;
 
 float occluder(vec2 uv) {
     vec4 c = texture2D(ShadowMap, uv);
@@ -601,7 +611,13 @@ void main() {
     }
     col *= Tint;
     float f = clamp((fogd - FogRange.x) / (FogRange.y - FogRange.x), 0.0, 1.0);
-    gl_FragColor = vec4(mix(col, FogColor.rgb, f), color.a);
+    float a = color.a;
+    if (Fade.y > Fade.x) {
+        // thin far-away outlines would break into flickering dashes
+        a *= clamp((Fade.y - fogd) / (Fade.y - Fade.x), 0.0, 1.0);
+        if (a < 0.02) discard;
+    }
+    gl_FragColor = vec4(mix(col, FogColor.rgb, f), a);
 }
 "#;
 
@@ -658,6 +674,9 @@ fn mat(cull: CullFace, depth_write: bool) -> Material {
                 UniformDesc::new("SunDir", UniformType::Float3),
                 UniformDesc::new("Params", UniformType::Float4),
                 UniformDesc::new("Tint", UniformType::Float3),
+                UniformDesc::new("Extra", UniformType::Float2),
+                UniformDesc::new("Fade", UniformType::Float2),
+                UniformDesc::new("Push", UniformType::Float1),
             ],
             textures: vec!["ShadowMap".to_string()],
         },
@@ -672,6 +691,8 @@ pub struct ShadowMap {
     /// Depth units per metre along the sun direction.
     pub depth_per_m: f32,
     pub res: u32,
+    /// Size of one shadow-map texel on the ground (metres).
+    pub texel: f32,
     /// Middle of the area it covers (x, z).
     pub centre: Vec2,
 }
@@ -747,6 +768,7 @@ impl ShadowMap {
             matrix,
             depth_per_m: 1.0 / (far - near),
             res,
+            texel: (hi.x - lo.x).max(hi.y - lo.y) / res as f32,
             centre: vec2(centre.x, centre.z),
         }
     }
@@ -793,6 +815,10 @@ impl Materials {
             textures: false,
             tint: Vec3::ONE,
         });
+        for mat in [&m.world, &m.outline, &m.fx] {
+            mat.set_uniform("Fade", vec2(0.0, 0.0));
+            mat.set_uniform("Push", 0.0f32);
+        }
         m
     }
 
@@ -805,6 +831,7 @@ impl Materials {
     }
 
     pub fn set_lighting(&self, l: &Lighting) {
+        let offset = l.shadow.map(|s| (s.texel * 1.5).max(0.08)).unwrap_or(0.08);
         let (tex, matrix, params) = match l.shadow {
             Some(s) => (
                 &s.target.texture,
@@ -828,7 +855,17 @@ impl Materials {
             m.set_uniform("SunDir", LIGHT_DIR.normalize());
             m.set_uniform("Params", params);
             m.set_uniform("Tint", l.tint);
+            m.set_uniform("Extra", vec2(offset, 0.0));
         }
+    }
+
+    /// Outlines drawn from now on fade out between `near` and `far` metres (the level's);
+    /// `None` keeps them at full strength (characters' team silhouettes).
+    pub fn set_outline_fade(&self, fade: Option<(f32, f32)>) {
+        let (a, b) = fade.unwrap_or((0.0, 0.0));
+        self.outline.set_uniform("Fade", vec2(a, b));
+        self.outline
+            .set_uniform("Push", if fade.is_some() { 0.12f32 } else { 0.0 });
     }
 
     /// Draws a toon mesh: outline pass then fill.

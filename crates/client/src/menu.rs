@@ -140,7 +140,15 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         x,
         y + 318.0,
     );
-    if s.vsync != was || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed)
+    ui.toggle(
+        t("Згладжування країв", "Anti-aliasing"),
+        &mut s.msaa,
+        col2,
+        y + 318.0,
+    );
+    if s.vsync != was
+        || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed)
+        || s.msaa != crate::MSAA_AT_START.load(std::sync::atomic::Ordering::Relaxed)
     {
         ui.text(
             t(
