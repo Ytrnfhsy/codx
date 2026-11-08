@@ -15,8 +15,9 @@ const TILE_CELLS: usize = 32;
 const LODS: [usize; 4] = [1, 2, 4, 8];
 /// Fog on terrain maps: (starts, opaque).
 pub const TERRAIN_FOG: (f32, f32) = (90.0, 330.0);
-/// The level's outlines fade out between these distances (m).
-const OUTLINE_FADE: (f32, f32) = (35.0, 80.0);
+/// The level's outlines fade out between these distances (m): only where the fog
+/// swallows everything anyway.
+const OUTLINE_FADE: (f32, f32) = (170.0, 260.0);
 /// Fog on the small maps.
 pub const ARENA_FOG: (f32, f32) = (55.0, 230.0);
 
@@ -64,13 +65,8 @@ pub fn boxes_mesh<'a>(
         let is_ground = b.min.y < -0.5 && size.x > 20.0;
         if outlines && b.solid && !is_ground && size.min_element() > 0.15 {
             let w = Vec3::splat(0.045);
-            m.outline.add_box_ex(
-                &Mat4::from_translation((b.min + b.max) * 0.5),
-                size * 0.5 + w,
-                OUTLINE,
-                255,
-                true,
-            );
+            m.outline
+                .add_outline_box((b.min + b.max) * 0.5, size * 0.5 + w, OUTLINE);
         }
     }
     m
@@ -435,14 +431,18 @@ impl Level {
     /// Draws the opaque level as seen from `cam` (with the view-projection `matrix`).
     /// The black outlines come last and fade out with distance: far away they would be
     /// thinner than a pixel and break up into flickering dashes.
-    pub fn draw(&self, mats: &crate::mesh::Materials, cam: Vec3, matrix: &Mat4, outlines: bool) {
+    /// `outline_grow`: metres per metre of distance that keep an outline about one pixel
+    /// wide (0 = no outlines).
+    pub fn draw(&self, mats: &crate::mesh::Materials, cam: Vec3, matrix: &Mat4, outline_grow: f32) {
+        let outlines = outline_grow > 0.0;
+        let fade = (OUTLINE_FADE.0, OUTLINE_FADE.1, outline_grow);
         if !self.terrain {
             let t = &self.tiles[0];
             gl_use_material(&mats.world);
             t.near.fill.draw_tex(Some(&mats.atlas));
             t.near.decals.draw_tex(Some(&mats.atlas));
             if outlines {
-                mats.set_outline_fade(Some(OUTLINE_FADE));
+                mats.set_outline_fade(Some(fade));
                 gl_use_material(&mats.outline);
                 t.near.outline.draw();
                 mats.set_outline_fade(None);
@@ -474,7 +474,7 @@ impl Level {
             }
         }
         if outlines {
-            mats.set_outline_fade(Some(OUTLINE_FADE));
+            mats.set_outline_fade(Some(fade));
             gl_use_material(&mats.outline);
             for (t, d) in &shown {
                 if *d < OUTLINE_FADE.1 {

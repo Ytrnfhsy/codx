@@ -50,7 +50,8 @@ pub struct VmState {
     pub bob: f32,
     pub sway: Vec2,
     pub recoil: f32,
-    pub sprint: bool,
+    /// 0..1 into the sprint pose.
+    pub sprint: f32,
     /// Reload progress 0..1.
     pub reload: Option<f32>,
     /// Weapon being raised: 1 = fully down, 0 = ready.
@@ -300,8 +301,11 @@ pub fn render_world(
     }
 
     // level
-    g.level
-        .draw(mats, view.pos, &view.matrix, settings.outlines);
+    // outlines about a pixel wide whatever the distance (in this frame's resolution)
+    let px = 2.0 * (view.fovy * 0.5).tan()
+        / (screen_height() * settings.render_scale.clamp(0.4, 1.0)).max(1.0);
+    let grow = if settings.outlines { px * 0.9 } else { 0.0 };
+    g.level.draw(mats, view.pos, &view.matrix, grow);
 
     // dynamic objects
     let mut m = std::mem::take(&mut g.frame_mesh);
@@ -717,16 +721,17 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     pitch += vm.recoil * 0.06;
     roll += (vm.recoil * 9.0).sin() * vm.recoil * 0.02;
     // sprint: gun across the chest, bouncing with the stride
-    if vm.sprint {
-        pos += vec3(-0.04, -0.06, 0.04);
+    if vm.sprint > 0.001 {
+        let k = vm.sprint * vm.sprint * (3.0 - 2.0 * vm.sprint);
+        pos += vec3(-0.04, -0.06, 0.04) * k;
         pos += vec3(
             vm.bob_phase.sin() * 0.025,
             -(vm.bob_phase.cos().abs()) * 0.03,
             0.0,
-        );
-        yaw += 0.7;
-        roll += 0.25 + vm.bob_phase.sin() * 0.05;
-        pitch -= 0.15;
+        ) * k;
+        yaw += 0.7 * k;
+        roll += (0.25 + vm.bob_phase.sin() * 0.05) * k;
+        pitch -= 0.15 * k;
     }
     // reload: tilt the gun, pull the magazine, slap a new one in, rack the bolt
     let mut mag_off = Vec3::ZERO;

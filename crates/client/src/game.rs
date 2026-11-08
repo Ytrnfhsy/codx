@@ -157,6 +157,11 @@ pub struct GameClient {
     cam_smooth: Vec3,
     pub last_fire: f64,
     pub stamina: f32,
+    /// Ran out of breath: no sprinting until some stamina is back (or Shift is let go),
+    /// or the sprint would flicker on and off every frame.
+    pub winded: bool,
+    /// 0..1 how far the first-person gun is into its sprint pose (smoothed).
+    pub sprint_pose: f32,
     pub sprinting: bool,
     pub grenades: u8,
     pub smokes: u8,
@@ -372,6 +377,8 @@ impl GameClient {
             cam_smooth: Vec3::ZERO,
             last_fire: -10.0,
             stamina: Tuning::default().movement.sprint_time,
+            winded: false,
+            sprint_pose: 0.0,
             sprinting: false,
             grenades: 0,
             smokes: 0,
@@ -1308,7 +1315,7 @@ impl GameClient {
             bob: self.walk_amount * (1.0 - self.ads_t * 0.85) * self.tuning.movement.view_bob,
             sway: self.sway,
             recoil: self.recoil_vis,
-            sprint: self.sprinting,
+            sprint: self.sprint_pose,
             reload: self
                 .reload_until
                 .map(|(end, dur)| (1.0 - ((end - now) / dur) as f32).clamp(0.0, 1.0)),
@@ -1647,11 +1654,15 @@ impl GameClient {
             }
             let ads_held = can_act && binds::down(Action::Aim);
             let reloading = self.reload_until.is_some();
+            if self.winded && (!key(Action::Sprint) || self.stamina >= self.sprint_max() * 0.35) {
+                self.winded = false;
+            }
             let want_sprint = key(Action::Sprint)
                 && fwd > 0.0
                 && self.body.stance == Stance::Stand
                 && !ads_held
                 && self.stamina > 0.0
+                && !self.winded
                 && now - self.last_fire > 0.2;
             // scoped snipers use Shift to hold breath instead
             let want_sprint = want_sprint && !(scoped_weapon && self.ads_t > 0.5);
@@ -1659,8 +1670,13 @@ impl GameClient {
                 self.sprint_end = now;
             }
             self.sprinting = want_sprint;
+            let target = if self.sprinting { 1.0 } else { 0.0 };
+            self.sprint_pose += (target - self.sprint_pose) * (dt * 12.0).min(1.0);
             if self.sprinting {
                 self.stamina = (self.stamina - dt).max(0.0);
+                if self.stamina <= 0.0 {
+                    self.winded = true;
+                }
             } else {
                 self.stamina = (self.stamina + dt * self.tuning.movement.sprint_recover)
                     .min(self.sprint_max());

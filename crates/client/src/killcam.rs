@@ -635,7 +635,11 @@ impl Killcam {
             bob: self.walk_amount * (1.0 - self.ads_t * 0.85) * tuning.movement.view_bob,
             sway: Vec2::ZERO,
             recoil: self.recoil,
-            sprint: self.sprint && self.ads_t < 0.1,
+            sprint: if self.sprint && self.ads_t < 0.1 {
+                1.0
+            } else {
+                0.0
+            },
             reload: self.reload_progress(tuning),
             raise: (1.0 - since(self.switch_at) / ws.swap_time.max(0.05)).clamp(0.0, 1.0),
             knife: Some(since(self.knife_at) / 0.45).filter(|k| (0.0..1.0).contains(k)),

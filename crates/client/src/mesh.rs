@@ -221,6 +221,26 @@ impl MeshBuilder {
         }
     }
 
+    /// A level outline box: flat-coloured, each corner remembering which way is "out"
+    /// (in its normal), so the shader can widen far-away outlines to stay a pixel or so
+    /// thick instead of breaking up into dashes.
+    pub fn add_outline_box(&mut self, center: Vec3, half: Vec3, color: [u8; 3]) {
+        let c = self.chunk_for(24);
+        for (_, corners) in BOX_FACES.iter() {
+            let base = c.verts.len() as u16;
+            for k in corners {
+                c.verts.push(Vertex {
+                    position: center + *k * half,
+                    uv: Vec2::ZERO,
+                    color: [color[0], color[1], color[2], 255],
+                    normal: k.extend(0.0),
+                });
+            }
+            c.idx
+                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+
     /// Axis-aligned box from min/max (static level geometry).
     pub fn add_aabb(&mut self, min: Vec3, max: Vec3, color: [u8; 3], detail: (u8, f32)) {
         let m = Mat4::from_translation((min + max) * 0.5);
@@ -533,10 +553,14 @@ uniform vec2 Extra;
 // pushes vertices this far away from the camera (the level's outlines: where two walls
 // meet, an outline pokes out in front of the neighbour and draws a seam line)
 uniform float Push;
+// level outlines: how much wider per metre of distance (keeps them about a pixel thick)
+uniform float Grow;
 void main() {
     vec4 wp = Model * vec4(position, 1.0);
     if (Push > 0.0) {
-        wp.xyz += normalize(wp.xyz - CamPos) * Push;
+        float d = length(wp.xyz - CamPos);
+        wp.xyz += normal.xyz * (Grow * d);
+        wp.xyz += normalize(wp.xyz - CamPos) * (Push + Grow * 2.0 * d);
     }
     gl_Position = Projection * wp;
     color = color0 / 255.0;
@@ -677,6 +701,7 @@ fn mat(cull: CullFace, depth_write: bool) -> Material {
                 UniformDesc::new("Extra", UniformType::Float2),
                 UniformDesc::new("Fade", UniformType::Float2),
                 UniformDesc::new("Push", UniformType::Float1),
+                UniformDesc::new("Grow", UniformType::Float1),
             ],
             textures: vec!["ShadowMap".to_string()],
         },
@@ -818,6 +843,7 @@ impl Materials {
         for mat in [&m.world, &m.outline, &m.fx] {
             mat.set_uniform("Fade", vec2(0.0, 0.0));
             mat.set_uniform("Push", 0.0f32);
+            mat.set_uniform("Grow", 0.0f32);
         }
         m
     }
@@ -859,13 +885,15 @@ impl Materials {
         }
     }
 
-    /// Outlines drawn from now on fade out between `near` and `far` metres (the level's);
-    /// `None` keeps them at full strength (characters' team silhouettes).
-    pub fn set_outline_fade(&self, fade: Option<(f32, f32)>) {
-        let (a, b) = fade.unwrap_or((0.0, 0.0));
+    /// Outlines drawn from now on are the level's: they fade out between `near` and
+    /// `far` metres and widen by `grow` per metre of distance. `None` puts the outline
+    /// material back for characters (team silhouettes at full strength).
+    pub fn set_outline_fade(&self, fade: Option<(f32, f32, f32)>) {
+        let (a, b, grow) = fade.unwrap_or((0.0, 0.0, 0.0));
         self.outline.set_uniform("Fade", vec2(a, b));
         self.outline
             .set_uniform("Push", if fade.is_some() { 0.12f32 } else { 0.0 });
+        self.outline.set_uniform("Grow", grow);
     }
 
     /// Draws a toon mesh: outline pass then fill.

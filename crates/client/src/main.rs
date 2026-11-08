@@ -366,6 +366,10 @@ async fn amain(args: Args) {
     }
 
     loop {
+        // the volume slider works at once, in the menu and in a game
+        if (audio.volume() - settings.volume).abs() > 1e-4 {
+            audio.set_volume(settings.volume);
+        }
         // the chosen language for everything this frame draws and says
         toon_shared::lang::set(settings.lang);
         let dt = get_frame_time().min(0.1);

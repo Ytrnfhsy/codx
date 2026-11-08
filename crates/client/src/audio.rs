@@ -1588,7 +1588,8 @@ fn synthesize(jobs: &[(Sfx, usize)]) -> Vec<(Sfx, Vec<[f32; 2]>)> {
 
 pub struct Audio {
     sounds: HashMap<Sfx, Vec<Sound>>,
-    pub volume: f32,
+    /// Master volume (the settings slider changes it while the game runs).
+    volume: std::cell::Cell<f32>,
     last: RefCell<HashMap<Sfx, f64>>,
     heli_on: RefCell<bool>,
     drone_on: RefCell<bool>,
@@ -1626,7 +1627,7 @@ impl Audio {
         }
         Audio {
             sounds,
-            volume,
+            volume: std::cell::Cell::new(volume),
             last: RefCell::new(HashMap::new()),
             heli_on: RefCell::new(false),
             drone_on: RefCell::new(false),
@@ -1635,8 +1636,17 @@ impl Audio {
         }
     }
 
+    /// Master volume 0..1, applied at once (the next sounds play at it).
+    pub fn set_volume(&self, v: f32) {
+        self.volume.set(v.clamp(0.0, 1.0));
+    }
+
+    pub fn volume(&self) -> f32 {
+        self.volume.get()
+    }
+
     pub fn play(&self, s: Sfx, vol: f32) {
-        if vol <= 0.01 || self.volume <= 0.0 {
+        if vol <= 0.01 || self.volume.get() <= 0.0 {
             return;
         }
         let now = get_time();
@@ -1662,7 +1672,7 @@ impl Audio {
                 &list[i.min(list.len() - 1)],
                 PlaySoundParams {
                     looped: false,
-                    volume: (vol * self.volume).min(1.0),
+                    volume: (vol * self.volume.get()).min(1.0),
                 },
             );
         }
@@ -1732,7 +1742,7 @@ impl Audio {
         let mut on = on.borrow_mut();
         match dist {
             Some(d) => {
-                let v = ((1.0 - d / range).clamp(0.05, 1.0) * self.volume * gain).min(1.0);
+                let v = ((1.0 - d / range).clamp(0.05, 1.0) * self.volume.get() * gain).min(1.0);
                 if !*on {
                     play_sound(
                         snd,
