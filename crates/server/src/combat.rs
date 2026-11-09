@@ -2,6 +2,7 @@
 
 use crate::game::{Dest, Game, Grenade, Heli, PendingBlast, WState};
 use glam::{vec3, Vec3};
+use toon_shared::ballistics::{trace_path, Ballistics, Path};
 use toon_shared::consts::*;
 use toon_shared::lang::{pick, t};
 use toon_shared::protocol::{MatchState, ShotFx, S2C};
@@ -16,6 +17,29 @@ pub enum Hit {
     Heli(usize, f32),
     Vehicle(usize, f32),
 }
+
+/// A bullet in flight.
+pub struct Bullet {
+    pub owner: u8,
+    pub weapon: WeaponId,
+    pub team: Team,
+    pub origin: Vec3,
+    pub path: Path,
+    /// When it left the barrel.
+    pub fired: f64,
+    /// Players are checked where the shooter saw them: this much in the past (negative).
+    pub rewind: f64,
+    pub stopping: bool,
+    /// Pieces of the path already checked.
+    pub checked: usize,
+    /// Which shot it belongs to (the pellets of a shotgun share one).
+    pub shot: u32,
+    /// Its tracer among this tick's shots.
+    pub fx: Option<usize>,
+}
+
+/// Most bullets in the air at once.
+const MAX_BULLETS: usize = 3000;
 
 /// Radius of a helicopter's hit sphere.
 const HELI_HIT_RADIUS: f32 = 2.6;
@@ -36,10 +60,35 @@ impl Game {
         max: f32,
         t: f64,
     ) -> (f32, Hit, f32) {
-        let (mut best, _, pierced) = self.world.bullet_trace(o, d, max);
+        let (best, _, pierced) = self.world.bullet_trace(o, d, max);
+        let (best, hit) = self.trace_targets(shooter, o, d, best, t);
+        let left = pierced
+            .iter()
+            .filter(|p| p.t < best)
+            .filter_map(|p| p.mat.bullet_pass())
+            .product();
+        (best, hit, left)
+    }
+
+    /// The nearest player (rewound to `t`), helicopter or vehicle on a straight piece of
+    /// a bullet's path, closer than `best`.
+    fn trace_targets(
+        &self,
+        shooter: Option<u8>,
+        o: Vec3,
+        d: Vec3,
+        mut best: f32,
+        t: f64,
+    ) -> (f32, Hit) {
         let mut hit = Hit::None;
         for p in self.players.iter().flatten() {
             if !p.alive || Some(p.id) == shooter {
+                continue;
+            }
+            // far from this piece of the path (rewinding moves nobody more than a few metres)
+            let rel = p.body.pos - o;
+            let along = rel.dot(d).clamp(0.0, best);
+            if (rel - d * along).length_squared() > 36.0 {
                 continue;
             }
             let (pos, yaw, stance) = p.rewound(t);
@@ -67,12 +116,7 @@ impl Game {
                 }
             }
         }
-        let left = pierced
-            .iter()
-            .filter(|p| p.t < best)
-            .filter_map(|p| p.mat.bullet_pass())
-            .product();
-        (best, hit, left)
+        (best, hit)
     }
 
     pub fn fire(&mut self, id: u8, weapon: WeaponId, origin: Vec3, dirs: &[Vec3]) {
@@ -143,9 +187,8 @@ impl Game {
         let team = p.team;
         let t = time - rewind;
 
-        let mut per_victim: Vec<(u8, f32, bool)> = Vec::new();
-        let mut heli_dmg: Vec<(usize, f32)> = Vec::new();
-        let mut vehicle_dmg: Vec<(usize, f32)> = Vec::new();
+        let b = Ballistics::of(weapon);
+        let mut fired = 0;
         for (k, d) in dirs.iter().take(def.pellets.max(1) as usize).enumerate() {
             if !d.is_finite() || d.length_squared() < 0.5 {
                 continue;
@@ -154,55 +197,151 @@ impl Game {
             if d.dot(look).clamp(-1.0, 1.0).acos() > max_angle {
                 continue;
             }
-            let (dist, hit, left) = self.trace(Some(id), origin, d, 400.0, t);
-            let mut flesh = false;
-            match hit {
-                Hit::Player(v, dist, zone) => {
-                    let mut dmg = def.damage_at(dist) * zone.mult(def.head_mult) * left;
-                    if stopping {
-                        dmg *= 1.4;
-                    }
-                    flesh = true;
-                    match per_victim.iter_mut().find(|e| e.0 == v) {
-                        Some(e) => {
-                            e.1 += dmg;
-                            e.2 |= zone == HitZone::Head;
-                        }
-                        None => per_victim.push((v, dmg, zone == HitZone::Head)),
-                    }
-                }
-                Hit::Heli(i, dist) => heli_dmg.push((i, def.damage_at(dist) * left)),
-                Hit::Vehicle(i, dist) => vehicle_dmg.push((i, def.damage_at(dist) * left)),
-                Hit::None => {}
-            }
-            if k < 3 {
+            let path = trace_path(&self.world, origin, d, &b);
+            // the first pellets show a tracer to where the bullet ends up
+            let fx = (k < 3).then(|| {
                 self.shots.push(ShotFx {
                     id,
                     weapon,
                     from: origin.to_array(),
-                    to: (origin + d * dist).to_array(),
-                    flesh,
+                    to: path.end().to_array(),
+                    flesh: false,
+                });
+                self.shots.len() - 1
+            });
+            fired += 1;
+            if self.bullets.len() < MAX_BULLETS {
+                self.bullets.push(Bullet {
+                    owner: id,
+                    weapon,
+                    team,
+                    origin,
+                    path,
+                    // it covers its first tick of flight at once: point blank is instant
+                    fired: time - TICK_DT as f64,
+                    rewind: t - time,
+                    stopping,
+                    checked: 0,
+                    shot: self.shot_serial,
+                    fx,
                 });
             }
         }
+        self.shot_serial = self.shot_serial.wrapping_add(1);
         if let Some(p) = self.pm(id) {
-            p.shots_fired += 1;
-            if !per_victim.is_empty() {
+            if fired > 0 {
+                p.shots_fired += 1;
+            }
+        }
+        self.update_bullets();
+    }
+
+    /// Moves every bullet in flight along its path and applies what it hits.
+    pub fn update_bullets(&mut self) {
+        if self.bullets.is_empty() {
+            return;
+        }
+        let time = self.time;
+        let mut hits: Vec<(usize, Hit, f32)> = Vec::new();
+        let mut done: Vec<usize> = Vec::new();
+        for (bi, bl) in self.bullets.iter().enumerate() {
+            let upto = bl.path.piece_at((time - bl.fired) as f32);
+            let at = time + bl.rewind;
+            let mut i = bl.checked;
+            let mut found = None;
+            while i < upto {
+                let (a, c) = (bl.path.points[i], bl.path.points[i + 1]);
+                let seg = c - a;
+                let len = seg.length();
+                if len > 1e-4 {
+                    let (dist, hit) = self.trace_targets(Some(bl.owner), a, seg / len, len, at);
+                    if !matches!(hit, Hit::None) {
+                        found = Some((hit, bl.path.dist[i] + dist));
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            match found {
+                Some((hit, d)) => {
+                    hits.push((bi, hit, d));
+                    done.push(bi);
+                }
+                None if upto + 1 >= bl.path.points.len() => done.push(bi),
+                None => {}
+            }
+        }
+        for bl in self.bullets.iter_mut() {
+            bl.checked = bl.path.piece_at((time - bl.fired) as f32);
+        }
+        // pellets of one shot that hit the same player add up into one hit
+        let mut per_victim: Vec<(u8, u8, WeaponId, f32, bool, Vec3)> = Vec::new();
+        let mut counted: Vec<(u8, u32)> = Vec::new();
+        let mut heli_dmg: Vec<(u8, Team, usize, f32)> = Vec::new();
+        let mut vehicle_dmg: Vec<(u8, usize, f32)> = Vec::new();
+        for (bi, hit, dist) in hits {
+            let bl = &self.bullets[bi];
+            let def = self.tuning.weapon(bl.weapon);
+            let left = bl.path.left_at(dist);
+            let base = def.damage_at(dist) * left;
+            let point = bl.path.point_at(dist);
+            // the tracer of a shot fired this tick ends where it really hit
+            if let Some(i) = bl.fx.filter(|_| time - bl.fired <= TICK_DT as f64 + 1e-6) {
+                if let Some(s) = self.shots.get_mut(i) {
+                    s.to = point.to_array();
+                    s.flesh = matches!(hit, Hit::Player(..));
+                }
+            }
+            match hit {
+                Hit::Player(v, _, zone) => {
+                    let mut dmg = base * zone.mult(def.head_mult);
+                    if bl.stopping {
+                        dmg *= 1.4;
+                    }
+                    if !counted.contains(&(bl.owner, bl.shot)) {
+                        counted.push((bl.owner, bl.shot));
+                    }
+                    match per_victim.iter_mut().find(|e| e.0 == bl.owner && e.1 == v) {
+                        Some(e) => {
+                            e.3 += dmg;
+                            e.4 |= zone == HitZone::Head;
+                        }
+                        None => per_victim.push((
+                            bl.owner,
+                            v,
+                            bl.weapon,
+                            dmg,
+                            zone == HitZone::Head,
+                            bl.origin,
+                        )),
+                    }
+                }
+                Hit::Heli(i, _) => heli_dmg.push((bl.owner, bl.team, i, base)),
+                Hit::Vehicle(i, _) => vehicle_dmg.push((bl.owner, i, base)),
+                Hit::None => {}
+            }
+        }
+        done.sort_unstable();
+        for bi in done.into_iter().rev() {
+            self.bullets.swap_remove(bi);
+        }
+        for (owner, _) in counted {
+            if let Some(p) = self.pm(owner) {
                 p.shots_hit += 1;
             }
         }
-        for (v, dmg, head) in per_victim {
-            self.damage(v, Some(id), dmg, Cause::Weapon(weapon), head, origin);
+        for (owner, v, weapon, dmg, head, origin) in per_victim {
+            self.damage(v, Some(owner), dmg, Cause::Weapon(weapon), head, origin);
         }
-        for (i, dmg) in vehicle_dmg {
-            self.damage_vehicle(i, dmg, Some(id));
+        for (owner, i, dmg) in vehicle_dmg {
+            self.damage_vehicle(i, dmg, Some(owner));
         }
-        for (i, dmg) in heli_dmg {
+        for (owner, team, i, dmg) in heli_dmg {
             if let Some(h) = self.helis.get_mut(i) {
                 if h.team != team || self.cfg.friendly_fire {
                     h.hp -= dmg;
                     self.outbox.push((
-                        Dest::One(id),
+                        Dest::One(owner),
                         S2C::HitConfirm {
                             kill: false,
                             headshot: false,

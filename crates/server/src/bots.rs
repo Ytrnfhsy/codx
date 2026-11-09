@@ -2,6 +2,7 @@
 
 use crate::game::Game;
 use glam::{vec2, vec3, Vec2, Vec3};
+use toon_shared::ballistics::{lead, Ballistics};
 use toon_shared::physics::{MoveInput, Stance};
 use toon_shared::protocol::{flags, MatchState};
 use toon_shared::ray::smoke_blocks;
@@ -138,6 +139,8 @@ pub struct Bot {
     pub br_jump_at: f64,
     /// Battle royale: where to come down (spread out from the other bots).
     pub br_land: Option<Vec3>,
+    /// No changing guns again before this.
+    next_switch: f64,
     /// How close (0..1) the bot is to noticing each enemy.
     awareness: Vec<(u8, f32)>,
     last_percept: f64,
@@ -239,6 +242,7 @@ impl Bot {
             path_fail_until: 0.0,
             br_jump_at: 0.0,
             br_land: None,
+            next_switch: 0.0,
             target: None,
             seen_at: 0.0,
             last_seen: None,
@@ -343,6 +347,15 @@ impl Game {
         let skill = (self.cfg.bot_skill + bot.skill_offset).clamp(0.0, 1.0);
         let sk = SkillProfile::new(skill);
         let walk_speed = self.tuning.movement.walk_speed;
+        // how far it looks: as far as its best loaded gun reaches (a sniper scans the hills)
+        let ballistic = Ballistics::of(weapon);
+        let reach = me
+            .weapons
+            .iter()
+            .filter(|w| w.mag + w.reserve > 0)
+            .map(|w| Ballistics::of(w.id).engage)
+            .fold(ballistic.engage, f32::max);
+        let sight = sk.max_sight.max(reach * lerp(0.7, 1.0, skill));
 
         let clouds = self.smoke_clouds();
         // ---- perception: enemies are noticed gradually, only inside the field of view
@@ -367,7 +380,7 @@ impl Game {
                     .attacked_by
                     .map(|a| a.0 == o.id && time - a.2 < 2.0)
                     .unwrap_or(false);
-                let in_view = d < sk.max_sight && (facing > sk.fov_cos || d < 2.5);
+                let in_view = d < sight && (facing > sk.fov_cos || d < 2.5);
                 let los = in_view
                     && ((self.world.line_of_sight(eye, o.eye())
                         && !smoke_blocks(eye, o.eye(), &clouds))
@@ -456,7 +469,13 @@ impl Game {
         bot.wobble_phase += dt;
         let w = bot.wobble_phase;
         // aiming down sights steadies the hands
-        let steady = if bot.was_ads { 0.55 } else { 1.0 };
+        // (and for a long shot it holds its breath, like a player in a scope)
+        let far = target.is_some_and(|t| t.1.distance(eye) > 60.0);
+        let steady = match (bot.was_ads, far) {
+            (true, true) => 0.25,
+            (true, false) => 0.55,
+            _ => 1.0,
+        };
         let wobble = vec2(
             (w * 1.3).sin() + (w * 3.1).sin() * 0.5,
             (w * 1.7).cos() * 0.8 + (w * 2.6).sin() * 0.3,
@@ -466,7 +485,10 @@ impl Game {
         let mut aim_err_angle = 10.0;
         let mut dist_to_target = 0.0;
         if let Some((_, chest, head, _, tvel)) = target {
-            let aim = chest.lerp(head, sk.head_bias) - tvel * sk.track_lag;
+            // where it will be when the bullet arrives (better bots lead better), held
+            // higher by the drop over the distance
+            let seen = chest.lerp(head, sk.head_bias) - tvel * sk.track_lag;
+            let (aim, _) = lead(eye, seen, tvel * lerp(0.4, 1.0, skill), ballistic.velocity);
             let d = aim - eye;
             dist_to_target = d.length();
             let want_yaw = yaw_of(d) + bot.aim_err.x;
@@ -516,8 +538,11 @@ impl Game {
         if target.is_some() {
             ads = dist_to_target > sk.ads_distance && class != WeaponClass::Shotgun;
             bot.was_ads = ads;
-            let tol = sk.fire_tolerance + 0.5 / dist_to_target.max(1.0);
-            let in_range = class != WeaponClass::Shotgun || dist_to_target < 20.0;
+            // (far away a body is a small mark: wait until the sights settle on it)
+            let tol = sk.fire_tolerance.min(0.9 / dist_to_target.max(1.0))
+                + 0.5 / dist_to_target.max(1.0);
+            let in_range = dist_to_target < ballistic.engage * 1.15
+                && (class != WeaponClass::Shotgun || dist_to_target < 20.0);
             let reacted = time - bot.seen_at > sk.reaction as f64;
             if reacted && protected_me {
                 // like a player: give up spawn protection to start fighting
@@ -526,7 +551,17 @@ impl Game {
                     p.switch_end = p.switch_end.max(time + 0.2);
                 }
             }
-            if reacted && !protected_me && aim_err_angle < tol && mag > 0 && !reloading && in_range
+            // a long shot waits for the moment the sights are still on the mark (better
+            // shooters are pickier about it)
+            let steady_shot = dist_to_target < 60.0
+                || bot.aim_err.length() * dist_to_target < lerp(4.0, 1.0, skill);
+            if reacted
+                && !protected_me
+                && aim_err_angle < tol
+                && steady_shot
+                && mag > 0
+                && !reloading
+                && in_range
             {
                 let can = if def.auto {
                     if time > bot.burst_until && time > bot.pause_until {
@@ -853,6 +888,44 @@ impl Game {
         if let Some(dirs) = fire_dirs {
             let eye = self.p(id).unwrap().eye();
             self.fire(id, weapon, eye, &dirs);
+        }
+        // the right gun for the distance: the closest-reaching one that still reaches,
+        // the longest-reaching otherwise; and never an empty one
+        let next_switch = self
+            .p(id)
+            .and_then(|p| p.bot.as_ref())
+            .map_or(0.0, |b| b.next_switch);
+        if time >= next_switch && !reloading {
+            if let Some(me) = self.p(id) {
+                let (slot, weps) = (me.slot as usize, me.weapons);
+                let loaded = |k: usize| weps[k].mag + weps[k].reserve > 0;
+                let eng = |k: usize| Ballistics::of(weps[k].id).engage;
+                let other = 1 - slot;
+                let better = loaded(other)
+                    && (!loaded(slot)
+                        || match target {
+                            Some(_) => {
+                                let d = dist_to_target;
+                                let fits = |k: usize| eng(k) >= d;
+                                if fits(slot) {
+                                    fits(other) && eng(other) < eng(slot) && d < 15.0
+                                } else {
+                                    eng(other) > eng(slot)
+                                }
+                            }
+                            // between fights: the main gun
+                            None => {
+                                eng(other) > eng(slot)
+                                    && weps[slot].id.def().class == WeaponClass::Pistol
+                            }
+                        });
+                if better {
+                    if let Some(b) = self.pm(id).and_then(|p| p.bot.as_mut()) {
+                        b.next_switch = time + 2.5;
+                    }
+                    self.switch_weapon(id, other as u8);
+                }
+            }
         }
         let need_reload = mag == 0 || (target.is_none() && (mag as f32) < def.mag as f32 * 0.4);
         if need_reload && reserve > 0 && !reloading {

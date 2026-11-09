@@ -1,6 +1,7 @@
 //! Code shared by the dedicated server and the game client:
 //! gameplay constants, weapons, maps, movement physics, raycasts and the network protocol.
 
+pub mod ballistics;
 pub mod consts;
 pub mod inventory;
 pub mod lang;

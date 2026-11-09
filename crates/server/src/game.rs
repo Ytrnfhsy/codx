@@ -349,6 +349,8 @@ pub struct Game {
     pub rotation_idx: usize,
     pub outbox: Vec<(Dest, S2C, bool)>,
     pub shots: Vec<ShotFx>,
+    pub bullets: Vec<crate::combat::Bullet>,
+    pub shot_serial: u32,
     pub log: VecDeque<String>,
     pub bans: crate::admin::Bans,
     /// Players to disconnect (id, reason) — handled by the network layer.
@@ -427,6 +429,8 @@ impl Game {
             rotation_idx: 0,
             outbox: Vec::new(),
             shots: Vec::new(),
+            bullets: Vec::new(),
+            shot_serial: 0,
             log: VecDeque::new(),
             bans,
             kicked: Vec::new(),
@@ -1417,6 +1421,7 @@ impl Game {
         self.state_end = self.time + pre;
         self.overtime = false;
         self.grenades.clear();
+        self.bullets.clear();
         self.smokes.clear();
         self.vehicles.clear();
         self.drops.clear();
@@ -1679,6 +1684,7 @@ impl Game {
         self.tick = self.tick.wrapping_add(1);
         self.path_budget = PATHS_PER_TICK;
         self.update_state(dt);
+        self.update_bullets();
         self.update_pickups();
 
         // bots

@@ -1456,33 +1456,46 @@ impl GameClient {
             dirs: dirs.iter().map(|d| d.to_array()).collect(),
         });
 
-        // local visuals: trace against the world and remote players
+        // local visuals: the bullet's arc through the world, and remote players on it
         let muzzle = self.viewmodel_muzzle_world();
-        for (k, d) in dirs.iter().enumerate() {
+        let b = toon_shared::ballistics::Ballistics::of(w);
+        for d in dirs.iter().take(3) {
             // bullets go through planks and cloth (as on the server)
-            let (mut t, _, pierced) = self.world.bullet_trace(eye, *d, 300.0);
+            let path = toon_shared::ballistics::trace_path(&self.world, eye, *d, &b);
+            let mut hit = path.end();
             let mut flesh = false;
-            for r in self.remotes.values() {
-                if !r.alive || r.team == self.team {
+            let mut stop = path.length();
+            'path: for i in 0..path.points.len().saturating_sub(1) {
+                let (a, c) = (path.points[i], path.points[i + 1]);
+                let len = a.distance(c);
+                if len < 1e-4 {
                     continue;
                 }
-                if let Some((rt, _)) = ray_player(eye, *d, r.pos, r.yaw, r.stance, t) {
-                    t = rt;
-                    flesh = true;
+                let dir = (c - a) / len;
+                // where the target will be when the bullet gets there
+                let t_arrive = i as f32 * toon_shared::ballistics::STEP;
+                for r in self.remotes.values() {
+                    if !r.alive || r.team == self.team && !self.mode.solo() {
+                        continue;
+                    }
+                    let at = r.pos + r.vel * t_arrive;
+                    if let Some((rt, _)) = ray_player(a, dir, at, r.yaw, r.stance, len) {
+                        hit = a + dir * rt;
+                        stop = path.dist[i] + rt;
+                        flesh = true;
+                        break 'path;
+                    }
                 }
             }
-            let hit = eye + *d * t;
-            if k < 3 {
-                for p in pierced.iter().filter(|p| p.t < t) {
-                    self.fx
-                        .pierce(eye + *d * p.t, p.mat == toon_shared::map::Mat::Wood);
-                }
-                self.fx.tracer(muzzle, hit);
-                if flesh {
-                    self.fx.flesh(hit);
-                } else {
-                    self.fx.impact(hit - *d * 0.05);
-                }
+            for p in path.pierced.iter().filter(|p| p.0 < stop) {
+                // (wood lets less through than cloth)
+                self.fx.pierce(path.point_at(p.0), p.1 < 0.9);
+            }
+            self.fx.tracer(muzzle, hit);
+            if flesh {
+                self.fx.flesh(hit);
+            } else if path.hit_world {
+                self.fx.impact(hit);
             }
         }
         self.muzzle_flash = now;
