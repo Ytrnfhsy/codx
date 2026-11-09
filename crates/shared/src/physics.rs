@@ -424,10 +424,10 @@ pub enum Chute {
 
 /// The parachute opens by itself this high above the ground.
 pub const CHUTE_OPEN_HEIGHT: f32 = 70.0;
-const FREEFALL_SPEED: f32 = 48.0;
-const FREEFALL_GLIDE: f32 = 16.0;
-const CHUTE_SINK: f32 = 5.5;
-const CHUTE_GLIDE: f32 = 9.0;
+pub const FREEFALL_SPEED: f32 = 48.0;
+pub const FREEFALL_GLIDE: f32 = 16.0;
+pub const CHUTE_SINK: f32 = 5.5;
+pub const CHUTE_GLIDE: f32 = 9.0;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MoveInput {

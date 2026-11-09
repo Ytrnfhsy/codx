@@ -136,6 +136,8 @@ pub struct Bot {
     pub skill_offset: f32,
     /// Battle royale: when to jump out of the plane.
     pub br_jump_at: f64,
+    /// Battle royale: where to come down (spread out from the other bots).
+    pub br_land: Option<Vec3>,
     /// How close (0..1) the bot is to noticing each enemy.
     awareness: Vec<(u8, f32)>,
     last_percept: f64,
@@ -236,6 +238,7 @@ impl Bot {
             repath_at: 0.0,
             path_fail_until: 0.0,
             br_jump_at: 0.0,
+            br_land: None,
             target: None,
             seen_at: 0.0,
             last_seen: None,
@@ -625,7 +628,14 @@ impl Game {
         } else {
             Stance::Crouch
         };
-        if fighting && !urgent && at_hold.is_some() {
+        if let Some(g) = goal.filter(|_| skydiving) {
+            // falling from the plane: steer straight for where we want to land, and open the
+            // parachute early when the spot is further than a free fall can carry us
+            let flat = vec3(g.x - pos.x, 0.0, g.z - pos.z);
+            move_dir = flat.normalize_or_zero();
+            let ground = self.world.ground(pos.x, pos.z).unwrap_or(0.0).max(g.y);
+            jump = flat.length() > crate::br::glide_reach(pos.y - ground, false);
+        } else if fighting && !urgent && at_hold.is_some() {
             // hold the spot and shoot from it
             stance = if hold_stance == Stance::Prone && dist_to_target < 15.0 {
                 Stance::Crouch
@@ -701,9 +711,6 @@ impl Game {
             let dy = wrap_angle(want - yaw);
             yaw = wrap_angle(yaw + dy.clamp(-1.2 * dt, 1.2 * dt));
             pitch *= 1.0 - (2.0 * dt).min(1.0);
-        } else if let Some(g) = goal.filter(|_| skydiving) {
-            // falling from the plane: steer straight for where we want to land
-            move_dir = vec3(g.x - pos.x, 0.0, g.z - pos.z).normalize_or_zero();
         } else if let Some(g) = goal {
             let flat_d = vec3(g.x - pos.x, 0.0, g.z - pos.z).length();
             // far goals may drift a little before the route is worth planning again

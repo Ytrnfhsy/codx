@@ -23,6 +23,20 @@ pub const PLANE_SPEED: f32 = 75.0;
 /// Walking this close to supplies picks them up.
 const LOOT_RADIUS: f32 = 1.3;
 
+/// How far sideways a skydiver gets from `height` metres above the ground: with the
+/// parachute opened right away, or in free fall until it opens by itself.
+pub fn glide_reach(height: f32, open_now: bool) -> f32 {
+    use toon_shared::physics::{
+        CHUTE_GLIDE, CHUTE_OPEN_HEIGHT, CHUTE_SINK, FREEFALL_GLIDE, FREEFALL_SPEED,
+    };
+    let h = height.max(0.0);
+    if open_now {
+        return h / CHUTE_SINK * CHUTE_GLIDE;
+    }
+    let fall = (h - CHUTE_OPEN_HEIGHT).max(0.0);
+    fall / FREEFALL_SPEED * FREEFALL_GLIDE + h.min(CHUTE_OPEN_HEIGHT) / CHUTE_SINK * CHUTE_GLIDE
+}
+
 /// Zone phases: (wait before shrinking, shrinking time, radius after it, damage per second
 /// outside). The first wait counts from the moment the plane takes off.
 const PHASES: [(f32, f32, f32, f32); 6] = [
@@ -141,7 +155,6 @@ impl Game {
         // everyone boards
         let start = self.br.plane_pos(time);
         let mut entrants = 0;
-        let jump_window = self.br.plane_time;
         let mut jumps = Vec::new();
         for p in self.players.iter_mut().flatten() {
             if !p.team.is_playing() {
@@ -163,15 +176,9 @@ impl Game {
                 jumps.push(p.id);
             }
         }
-        for id in jumps {
-            // bots leave the plane over the island, at different moments
-            let at = time + self.rng.range(0.15, 0.8) as f64 * jump_window as f64;
-            if let Some(b) = self.pm(id).and_then(|p| p.bot.as_mut()) {
-                b.br_jump_at = at;
-            }
-        }
         self.br.entrants = entrants;
         self.br_scatter_loot();
+        self.br_assign_drops(&jumps);
         self.center_all(
             || {
                 t(
@@ -182,6 +189,89 @@ impl Game {
             },
             4.0,
         );
+    }
+
+    /// Gives every bot its own landing spot, as far from the others as the flight path
+    /// allows (by preference next to a gun), and the moment to jump: when the plane is
+    /// closest to it.
+    fn br_assign_drops(&mut self, bots: &[u8]) {
+        if bots.is_empty() {
+            return;
+        }
+        let from = self.br.plane_from;
+        let dir = self.br.plane_dir;
+        let run = PLANE_SPEED * self.br.plane_time;
+        // what a bot can reach after leaving the plane (with some room to spare)
+        let reach = glide_reach(PLANE_HEIGHT - 20.0, true) * 0.8;
+        let (lo, hi) = (self.map.min, self.map.max);
+        let margin = 25.0;
+        let along_of = |q: Vec3| {
+            let rel = vec3(q.x - from.x, 0.0, q.z - from.z);
+            let along = rel.dot(dir);
+            let side = (rel - dir * along).length();
+            (along, side)
+        };
+        let fits = |q: Vec3| {
+            let (along, side) = along_of(q);
+            side < reach
+                && along > run * 0.06
+                && along < run * 0.94
+                && q.x > lo.x + margin
+                && q.x < hi.x - margin
+                && q.z > lo.y + margin
+                && q.z < hi.y - margin
+        };
+        // candidates: guns on the ground, then any walkable ground
+        let mut cands: Vec<(Vec3, f32)> = self
+            .pickups
+            .iter()
+            .map(|pk| pk.pos)
+            .filter(|q| fits(*q))
+            .map(|q| (q, 12.0))
+            .collect();
+        cands.retain(|c| self.reachable(c.0));
+        for _ in 0..(bots.len() * 6).max(60) {
+            let q = self.nav.random_point(&mut self.rng);
+            if fits(q) {
+                cands.push((q, 0.0));
+            }
+        }
+        let mut chosen: Vec<Vec3> = Vec::new();
+        for &id in bots {
+            let pick = cands
+                .iter()
+                .enumerate()
+                .map(|(i, (q, bonus))| {
+                    let gap = chosen
+                        .iter()
+                        .map(|c| vec2(c.x - q.x, c.z - q.z).length())
+                        .fold(400.0f32, f32::min);
+                    (i, gap + bonus + self.rng.range(0.0, 6.0))
+                })
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(i, _)| i);
+            let time = self.time;
+            let t0 = self.br.plane_t0;
+            let window = self.br.plane_time as f64;
+            let (land, at) = match pick {
+                Some(i) => {
+                    let (q, _) = cands.swap_remove(i);
+                    let (along, _) = along_of(q);
+                    // jump when the plane passes it
+                    let at = t0 + (along / PLANE_SPEED) as f64;
+                    (Some(q), at.clamp(time + 0.1 * window, time + 0.95 * window))
+                }
+                // nowhere left: anywhere along the way
+                None => (None, time + self.rng.range(0.15, 0.8) as f64 * window),
+            };
+            if let Some(q) = land {
+                chosen.push(q);
+            }
+            if let Some(b) = self.pm(id).and_then(|p| p.bot.as_mut()) {
+                b.br_jump_at = at;
+                b.br_land = land;
+            }
+        }
     }
 
     /// Picks where the zone shrinks to next.
@@ -785,6 +875,13 @@ impl Game {
             return (None, false, false);
         };
         let skydiving = me.body.chute != Chute::None;
+        if skydiving {
+            if let Some(l) = bot.br_land {
+                return (Some(l), false, false);
+            }
+        } else {
+            bot.br_land = None;
+        }
         if !skydiving && flat.distance(c) > r * 0.85 + 3.0 {
             let inside = c + (flat - c).normalize_or_zero() * r * 0.5;
             let g = self

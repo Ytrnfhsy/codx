@@ -335,3 +335,117 @@ fn inventory_pick_up_heal_and_drop() {
     assert!(dropped.iter().any(|(k, _)| *k == LootKind::Armor(2)));
     assert!(dropped.contains(&(LootKind::Backpack(1), 1)));
 }
+
+/// Nobody waits for the round inside someone else, and the bots come down spread out
+/// over the island instead of in a heap under the plane.
+#[test]
+fn lobby_and_landing_are_spread_out() {
+    let mut cfg = ServerConfig {
+        data_dir: std::env::temp_dir().join("tw-br5").to_string_lossy().into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 40;
+    cfg.br.max_players = 41;
+    let mut g = Game::new(cfg);
+    g.rng = toon_shared::rng::Rng::new(21);
+    g.change_map(MapId::Island, Mode::Br);
+    let me = g
+        .connect(
+            "127.0.0.1:5007".parse().unwrap(),
+            "Гравець",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    let flat = |a: glam::Vec3, b: glam::Vec3| glam::vec2(a.x - b.x, a.z - b.z).length();
+    // nearest neighbour of each position
+    let nearest = |ps: &[glam::Vec3]| -> Vec<f32> {
+        ps.iter()
+            .enumerate()
+            .map(|(i, a)| {
+                ps.iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i)
+                    .map(|(_, b)| flat(*a, *b))
+                    .fold(f32::MAX, f32::min)
+            })
+            .collect()
+    };
+    let mut lobby_min = f32::MAX;
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+        if g.br.running {
+            break;
+        }
+        let ps: Vec<_> = g
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| p.alive)
+            .map(|p| p.body.pos)
+            .collect();
+        if ps.len() > 10 {
+            let n = nearest(&ps);
+            lobby_min = lobby_min.min(n.iter().cloned().fold(f32::MAX, f32::min));
+        }
+    }
+    assert!(g.br.running, "the round did not start");
+    eprintln!("lobby: closest two players {lobby_min:.2} m apart");
+    assert!(
+        lobby_min > 0.9,
+        "players inside each other in the lobby ({lobby_min:.2} m)"
+    );
+
+    g.handle(me, C2S::BrJump);
+    let mut landed: std::collections::HashMap<u8, glam::Vec3> = Default::default();
+    let mut aims: std::collections::HashMap<u8, glam::Vec3> = Default::default();
+    for _ in 0..(110.0 / TICK_DT) as usize {
+        for p in g.players.iter().flatten() {
+            if let Some(l) = p.bot.as_ref().and_then(|b| b.br_land) {
+                aims.insert(p.id, l);
+            }
+        }
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+        for p in g.players.iter().flatten().filter(|p| p.is_bot()) {
+            if p.alive && !p.in_plane && p.body.chute == Chute::None {
+                landed.entry(p.id).or_insert(p.body.pos);
+            }
+        }
+    }
+    for p in g.players.iter().flatten().filter(|p| p.is_bot()) {
+        if !landed.contains_key(&p.id) {
+            eprintln!(
+                "not landed: {} alive {} plane {} chute {:?} at {:.1} vel {:.1}",
+                p.name, p.alive, p.in_plane, p.body.chute, p.body.pos, p.body.vel
+            );
+        }
+    }
+    // they come down where they meant to
+    let missed = landed
+        .iter()
+        .filter_map(|(id, at)| aims.get(id).map(|a| flat(*a, *at)))
+        .filter(|d| *d > 40.0)
+        .count();
+    assert!(missed <= 2, "{missed} bots landed far from their spot");
+    let ps: Vec<_> = landed.values().cloned().collect();
+    // (one or two may be shot on the way down)
+    assert!(ps.len() >= 34, "only {} bots landed", ps.len());
+    let mut n = nearest(&ps);
+    n.sort_by(f32::total_cmp);
+    let median = n[n.len() / 2];
+    let crowded = n.iter().filter(|d| **d < 15.0).count();
+    eprintln!(
+        "landing: nearest neighbour median {median:.0} m, min {:.1} m, {crowded} within 15 m",
+        n[0]
+    );
+    assert!(
+        median > 45.0,
+        "bots land too close together (median {median:.0} m)"
+    );
+    assert!(crowded <= 2, "{crowded} bots landed within 15 m of another");
+}

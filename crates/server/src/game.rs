@@ -908,11 +908,40 @@ impl Game {
         self.recent_deaths.retain(|d| time - d.1 < 12.0);
         self.recent_spawns.retain(|d| time - d.1 < 4.0);
         let base = side_only || self.state == MatchState::PreRound || !team.is_playing();
-        let mut cands: Vec<Spawn> = if base && team.is_playing() {
+        let mut cands: Vec<Spawn> = if base && team.is_playing() && !self.mode.solo() {
             self.map.spawns[team.index()].clone()
         } else {
             self.map.all_spawns().copied().collect()
         };
+        // battle royale lobby: dozens of players wait on a handful of spawn points, so
+        // each one gets rings of spots around it (nobody ends up inside someone else)
+        if self.mode == Mode::Br && base {
+            let spots: Vec<Spawn> = cands.clone();
+            for s in spots {
+                for ring in 1..=3 {
+                    let r = ring as f32 * 2.2;
+                    let n = 6 * ring;
+                    for k in 0..n {
+                        let a = k as f32 / n as f32 * std::f32::consts::TAU + ring as f32;
+                        let at = s.pos + vec3(a.cos() * r, 0.0, a.sin() * r);
+                        let Some(y) = self.world.floor_below(at + vec3(0.0, 1.0, 0.0), 2.5) else {
+                            continue;
+                        };
+                        let at = vec3(at.x, y, at.z);
+                        if toon_shared::physics::fits(
+                            &self.world,
+                            at + vec3(0.0, 0.05, 0.0),
+                            Stance::Stand,
+                        ) {
+                            cands.push(Spawn {
+                                pos: at,
+                                yaw: s.yaw,
+                            });
+                        }
+                    }
+                }
+            }
+        }
         if !base {
             let centre = self.map.center();
             let centre = vec3(centre.x, 0.0, centre.y);
@@ -950,6 +979,8 @@ impl Game {
                 let d = p.body.pos.distance(s.pos);
                 if d < 1.5 {
                     score -= 200.0;
+                } else if d < 2.5 {
+                    score -= 40.0;
                 }
                 if p.team == team {
                     min_friend = min_friend.min(d);
