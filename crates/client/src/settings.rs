@@ -71,6 +71,8 @@ pub struct Settings {
     pub render_scale: f32,
     /// Vertical sync (FPS locked to the monitor refresh rate). Applied on restart.
     pub vsync: bool,
+    /// Battle royale character (`toon_shared::skins`).
+    pub skin: u8,
     /// Smooth jagged edges (4× multisampling).
     #[serde(default = "yes")]
     pub msaa: bool,
@@ -122,6 +124,7 @@ impl Settings {
             render_scale: 1.0,
             vsync: true,
             msaa: true,
+            skin: 0,
             fps_limit: 144,
             lang,
             custom: (1..=3)

@@ -84,6 +84,8 @@ pub enum Overlay {
     Settings,
     /// Key bindings.
     Controls,
+    /// Battle royale: picking a character.
+    Skin,
 }
 
 pub struct Welcome {
@@ -208,6 +210,10 @@ pub struct GameClient {
     pub piloting: Option<crate::pilot::Piloting>,
     /// The language the server writes to us in (sent again when changed in the settings).
     sent_lang: toon_shared::lang::Lang,
+    /// Character last told to the server (255: not yet).
+    sent_skin: u8,
+    /// Where the character chooser wants its turning 3D preview this frame.
+    pub skin_preview: Option<Rect>,
     pub fx: Effects,
     pub rcon_pass: String,
     pub spec_pos: Vec3,
@@ -416,6 +422,8 @@ impl GameClient {
             artillery: Vec::new(),
             piloting: None,
             sent_lang: toon_shared::lang::get(),
+            sent_skin: 255,
+            skin_preview: None,
             fx: Effects::new(),
             rcon_pass: String::new(),
             spec_pos: spec,
@@ -653,8 +661,10 @@ impl GameClient {
             S2C::TeamSet(t) => {
                 self.team = t;
                 if t.is_playing() && self.mode == Mode::Br && !self.has_class {
-                    // no classes in the battle royale: you find your weapons
+                    // no classes in the battle royale (you find your weapons): pick who you
+                    // are instead
                     self.choose_class(toon_shared::weapons::DEFAULT_CLASSES[0].1);
+                    self.overlay = Overlay::Skin;
                 } else if t.is_playing() {
                     if !self.has_class {
                         self.overlay = Overlay::Class;
@@ -967,6 +977,9 @@ impl GameClient {
         self.overtime = s.overtime;
 
         let mut seen = Vec::new();
+        for p in &s.players {
+            crate::soldier::set_skin(p.id, p.skin);
+        }
         for p in s.players {
             if p.id == self.my_id {
                 self.team = p.team;
@@ -1519,6 +1532,10 @@ impl GameClient {
 
     /// Per-frame update. `input_enabled` is false while menus are open.
     pub fn update(&mut self, dt: f32, settings: &Settings, audio: Option<&Audio>) {
+        if settings.skin != self.sent_skin {
+            self.sent_skin = settings.skin;
+            self.net.send(C2S::SetSkin(settings.skin));
+        }
         if settings.lang != self.sent_lang {
             self.sent_lang = settings.lang;
             self.net.send(C2S::Lang(settings.lang));

@@ -1077,3 +1077,59 @@ pub fn draw_model_gallery(mats: &Materials) {
     mats.draw_toon(&m);
     set_default_camera();
 }
+
+/// A character turning slowly inside `rect` (screen pixels): the chooser's preview.
+pub fn draw_skin_preview(mats: &Materials, skin: u8, rect: Rect, t: f32) {
+    let dpi = screen_dpi_scale();
+    let vp = (
+        (rect.x * dpi) as i32,
+        ((screen_height() - rect.y - rect.h) * dpi) as i32,
+        (rect.w * dpi) as i32,
+        (rect.h * dpi) as i32,
+    );
+    let cam = Camera3D {
+        position: vec3(0.0, 1.2, -4.8),
+        target: vec3(0.0, 0.92, 0.0),
+        up: Vec3::Y,
+        fovy: 0.55,
+        aspect: Some(rect.w / rect.h.max(1.0)),
+        projection: Projection::Perspective,
+        render_target: None,
+        viewport: Some(vp),
+        z_near: 0.1,
+        z_far: 20.0,
+    };
+    set_camera(&cam);
+    mats.set_lighting(&crate::mesh::Lighting {
+        shadow: None,
+        textures: false,
+        tint: Vec3::ONE,
+    });
+    mats.set_view(cam.position, Color::new(0.0, 0.0, 0.0, 1.0), 100.0, 200.0);
+    // a spare player id carries the chosen character
+    const PREVIEW: u8 = 255;
+    soldier::set_skin(PREVIEW, skin);
+    let mut m = ToonMesh::new();
+    soldier::add_soldier(
+        &mut m,
+        &soldier::SoldierPose {
+            pos: Vec3::ZERO,
+            yaw: std::f32::consts::PI + t * 0.7,
+            pitch: 0.0,
+            stance: Stance::Stand,
+            team: Team::Allies,
+            weapon: WeaponId::M4,
+            look: PREVIEW,
+            time: t,
+            phase: 0.0,
+            walk: 0.0,
+            sprint: 0.0,
+            has_bomb: false,
+            melee: 0.0,
+            reload: None,
+            outline: soldier::OUTLINE,
+        },
+    );
+    mats.draw_toon(&m);
+    set_default_camera();
+}

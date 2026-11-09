@@ -96,6 +96,8 @@ pub struct Player {
     pub in_plane: bool,
     /// Battle royale body armour (0..100).
     pub armor: f32,
+    /// Battle royale character.
+    pub skin: u8,
 }
 
 impl Player {
@@ -166,6 +168,7 @@ impl Player {
             chat_budget: 5.0,
             in_plane: false,
             armor: 0.0,
+            skin: 0,
         }
     }
     pub fn is_bot(&self) -> bool {
@@ -668,6 +671,8 @@ impl Game {
         let name = self.sanitize_name(&format!("[Бот] {base}"), None);
         let mut p = Player::new(id, name, None, self.time);
         p.bot = Some(Box::new(Bot::new(&mut self.rng)));
+        // bots dress up as somebody in the battle royale
+        p.skin = 1 + self.rng.below(toon_shared::skins::count() as usize - 1) as u8;
         let class = DEFAULT_CLASSES[self.rng.below(DEFAULT_CLASSES.len())].1;
         p.loadout = class;
         p.has_loadout = true;
@@ -1090,6 +1095,11 @@ impl Game {
             C2S::Melee => self.melee(id),
             C2S::PickUp(ent) => self.pick_up(id, ent),
             C2S::BrJump => self.br_jump(id),
+            C2S::SetSkin(s) => {
+                if let Some(p) = self.pm(id) {
+                    p.skin = s.min(toon_shared::skins::count() - 1);
+                }
+            }
             C2S::UseKillstreak { target, pilot } => self.use_killstreak(id, target, pilot),
             C2S::Drive {
                 pos,
@@ -1788,6 +1798,8 @@ impl Game {
                         },
                     weapon: p.weapon().id,
                     flags: f,
+                    // characters are a battle royale thing: elsewhere sides wear uniforms
+                    skin: if self.mode.solo() { p.skin } else { 0 },
                 }
             })
             .collect();

@@ -93,6 +93,8 @@ pub enum C2S {
     Lang(crate::lang::Lang),
     /// Jump out of the battle royale plane.
     BrJump,
+    /// The character the player wants to be in the battle royale (`skins::SKINS`).
+    SetSkin(u8),
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -133,6 +135,8 @@ pub struct PlayerSnap {
     pub stance: u8,
     pub weapon: WeaponId,
     pub flags: u8,
+    /// Battle royale character (`skins::SKINS`; 0 = team uniform).
+    pub skin: u8,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

@@ -764,9 +764,12 @@ async fn amain(args: Args) {
                     enter,
                     hot: false,
                 };
-                if let Some(hud::HudAction::Leave) =
-                    g.draw_hud(&mut ui, &view, &tags, &mut settings, fps)
-                {
+                g.skin_preview = None;
+                let action = g.draw_hud(&mut ui, &view, &tags, &mut settings, fps);
+                if let Some(rect) = g.skin_preview {
+                    render::draw_skin_preview(&mats, settings.skin, rect, get_time() as f32);
+                }
+                if let Some(hud::HudAction::Leave) = action {
                     g.disconnect();
                     next = Some(Screen::Menu);
                 }

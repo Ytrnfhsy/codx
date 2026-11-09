@@ -22,7 +22,7 @@ they are more than SMOOTH_DEG apart, which keeps the meshes small for CPU skinni
 """
 import base64, json, math, os, struct, sys
 
-MODELS = ["BlueSoldier_Male", "Soldier_Male"]
+MODELS = ["BlueSoldier_Male", "Soldier_Male", "Pirate_Male", "Ninja_Male", "Ninja_Sand", "Knight_Male", "Knight_Golden_Male", "Goblin_Male", "Elf", "Kimono_Male", "Worker_Male", "Wizard"]
 CLIPS = ["Idle", "Walk", "Run"]
 ANIM_SOURCE = "Soldier_Male"
 FPS = 30.0

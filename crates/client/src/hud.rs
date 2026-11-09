@@ -1883,16 +1883,19 @@ impl GameClient {
                 if ui.button(t("Продовжити", "Resume"), x + 24.0, y + 90.0, bw, 46.0) {
                     self.overlay = self.after_pause();
                 }
-                // (no classes or sides in the battle royale)
-                if self.mode != Mode::Br
-                    && ui.button2(
-                        t("Змінити клас", "Change class"),
-                        x + 24.0,
-                        y + 146.0,
-                        bw,
-                        46.0,
-                    )
-                {
+                // (no classes or sides in the battle royale: characters instead)
+                if self.mode == Mode::Br {
+                    if ui.button2(t("Персонаж", "Character"), x + 24.0, y + 146.0, bw, 46.0)
+                    {
+                        self.overlay = Overlay::Skin;
+                    }
+                } else if ui.button2(
+                    t("Змінити клас", "Change class"),
+                    x + 24.0,
+                    y + 146.0,
+                    bw,
+                    46.0,
+                ) {
                     self.overlay = Overlay::Class;
                 }
                 if self.mode != Mode::Br
@@ -1991,6 +1994,63 @@ impl GameClient {
                 if ui.button(t("Готово", "Done"), x + pw - 180.0, y + 510.0, 156.0, 44.0) {
                     settings.save();
                     self.overlay = Overlay::Pause;
+                }
+                None
+            }
+            Overlay::Skin => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                let pw = 440.0f32.min(w - 20.0);
+                let ph = 520.0f32.min(h - 20.0);
+                let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
+                ui.panel(x, y, pw, ph);
+                ui.bold(
+                    t("Твій персонаж", "Your character"),
+                    x + 24.0,
+                    y + 44.0,
+                    26,
+                    ACCENT,
+                );
+                ui.text(
+                    t(
+                        "Так тебе бачитимуть у королівській битві",
+                        "How others see you in the battle royale",
+                    ),
+                    x + 24.0,
+                    y + 70.0,
+                    14,
+                    MUTED,
+                );
+                // the turning model is drawn into this box after the HUD
+                let bx = Rect::new(x + 24.0, y + 84.0, pw - 48.0, ph - 230.0);
+                draw_rectangle(bx.x, bx.y, bx.w, bx.h, Color::new(0.1, 0.12, 0.18, 1.0));
+                self.skin_preview = Some(bx);
+                let n = toon_shared::skins::count();
+                let d = ui.stepper(
+                    "",
+                    toon_shared::skins::name(settings.skin),
+                    x + 24.0,
+                    y + ph - 130.0,
+                    pw - 48.0,
+                );
+                if d != 0 {
+                    settings.skin = ((settings.skin as i32 + d).rem_euclid(n as i32)) as u8;
+                }
+                if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::A) {
+                    settings.skin = (settings.skin + n - 1) % n;
+                }
+                if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
+                    settings.skin = (settings.skin + 1) % n;
+                }
+                if ui.button(
+                    t("Готово", "Done"),
+                    x + pw - 200.0,
+                    y + ph - 70.0,
+                    176.0,
+                    46.0,
+                ) || is_key_pressed(KeyCode::Enter)
+                {
+                    settings.save();
+                    self.overlay = Overlay::None;
                 }
                 None
             }

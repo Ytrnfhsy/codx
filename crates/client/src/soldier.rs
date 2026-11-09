@@ -64,8 +64,33 @@ pub struct SoldierPose {
     pub outline: f32,
 }
 
-/// Model index for a team and look: each team has its own uniforms.
+thread_local! {
+    /// Battle royale character of every player id (0: team uniform), from the snapshots.
+    static SKIN_OF: std::cell::RefCell<[u8; 256]> = const { std::cell::RefCell::new([0; 256]) };
+}
+
+/// Remembers which character player `id` is (`toon_shared::skins`).
+pub fn set_skin(id: u8, skin: u8) {
+    SKIN_OF.with(|s| s.borrow_mut()[id as usize] = skin);
+}
+
+pub fn skin_of(id: u8) -> u8 {
+    SKIN_OF.with(|s| s.borrow()[id as usize])
+}
+
+/// Model index of a skin's character (None for the uniform or if the pack lacks it).
+pub fn skin_model(skin: u8) -> Option<usize> {
+    let name = toon_shared::skins::model(skin)?;
+    let r = rig();
+    (0..r.models.len()).find(|&i| r.models[i].name == name)
+}
+
+/// Model index for a team and look (the player id): each team has its own uniforms,
+/// unless the player wears a battle royale character.
 pub fn model_for(team: Team, look: u8) -> usize {
+    if let Some(m) = skin_model(skin_of(look)) {
+        return m;
+    }
     let r = rig();
     let prefix = match team {
         Team::Axis => "Soldier_",
@@ -86,7 +111,10 @@ pub fn colors(model: usize, look: u8) -> Vec<[u8; 3]> {
     md.mats
         .iter()
         .map(|(name, c)| match name.as_str() {
-            "Skin" => TONES[(look as usize / 2) % TONES.len()],
+            // the pack leaves human skin black for us to tint (a goblin is green already)
+            "Skin" if (c[0] as u32 + c[1] as u32 + c[2] as u32) < 120 => {
+                TONES[(look as usize / 2) % TONES.len()]
+            }
             // the pack's eyes are white on dark skin; ours are dark on light skin
             "Face" => [44, 36, 46],
             // the pack is quite dark; lift it to the game's bright cartoon palette
@@ -103,8 +131,17 @@ pub fn arm_colors(team: Team, look: u8) -> ([u8; 3], [u8; 3]) {
     let model = model_for(team, look);
     let md = &rig().models[model];
     let c = colors(model, look);
-    let sleeve = md.mat("Main").map(|i| c[i]).unwrap_or([120, 120, 120]);
-    (sleeve, TONES[(look as usize / 2) % TONES.len()])
+    // the uniform's sleeve, or a character's clothes
+    let sleeve = ["Main", "Clothes", "Armor", "Shirt", "Pants"]
+        .iter()
+        .find_map(|n| md.mat(n))
+        .map(|i| c[i])
+        .unwrap_or([120, 120, 120]);
+    let hand = md
+        .mat("Skin")
+        .map(|i| c[i])
+        .unwrap_or(TONES[(look as usize / 2) % TONES.len()]);
+    (sleeve, hand)
 }
 
 /// Turns a bone around the model's X axis (positive leans forward) and refreshes `g`.
@@ -277,7 +314,13 @@ pub fn add_soldier(m: &mut ToonMesh, p: &SoldierPose) -> Vec3 {
         );
     }
 
-    let prev_ink = m.ink.replace(team_ink(p.team));
+    // characters have no side: a plain dark outline
+    let ink = if skin_of(p.look) > 0 {
+        crate::mesh::OUTLINE
+    } else {
+        team_ink(p.team)
+    };
+    let prev_ink = m.ink.replace(ink);
     r.draw(m, model, &g, world, &colors(model, p.look), p.outline);
     if p.has_bomb {
         let back = world * g[ids.torso].mat();
@@ -356,7 +399,12 @@ pub fn add_ragdoll(m: &mut ToonMesh, team: Team, look: u8, j: &RagdollJoints) {
         };
         r.set_global(&mut local, &mut g, ids.foot[s], foot);
     }
-    let prev_ink = m.ink.replace(team_ink(team));
+    let ink = if skin_of(look) > 0 {
+        crate::mesh::OUTLINE
+    } else {
+        team_ink(team)
+    };
+    let prev_ink = m.ink.replace(ink);
     r.draw(m, model, &g, world, &colors(model, look), OUTLINE);
     m.ink = prev_ink;
 }
