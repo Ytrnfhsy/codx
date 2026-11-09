@@ -1,6 +1,6 @@
 //! Shooting, damage, deaths, grenades, melee and killstreaks.
 
-use crate::game::{Dest, Game, Grenade, Heli, PendingBlast};
+use crate::game::{Dest, Game, Grenade, Heli, PendingBlast, WState};
 use glam::{vec3, Vec3};
 use toon_shared::consts::*;
 use toon_shared::lang::{pick, t};
@@ -125,6 +125,8 @@ impl Game {
             return;
         }
         p.shot_budget -= 1.0;
+        // shooting puts the medkit away
+        p.inv.healing = 0.0;
         p.weapon_mut().mag -= 1;
         p.last_shot = time;
         let eye = p.eye();
@@ -232,6 +234,7 @@ impl Game {
             return;
         }
         let ff = self.cfg.friendly_fire || self.mode.solo();
+        let solo = self.mode.solo();
         let time = self.time;
         let att_team = attacker.and_then(|a| self.p(a)).map(|a| a.team);
         let Some(v) = self.pm(victim) else { return };
@@ -251,11 +254,11 @@ impl Game {
         if v.has_perk2(Perk2::Juggernaut) {
             amount *= 0.75;
         }
-        // body armour soaks up half of it while it lasts
-        if v.armor > 0.0 && cause != Cause::Zone {
-            let soak = (amount * 0.5).min(v.armor);
-            v.armor -= soak;
-            amount -= soak;
+        // battle royale: the vest takes part of a body hit, the helmet part of a head
+        // hit, while they last
+        if solo && !matches!(cause, Cause::Zone | Cause::Fall | Cause::World) {
+            amount = v.inv.soak(amount, headshot);
+            v.inv.healing = 0.0;
         }
         v.hp -= amount;
         v.last_damage = time;
@@ -322,6 +325,15 @@ impl Game {
         v.attackers.clear();
         self.recent_deaths.push((vpos, time));
         self.drop_bomb_if_carrier(victim);
+        // (battle royale: the rounds are in the inventory, which drops by itself)
+        let dropped = if self.mode.solo() {
+            WState {
+                reserve: 0,
+                ..dropped
+            }
+        } else {
+            dropped
+        };
         if self.state != MatchState::PostMatch {
             self.drop_weapon(dropped, vpos);
             // battle royale: everything they carried is up for grabs
@@ -329,8 +341,14 @@ impl Game {
                 let other = self
                     .p(victim)
                     .and_then(|v| v.weapons.iter().find(|w| w.id != dropped.id).copied());
-                if let Some(w) = other {
-                    self.drop_weapon(w, vpos + vec3(0.6, 0.0, 0.3));
+                let empty = self.p(victim).and_then(|v| v.empty_slot);
+                let other_slot = self
+                    .p(victim)
+                    .and_then(|v| v.weapons.iter().position(|w| w.id != dropped.id));
+                if let Some(w) =
+                    other.filter(|_| empty.is_none() || empty != other_slot.map(|s| s as u8))
+                {
+                    self.drop_weapon(WState { reserve: 0, ..w }, vpos + vec3(0.6, 0.0, 0.3));
                 }
             }
         }

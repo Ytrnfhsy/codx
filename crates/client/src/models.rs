@@ -822,21 +822,63 @@ pub fn add_loot(m: &mut ToonMesh, pos: Vec3, kind: toon_shared::protocol::LootKi
                 0.0,
             );
         }
-        LootKind::Ammo => {
-            m.boxed(&base, vec3(0.32, 0.16, 0.2), [96, 112, 64], 0.02);
+        LootKind::Ammo(a) => {
+            use toon_shared::inventory::AmmoType;
+            // the box's band tells the calibre
+            let band = match a {
+                AmmoType::Pistol => [220, 200, 120],
+                AmmoType::Smg => [120, 200, 230],
+                AmmoType::Rifle => [230, 150, 60],
+                AmmoType::Shotgun => [220, 70, 60],
+                AmmoType::Sniper => [170, 110, 220],
+                AmmoType::Lmg => [120, 210, 110],
+            };
+            m.boxed(&base, vec3(0.3, 0.15, 0.2), [86, 100, 60], 0.02);
             m.boxed(
-                &(base * Mat4::from_translation(vec3(0.0, 0.17, 0.0))),
-                vec3(0.08, 0.02, 0.18),
-                [220, 190, 80],
+                &(base * Mat4::from_translation(vec3(0.0, 0.0, 0.0))),
+                vec3(0.31, 0.05, 0.21),
+                band,
                 0.0,
             );
         }
-        LootKind::Armor => {
-            m.boxed(&base, vec3(0.3, 0.34, 0.1), [60, 84, 120], 0.02);
+        LootKind::Armor(l) => {
+            let c = level_color(l);
+            m.boxed(&base, vec3(0.3, 0.34, 0.1), c, 0.02);
             m.boxed(
-                &(base * Mat4::from_translation(vec3(0.0, 0.0, 0.11))),
-                vec3(0.2, 0.2, 0.02),
-                [80, 110, 150],
+                &(base * Mat4::from_translation(vec3(0.0, 0.05, 0.11))),
+                vec3(0.2, 0.18, 0.02),
+                toon_shared::map::shade(c, 1.2),
+                0.0,
+            );
+        }
+        LootKind::Helmet(l) => {
+            let c = level_color(l);
+            m.sphere(
+                &(base * Mat4::from_scale(vec3(1.0, 0.75, 1.1))),
+                0.24,
+                c,
+                0.02,
+            );
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, -0.06, 0.0))),
+                vec3(0.27, 0.03, 0.29),
+                toon_shared::map::shade(c, 0.8),
+                0.0,
+            );
+        }
+        LootKind::Backpack(l) => {
+            let c = [[0, 0, 0], [110, 120, 80], [90, 110, 140], [70, 70, 80]][l.min(3) as usize];
+            m.boxed(&base, vec3(0.24, 0.3, 0.14), c, 0.02);
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, -0.08, 0.15))),
+                vec3(0.18, 0.12, 0.05),
+                toon_shared::map::shade(c, 0.85),
+                0.0,
+            );
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, 0.32, 0.0))),
+                vec3(0.18, 0.04, 0.12),
+                level_color(l),
                 0.0,
             );
         }
@@ -927,5 +969,14 @@ pub fn add_transport(m: &mut ToonMesh, pos: Vec3, yaw: f32, t: f32) {
         let prop =
             e * Mat4::from_translation(vec3(0.0, 0.0, -1.7)) * Mat4::from_rotation_z(t * 25.0 + x);
         m.boxed(&prop, vec3(2.0, 0.15, 0.05), [40, 40, 40], 0.0);
+    }
+}
+
+/// Colour of an equipment level: grey, blue, black with gold.
+pub fn level_color(level: u8) -> [u8; 3] {
+    match level {
+        3 => [50, 50, 58],
+        2 => [60, 96, 160],
+        _ => [130, 136, 120],
     }
 }

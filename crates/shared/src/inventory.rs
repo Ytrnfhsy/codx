@@ -1,0 +1,225 @@
+//! Battle royale inventory: everything a player carries besides the two guns in their
+//! hands — ammunition by calibre, medkits, grenades, the vest, the helmet and the
+//! backpack that decides how much of it all fits.
+
+use crate::lang::t;
+use crate::weapons::{WeaponClass, WeaponId};
+use serde::{Deserialize, Serialize};
+
+/// Ammunition kinds; every gun takes one of them (by its class).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AmmoType {
+    Pistol,
+    Smg,
+    Rifle,
+    Shotgun,
+    Sniper,
+    Lmg,
+}
+
+impl AmmoType {
+    pub const ALL: [AmmoType; 6] = [
+        AmmoType::Pistol,
+        AmmoType::Smg,
+        AmmoType::Rifle,
+        AmmoType::Shotgun,
+        AmmoType::Sniper,
+        AmmoType::Lmg,
+    ];
+
+    pub fn of(w: WeaponId) -> AmmoType {
+        match w.def().class {
+            WeaponClass::Pistol => AmmoType::Pistol,
+            WeaponClass::Smg => AmmoType::Smg,
+            WeaponClass::Rifle => AmmoType::Rifle,
+            WeaponClass::Shotgun => AmmoType::Shotgun,
+            WeaponClass::Sniper => AmmoType::Sniper,
+            WeaponClass::Lmg => AmmoType::Lmg,
+        }
+    }
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            AmmoType::Pistol => t("Пістолетні набої", "Pistol ammo"),
+            AmmoType::Smg => t("Набої для ПП", "SMG ammo"),
+            AmmoType::Rifle => t("Гвинтівкові набої", "Rifle ammo"),
+            AmmoType::Shotgun => t("Дріб", "Shotgun shells"),
+            AmmoType::Sniper => t("Снайперські набої", "Sniper ammo"),
+            AmmoType::Lmg => t("Кулеметна стрічка", "Machine gun belt"),
+        }
+    }
+
+    /// A few letters for the HUD.
+    pub fn short(self) -> &'static str {
+        match self {
+            AmmoType::Pistol => t("ПІСТ", "PST"),
+            AmmoType::Smg => t("ПП", "SMG"),
+            AmmoType::Rifle => t("ГВИНТ", "RFL"),
+            AmmoType::Shotgun => t("ДРІБ", "SHT"),
+            AmmoType::Sniper => t("СНАЙП", "SNP"),
+            AmmoType::Lmg => t("КУЛ", "LMG"),
+        }
+    }
+
+    /// The guns that take it (for the pick-up prompt).
+    pub fn guns(self) -> Vec<&'static str> {
+        WeaponId::all()
+            .filter(|w| AmmoType::of(*w) == self)
+            .map(|w| w.def().name)
+            .collect()
+    }
+
+    /// What fits with no backpack.
+    pub fn base_cap(self) -> u16 {
+        match self {
+            AmmoType::Pistol => 45,
+            AmmoType::Smg => 120,
+            AmmoType::Rifle => 120,
+            AmmoType::Shotgun => 24,
+            AmmoType::Sniper => 25,
+            AmmoType::Lmg => 200,
+        }
+    }
+
+    /// How much one box on the ground holds.
+    pub fn box_size(self) -> u16 {
+        match self {
+            AmmoType::Pistol => 15,
+            AmmoType::Smg => 30,
+            AmmoType::Rifle => 30,
+            AmmoType::Shotgun => 8,
+            AmmoType::Sniper => 5,
+            AmmoType::Lmg => 50,
+        }
+    }
+}
+
+/// Highest level of vests, helmets and backpacks.
+pub const MAX_LEVEL: u8 = 3;
+
+/// Points of damage a vest of each level can take before it is worn out.
+pub fn armor_durability(level: u8) -> f32 {
+    [0.0, 60.0, 100.0, 150.0][level.min(MAX_LEVEL) as usize]
+}
+/// Share of a body hit a vest takes on.
+pub fn armor_absorb(level: u8) -> f32 {
+    [0.0, 0.3, 0.4, 0.55][level.min(MAX_LEVEL) as usize]
+}
+pub fn helmet_durability(level: u8) -> f32 {
+    [0.0, 40.0, 70.0, 100.0][level.min(MAX_LEVEL) as usize]
+}
+/// Share of a head hit a helmet takes on.
+pub fn helmet_absorb(level: u8) -> f32 {
+    [0.0, 0.3, 0.45, 0.6][level.min(MAX_LEVEL) as usize]
+}
+
+/// Roman numerals for the levels.
+pub fn level_name(level: u8) -> &'static str {
+    ["", "I", "II", "III"][level.min(MAX_LEVEL) as usize]
+}
+
+/// Seconds a medkit takes to use, and what it heals.
+pub const MEDKIT_TIME: f32 = 3.0;
+pub const MEDKIT_HEAL: f32 = 60.0;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Inventory {
+    pub medkits: u8,
+    /// Vest level (0 = none) and what is left of it.
+    pub armor: u8,
+    pub armor_hp: f32,
+    pub helmet: u8,
+    pub helmet_hp: f32,
+    pub backpack: u8,
+    /// Rounds of each `AmmoType`.
+    pub ammo: [u16; 6],
+    /// Seconds left of using a medkit (0 = not healing).
+    pub healing: f32,
+}
+
+impl Inventory {
+    fn bag(&self) -> f32 {
+        [1.0, 1.5, 2.0, 2.5][self.backpack.min(MAX_LEVEL) as usize]
+    }
+    pub fn ammo_cap(&self, t: AmmoType) -> u16 {
+        (t.base_cap() as f32 * self.bag()) as u16
+    }
+    pub fn medkit_cap(&self) -> u8 {
+        2 + self.backpack * 2
+    }
+    pub fn grenade_cap(&self) -> u8 {
+        2 + self.backpack
+    }
+    pub fn ammo(&self, t: AmmoType) -> u16 {
+        self.ammo[t.index()]
+    }
+    /// Adds up to `n` rounds; returns how many fitted.
+    pub fn add_ammo(&mut self, t: AmmoType, n: u16) -> u16 {
+        let room = self.ammo_cap(t).saturating_sub(self.ammo[t.index()]);
+        let take = room.min(n);
+        self.ammo[t.index()] += take;
+        take
+    }
+    /// Damage after the vest or the helmet took its share (and wore down).
+    pub fn soak(&mut self, amount: f32, head: bool) -> f32 {
+        let absorb = if head {
+            helmet_absorb(self.helmet)
+        } else {
+            armor_absorb(self.armor)
+        };
+        let (level, hp) = if head {
+            (&mut self.helmet, &mut self.helmet_hp)
+        } else {
+            (&mut self.armor, &mut self.armor_hp)
+        };
+        if *level == 0 || *hp <= 0.0 {
+            return amount;
+        }
+        let taken = (amount * absorb).min(*hp);
+        *hp -= taken;
+        if *hp <= 0.01 {
+            *level = 0;
+            *hp = 0.0;
+        }
+        amount - taken
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vests_and_helmets_soak_and_wear_out() {
+        let mut inv = Inventory {
+            armor: 2,
+            armor_hp: armor_durability(2),
+            helmet: 1,
+            helmet_hp: helmet_durability(1),
+            ..Default::default()
+        };
+        assert!((inv.soak(50.0, false) - 30.0).abs() < 1e-3);
+        assert!((inv.soak(100.0, true) - 70.0).abs() < 1e-3);
+        // a worn vest gives up
+        for _ in 0..10 {
+            inv.soak(100.0, false);
+        }
+        assert_eq!(inv.armor, 0);
+        assert_eq!(inv.soak(40.0, false), 40.0);
+    }
+
+    #[test]
+    fn the_backpack_decides_what_fits() {
+        let mut inv = Inventory::default();
+        assert_eq!(inv.add_ammo(AmmoType::Sniper, 100), 25);
+        inv.backpack = 3;
+        assert_eq!(inv.add_ammo(AmmoType::Sniper, 100), 37);
+        assert_eq!(inv.medkit_cap(), 8);
+        assert_eq!(AmmoType::of(WeaponId::M40), AmmoType::Sniper);
+        assert!(AmmoType::Rifle.guns().contains(&"M4A1"));
+    }
+}

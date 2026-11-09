@@ -69,6 +69,11 @@ impl Game {
 
     /// Swaps the player's current weapon for a dropped one.
     pub fn pick_up(&mut self, id: u8, ent: u16) {
+        // battle royale supplies are picked up with the same key
+        if self.mode == toon_shared::Mode::Br && self.br_pick(id, ent) {
+            return;
+        }
+        let br = self.mode == toon_shared::Mode::Br;
         let time = self.time;
         let Some(i) = self.pickups.iter().position(|p| p.id == ent) else {
             return;
@@ -86,12 +91,26 @@ impl Game {
             return;
         }
         // an empty slot is filled first (battle royale: you start with a pistol only)
-        let empty = p.weapons.iter().position(|w| w.mag == 0 && w.reserve == 0);
+        let empty = if br {
+            p.empty_slot.map(|s| s as usize)
+        } else {
+            p.weapons.iter().position(|w| w.mag == 0 && w.reserve == 0)
+        };
+        if br {
+            p.empty_slot = None;
+        }
         if let Some(e) = empty {
             p.slot = e as u8;
         }
         let old = *p.weapon();
         *p.weapon_mut() = pk.w;
+        // battle royale: rounds live in the inventory, not in the guns
+        let old = if br {
+            p.br_refresh_reserve();
+            WState { reserve: 0, ..old }
+        } else {
+            old
+        };
         p.reload_end = None;
         p.switch_end = time + swap as f64;
         p.shot_budget = p.shot_budget.min(1.0);

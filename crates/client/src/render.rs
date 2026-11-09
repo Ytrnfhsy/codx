@@ -401,7 +401,7 @@ pub fn render_world(
                 let target = g.pickup_target.map(|t| t.0) == Some(*id) && kc.is_none();
                 models::add_dropped_gun(&mut m, Vec3::from_array(*pos), *yaw, *weapon, age, target);
             }
-            EntSnap::Loot { id, kind, pos } => models::add_loot(
+            EntSnap::Loot { id, kind, pos, .. } => models::add_loot(
                 &mut m,
                 Vec3::from_array(*pos),
                 *kind,
@@ -978,6 +978,24 @@ pub fn draw_model_gallery(mats: &Materials) {
         let base =
             trs(pos, std::f32::consts::FRAC_PI_2, 0.0, 0.0) * Mat4::from_scale(Vec3::splat(1.7));
         models::add_gun(&mut m, &base, w, 0.012);
+    }
+    // battle royale supplies along the front
+    {
+        use toon_shared::inventory::AmmoType;
+        use toon_shared::protocol::LootKind;
+        let mut kinds: Vec<LootKind> = AmmoType::ALL.iter().map(|a| LootKind::Ammo(*a)).collect();
+        kinds.push(LootKind::Medkit);
+        kinds.push(LootKind::Grenades);
+        for lv in 1..=3 {
+            kinds.push(LootKind::Armor(lv));
+            kinds.push(LootKind::Helmet(lv));
+            kinds.push(LootKind::Backpack(lv));
+        }
+        for (i, k) in kinds.into_iter().enumerate() {
+            let (col, row) = (i % 9, i / 9);
+            let x = 4.6 - col as f32 * 0.8 - row as f32 * 0.4;
+            models::add_loot(&mut m, vec3(x, 2.0 + row as f32 * 0.45, 0.5), k, 0.0);
+        }
     }
     // soldiers of both teams
     let looks = [

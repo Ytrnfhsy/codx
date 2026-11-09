@@ -1,7 +1,7 @@
 //! 2D HUD and in-game menus.
 
 use crate::binds::{key, Action};
-use crate::game::{GameClient, Overlay};
+use crate::game::{GameClient, Overlay, Pick};
 use crate::models::team_color;
 use crate::render::{NameTag, View};
 use crate::settings::Settings;
@@ -9,7 +9,7 @@ use crate::ui::*;
 use macroquad::prelude::*;
 use toon_shared::consts::*;
 use toon_shared::lang::t;
-use toon_shared::protocol::{flags, EntSnap, MatchState};
+use toon_shared::protocol::{flags, EntSnap, LootKind, MatchState};
 use toon_shared::tr;
 use toon_shared::weapons::{Cause, Killstreak, Perk1, Perk2, Perk3, WeaponId};
 use toon_shared::{look_dir, wrap_angle, yaw_of, Mode, Team};
@@ -142,6 +142,7 @@ impl GameClient {
         self.draw_minimap(ui);
         self.draw_score_panel(ui);
         self.draw_br_alerts(ui);
+        self.draw_br_inventory(ui);
         self.draw_killfeed(ui);
         self.draw_chat(ui);
         if self.big_map && self.mode == Mode::Br && self.overlay == Overlay::None {
@@ -153,22 +154,33 @@ impl GameClient {
 
         // dropped weapon prompt
         if self.alive && self.overlay == Overlay::None {
-            if let Some((_, w)) = self.pickup_target {
+            if let Some((_, pick)) = self.pickup_target {
+                let what = pick_label(pick);
                 let text = if self.near_objective() {
                     tr!(
                         "{} — відійди від бомби, щоб підібрати",
                         "{} — step off the bomb to pick it up",
-                        w.def().name
+                        what
                     )
                 } else {
                     tr!(
                         "{} — підібрати {}",
                         "{} — pick up {}",
                         key(Action::Use),
-                        w.def().name
+                        what
                     )
                 };
                 ui.centered(&text, cx, cy + 90.0, 20, TEXT);
+                // which guns take these rounds
+                if let Pick::Loot(LootKind::Ammo(a), _) = pick {
+                    ui.centered(
+                        &tr!("для: {}", "for: {}", a.guns().join(", ")),
+                        cx,
+                        cy + 114.0,
+                        15,
+                        MUTED,
+                    );
+                }
             }
         }
 
@@ -845,7 +857,140 @@ impl GameClient {
             ui.shadowed(t("Здоров'я", "Health"), x + 4.0, y + 66.0, 12, MUTED);
             bar(y + 70.0, self.me.hp / toon_shared::consts::MAX_HEALTH, GOOD);
             ui.shadowed(t("Броня", "Armour"), x + 4.0, y + 94.0, 12, MUTED);
-            bar(y + 96.0, br.armor / 100.0, Color::new(0.4, 0.6, 1.0, 1.0));
+            let vest = toon_shared::inventory::armor_durability(br.inv.armor);
+            bar(
+                y + 96.0,
+                if vest > 0.0 {
+                    br.inv.armor_hp / vest
+                } else {
+                    0.0
+                },
+                Color::new(0.4, 0.6, 1.0, 1.0),
+            );
+        }
+    }
+
+    /// Battle royale: what we carry, bottom left — medkits, vest, helmet, backpack,
+    /// grenades and the rounds of every calibre we have.
+    fn draw_br_inventory(&self, ui: &Ui) {
+        use toon_shared::inventory::{
+            armor_durability, helmet_durability, level_name, AmmoType, MEDKIT_TIME,
+        };
+        let Some(br) = &self.br else { return };
+        if !self.alive || br.in_plane {
+            return;
+        }
+        let inv = &br.inv;
+        let h = screen_height();
+        let (x0, y0) = (16.0, h - 118.0);
+        let s = 60.0;
+        let tile = |k: usize, label: &str, value: &str, fill: f32, c: Color, on: bool| {
+            let x = x0 + k as f32 * (s + 6.0);
+            draw_rectangle(
+                x,
+                y0,
+                s,
+                s,
+                Color::new(0.0, 0.0, 0.0, if on { 0.55 } else { 0.3 }),
+            );
+            if fill > 0.0 {
+                draw_rectangle(x, y0 + s - 5.0, s * fill.clamp(0.0, 1.0), 5.0, c);
+            }
+            let col = if on { TEXT } else { MUTED };
+            let lw = ui.width(label, 12, false);
+            ui.text(label, x + (s - lw) / 2.0, y0 + 15.0, 12, col);
+            let vw = ui.width(value, 20, true);
+            ui.shadowed(
+                value,
+                x + (s - vw) / 2.0,
+                y0 + 40.0,
+                20,
+                if on { c } else { MUTED },
+            );
+        };
+        tile(
+            0,
+            t("Аптечки", "Medkits"),
+            &format!("{}/{}", inv.medkits, inv.medkit_cap()),
+            0.0,
+            Color::new(1.0, 0.4, 0.4, 1.0),
+            inv.medkits > 0,
+        );
+        // the key that uses one
+        let hint = format!("[{}]", key(Action::Heal));
+        let hw = ui.width(&hint, 12, false);
+        ui.text(&hint, x0 + (s - hw) / 2.0, y0 + s - 3.0, 12, MUTED);
+        let blue = Color::new(0.45, 0.65, 1.0, 1.0);
+        tile(
+            1,
+            t("Броня", "Vest"),
+            if inv.armor > 0 {
+                level_name(inv.armor)
+            } else {
+                "—"
+            },
+            if inv.armor > 0 {
+                inv.armor_hp / armor_durability(inv.armor)
+            } else {
+                0.0
+            },
+            blue,
+            inv.armor > 0,
+        );
+        tile(
+            2,
+            t("Шолом", "Helmet"),
+            if inv.helmet > 0 {
+                level_name(inv.helmet)
+            } else {
+                "—"
+            },
+            if inv.helmet > 0 {
+                inv.helmet_hp / helmet_durability(inv.helmet)
+            } else {
+                0.0
+            },
+            blue,
+            inv.helmet > 0,
+        );
+        tile(
+            3,
+            t("Рюкзак", "Pack"),
+            if inv.backpack > 0 {
+                level_name(inv.backpack)
+            } else {
+                "—"
+            },
+            0.0,
+            ACCENT,
+            inv.backpack > 0,
+        );
+        // rounds of every calibre carried
+        let mut x = x0;
+        let y = y0 + s + 18.0;
+        for a in AmmoType::ALL {
+            let n = inv.ammo(a);
+            if n == 0 {
+                continue;
+            }
+            let txt = format!("{} {}", a.short(), n);
+            ui.shadowed(&txt, x, y, 14, TEXT);
+            x += ui.width(&txt, 14, true) + 14.0;
+        }
+        // using a medkit
+        if inv.healing > 0.0 {
+            let (w, hh) = (screen_width(), h);
+            let k = 1.0 - inv.healing / MEDKIT_TIME;
+            let bw = 220.0;
+            draw_rectangle(
+                (w - bw) / 2.0,
+                hh * 0.66,
+                bw,
+                10.0,
+                Color::new(0.0, 0.0, 0.0, 0.6),
+            );
+            draw_rectangle((w - bw) / 2.0, hh * 0.66, bw * k, 10.0, GOOD);
+            ui.centered(t("Аптечка…", "Medkit…"), w / 2.0, hh * 0.66 - 8.0, 16, TEXT);
         }
     }
 
@@ -2425,4 +2570,16 @@ fn draw_bomb_icon(x: f32, y: f32, scale: f32, pulse: f32) {
         2.0,
         ACCENT,
     );
+}
+
+/// What a pick-up prompt calls a thing on the ground.
+fn pick_label(p: Pick) -> String {
+    match p {
+        Pick::Weapon(w) => w.def().name.into(),
+        Pick::Loot(k, n) => match k {
+            LootKind::Ammo(_) | LootKind::Medkit if n > 1 => format!("{} ×{n}", k.name()),
+            LootKind::Armor(_) | LootKind::Helmet(_) if n < 100 => format!("{} ({n}%)", k.name()),
+            _ => k.name(),
+        },
+    }
 }

@@ -56,6 +56,14 @@ pub struct Line {
     pub time: f64,
 }
 
+/// Something on the ground within reach of the use key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Pick {
+    Weapon(WeaponId),
+    /// Battle royale supplies and how many (or per cent left).
+    Loot(LootKind, u16),
+}
+
 pub struct KillLine {
     pub killer: String,
     pub victim: String,
@@ -249,7 +257,7 @@ pub struct GameClient {
     /// Sun shadow map of the current level (rendered on the first frame after a map loads).
     pub shadow: Option<crate::mesh::ShadowMap>,
     /// Dropped weapon we can pick up right now.
-    pub pickup_target: Option<(u16, WeaponId)>,
+    pub pickup_target: Option<(u16, Pick)>,
     next_pickup: f64,
     spawn_time: f64,
 }
@@ -1230,21 +1238,36 @@ impl GameClient {
     }
 
     /// The closest dropped weapon in reach that we don't already carry.
-    fn find_pickup(&self) -> Option<(u16, WeaponId)> {
+    fn find_pickup(&self) -> Option<(u16, Pick)> {
         let me = self.body.pos;
+        let near = |pos: &[f32; 3], r: f32| {
+            let p = Vec3::from_array(*pos);
+            let d = vec2(p.x - me.x, p.z - me.z).length();
+            (d < r && (p.y - me.y).abs() < 1.8).then_some(d)
+        };
+        // (the battle royale's empty second slot holds a placeholder pistol)
+        let empty_slot = self.mode == Mode::Br && self.weapons[1].1 == 0 && self.weapons[1].2 == 0;
         self.ents
             .iter()
             .filter_map(|e| match e {
                 EntSnap::Weapon {
                     id, weapon, pos, ..
                 } => {
-                    let p = Vec3::from_array(*pos);
-                    let d = vec2(p.x - me.x, p.z - me.z).length();
-                    let ok = d < 1.6
-                        && (p.y - me.y).abs() < 1.8
-                        && self.weapons.iter().all(|w| w.0 != *weapon);
-                    ok.then_some((d, *id, *weapon))
+                    let have = self
+                        .weapons
+                        .iter()
+                        .enumerate()
+                        .any(|(k, w)| w.0 == *weapon && !(k == 1 && empty_slot));
+                    near(pos, 1.6)
+                        .filter(|_| !have)
+                        .map(|d| (d, *id, Pick::Weapon(*weapon)))
                 }
+                EntSnap::Loot {
+                    id,
+                    kind,
+                    amount,
+                    pos,
+                } => near(pos, 1.5).map(|d| (d, *id, Pick::Loot(*kind, *amount))),
                 _ => None,
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -1972,6 +1995,9 @@ impl GameClient {
                     self.net.send(C2S::PickUp(ent));
                     self.next_pickup = now + 0.6;
                 }
+            }
+            if self.mode == Mode::Br && pressed(Action::Heal) {
+                self.net.send(C2S::UseMedkit);
             }
             if !shielded && pressed(Action::Killstreak) {
                 match self.me.rewards.last() {

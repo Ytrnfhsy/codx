@@ -35,10 +35,12 @@ pub enum Action {
     ChatTeam,
     Class,
     Leave,
+    /// Battle royale: use a medkit.
+    Heal,
 }
 
 impl Action {
-    pub const ALL: [Action; 23] = [
+    pub const ALL: [Action; 24] = [
         Action::Forward,
         Action::Back,
         Action::Left,
@@ -62,6 +64,7 @@ impl Action {
         Action::ChatTeam,
         Action::Class,
         Action::Leave,
+        Action::Heal,
     ];
 
     pub fn name(self) -> &'static str {
@@ -82,13 +85,14 @@ impl Action {
             Action::Grenade => t("Граната", "Grenade"),
             Action::Smoke => t("Димова граната", "Smoke grenade"),
             Action::Knife => t("Ніж", "Knife"),
-            Action::Use => t("Дія (бомба, зброя)", "Use (bomb, gun)"),
+            Action::Use => t("Дія (бомба, зброя, лут)", "Use (bomb, gun, loot)"),
             Action::Killstreak => t("Кілстрік", "Killstreak"),
             Action::Scoreboard => t("Рахунок", "Scoreboard"),
             Action::ChatAll => t("Чат: всім", "Chat: all"),
             Action::ChatTeam => t("Чат: команді", "Chat: team"),
             Action::Class => t("Змінити клас", "Change class"),
             Action::Leave => t("Вийти з техніки", "Leave vehicle"),
+            Action::Heal => t("Аптечка", "Medkit"),
         }
     }
 
@@ -120,6 +124,7 @@ impl Action {
             Action::ChatTeam => [k(K::Y), Bind::None],
             Action::Class => [k(K::M), Bind::None],
             Action::Leave => [k(K::E), Bind::None],
+            Action::Heal => [k(K::H), Bind::None],
         }
     }
 }

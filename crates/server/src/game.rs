@@ -94,13 +94,47 @@ pub struct Player {
     pub chat_budget: f32,
     /// Battle royale: still riding the plane.
     pub in_plane: bool,
-    /// Battle royale body armour (0..100).
-    pub armor: f32,
+    /// Battle royale: everything carried besides the guns.
+    pub inv: toon_shared::inventory::Inventory,
+    /// Battle royale: each slot's reserve as last matched with the inventory (a reload
+    /// takes rounds out of the reserve, and so out of the inventory).
+    pub ammo_seen: [u16; 2],
+    /// Battle royale: the slot that holds no gun yet (the next one picked up goes there).
+    pub empty_slot: Option<u8>,
     /// Battle royale character.
     pub skin: u8,
 }
 
 impl Player {
+    /// Battle royale: every gun's reserve is the inventory's ammo of its calibre.
+    pub fn br_refresh_reserve(&mut self) {
+        for (k, w) in self.weapons.iter_mut().enumerate() {
+            if self.empty_slot == Some(k as u8) {
+                w.reserve = 0;
+            } else {
+                w.reserve = self.inv.ammo(toon_shared::inventory::AmmoType::of(w.id));
+            }
+            self.ammo_seen[k] = w.reserve;
+        }
+    }
+
+    /// Battle royale: rounds a reload moved from a reserve into a magazine leave the
+    /// inventory too.
+    pub fn br_sync_ammo(&mut self) {
+        for k in 0..2 {
+            let w = self.weapons[k];
+            if self.empty_slot == Some(k as u8) {
+                continue;
+            }
+            let used = self.ammo_seen[k].saturating_sub(w.reserve);
+            if used > 0 {
+                let t = toon_shared::inventory::AmmoType::of(w.id);
+                self.inv.ammo[t.index()] = self.inv.ammo[t.index()].saturating_sub(used);
+            }
+        }
+        self.br_refresh_reserve();
+    }
+
     pub fn new(id: u8, name: String, addr: Option<SocketAddr>, now: f64) -> Player {
         let l = DEFAULT_CLASSES[0].1;
         Player {
@@ -167,7 +201,9 @@ impl Player {
             joined_at: now,
             chat_budget: 5.0,
             in_plane: false,
-            armor: 0.0,
+            inv: Default::default(),
+            ammo_seen: [0; 2],
+            empty_slot: None,
             skin: 0,
         }
     }
@@ -1099,6 +1135,7 @@ impl Game {
             C2S::Melee => self.melee(id),
             C2S::PickUp(ent) => self.pick_up(id, ent),
             C2S::BrJump => self.br_jump(id),
+            C2S::UseMedkit => self.br_use_medkit(id),
             C2S::SetSkin(s) => {
                 if let Some(p) = self.pm(id) {
                     p.skin = s.min(toon_shared::skins::count() - 1);
@@ -1574,7 +1611,7 @@ impl Game {
                     self.update_sab();
                 }
                 if self.mode == Mode::Br {
-                    self.update_br();
+                    self.update_br(dt);
                 }
             }
             MatchState::RoundEnd => {

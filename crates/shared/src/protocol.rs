@@ -95,6 +95,8 @@ pub enum C2S {
     BrJump,
     /// The character the player wants to be in the battle royale (`skins::SKINS`).
     SetSkin(u8),
+    /// Battle royale: use a medkit.
+    UseMedkit,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -228,6 +230,8 @@ pub enum EntSnap {
     Loot {
         id: u16,
         kind: LootKind,
+        /// Rounds, medkits, or per cent left of a vest or helmet.
+        amount: u16,
         pos: V3,
     },
 }
@@ -235,24 +239,31 @@ pub enum EntSnap {
 /// Battle royale supplies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LootKind {
-    /// Ammunition for both carried guns.
-    Ammo,
-    /// Heals 50.
+    /// A box of rounds of one calibre (`amount` rounds).
+    Ammo(crate::inventory::AmmoType),
+    /// `amount` medkits.
     Medkit,
-    /// Body armour: soaks up half the damage until worn out.
-    Armor,
+    /// A vest of a level 1..3 (`amount`: what is left of it, per cent).
+    Armor(u8),
+    /// A helmet of a level 1..3 (`amount`: per cent left).
+    Helmet(u8),
+    /// A backpack of a level 1..3.
+    Backpack(u8),
     /// Two grenades and a smoke.
     Grenades,
 }
 
 impl LootKind {
-    pub fn name(self) -> &'static str {
+    pub fn name(self) -> String {
+        use crate::inventory::level_name;
         use crate::lang::t;
         match self {
-            LootKind::Ammo => t("Набої", "Ammo"),
-            LootKind::Medkit => t("Аптечка", "Medkit"),
-            LootKind::Armor => t("Бронежилет", "Body armour"),
-            LootKind::Grenades => t("Гранати", "Grenades"),
+            LootKind::Ammo(a) => a.name().into(),
+            LootKind::Medkit => t("Аптечка", "Medkit").into(),
+            LootKind::Armor(l) => format!("{} {}", t("Бронежилет", "Vest"), level_name(l)),
+            LootKind::Helmet(l) => format!("{} {}", t("Шолом", "Helmet"), level_name(l)),
+            LootKind::Backpack(l) => format!("{} {}", t("Рюкзак", "Backpack"), level_name(l)),
+            LootKind::Grenades => t("Гранати", "Grenades").into(),
         }
     }
 }
@@ -275,7 +286,8 @@ pub struct BrSnap {
     pub plane: Option<(V3, f32)>,
     /// We are still in the plane (jump to leave it).
     pub in_plane: bool,
-    pub armor: f32,
+    /// What we carry.
+    pub inv: crate::inventory::Inventory,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

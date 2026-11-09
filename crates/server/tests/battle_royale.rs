@@ -7,7 +7,7 @@ use toon_shared::consts::TICK_DT;
 use toon_shared::map::MapId;
 use toon_shared::physics::Chute;
 use toon_shared::protocol::{MatchState, C2S, S2C};
-use toon_shared::weapons::{WeaponClass, DEFAULT_CLASSES};
+use toon_shared::weapons::{Cause, WeaponClass, DEFAULT_CLASSES};
 use toon_shared::{Mode, Team};
 
 #[test]
@@ -33,7 +33,7 @@ fn a_round_of_battle_royale() {
     g.handle(me, C2S::JoinTeam(None));
     g.handle(me, C2S::SetLoadout(DEFAULT_CLASSES[0].1));
 
-    let mut step = |g: &mut Game| {
+    let step = |g: &mut Game| {
         g.tick(TICK_DT);
         g.outbox.clear();
         g.shots.clear();
@@ -195,4 +195,143 @@ fn round_ends_when_the_last_real_player_is_out() {
         MatchState::PostMatch,
         "the bots kept playing on their own"
     );
+}
+
+/// Supplies are picked up with the use key (ammo even for a gun you do not carry),
+/// medkits are kept and used on demand, a vest soaks hits, and a knocked out player
+/// leaves everything they carried on the ground.
+#[test]
+fn inventory_pick_up_heal_and_drop() {
+    use toon_shared::inventory::AmmoType;
+    use toon_shared::protocol::LootKind;
+    let mut cfg = ServerConfig {
+        data_dir: std::env::temp_dir().join("tw-br4").to_string_lossy().into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 2;
+    cfg.br.max_players = 4;
+    let mut g = Game::new(cfg);
+    g.rng = toon_shared::rng::Rng::new(9);
+    g.change_map(MapId::Island, Mode::Br);
+    let me = g
+        .connect(
+            "127.0.0.1:5006".parse().unwrap(),
+            "Гравець",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    let step = |g: &mut Game, secs: f32| {
+        for _ in 0..(secs / TICK_DT).max(1.0) as usize {
+            g.tick(TICK_DT);
+            g.outbox.clear();
+            g.shots.clear();
+        }
+    };
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        step(&mut g, TICK_DT);
+        if g.br.running {
+            break;
+        }
+    }
+    assert!(g.br.running);
+    g.handle(me, C2S::BrJump);
+    // (our client would fly the parachute down: put us on the ground)
+    let ground = {
+        let p = g.p(me).unwrap();
+        let (x, z) = (p.body.pos.x, p.body.pos.z);
+        glam::vec3(x, g.world.ground(x, z).unwrap_or(0.0), z)
+    };
+    {
+        let p = g.pm(me).unwrap();
+        p.body.chute = Chute::None;
+        p.body.pos = ground;
+        p.body.vel = glam::Vec3::ZERO;
+    }
+    let p = g.p(me).unwrap();
+    assert!(p.alive);
+    assert_eq!(p.inv.ammo(AmmoType::Pistol), 15);
+    let at = p.body.pos;
+
+    // put supplies at our feet: walking over them takes nothing, the use key does
+    let put = |g: &mut Game, kind: LootKind, amount: u16| {
+        let id = g.new_ent_id();
+        g.br.loot.push(toon_server::br::Loot {
+            id,
+            kind,
+            amount,
+            pos: at,
+        });
+        id
+    };
+    let sniper = put(&mut g, LootKind::Ammo(AmmoType::Sniper), 10);
+    let kits = put(&mut g, LootKind::Medkit, 3);
+    let vest = put(&mut g, LootKind::Armor(2), 100);
+    step(&mut g, 1.0);
+    assert_eq!(g.p(me).unwrap().inv.ammo(AmmoType::Sniper), 0);
+    for e in [sniper, kits, vest] {
+        g.handle(me, C2S::PickUp(e));
+    }
+    let p = g.p(me).unwrap();
+    assert_eq!(p.inv.ammo(AmmoType::Sniper), 10, "no sniper rifle needed");
+    assert_eq!(p.inv.medkits, 2, "no backpack: two medkits fit");
+    assert_eq!(p.inv.armor, 2);
+    let kit_left = g.br.loot.iter().find(|l| l.id == kits).map(|l| l.amount);
+    assert_eq!(kit_left, Some(1), "what does not fit stays on the ground");
+
+    // a backpack makes room for the third
+    let bag = put(&mut g, LootKind::Backpack(1), 1);
+    g.handle(me, C2S::PickUp(bag));
+    g.handle(me, C2S::PickUp(kits));
+    assert_eq!(g.p(me).unwrap().inv.medkits, 3);
+
+    // the vest takes its share of a hit
+    let hp0 = g.p(me).unwrap().hp;
+    g.damage(me, None, 50.0, Cause::Zone, false, ground);
+    let zone_hit = hp0 - g.p(me).unwrap().hp;
+    assert!((zone_hit - 50.0).abs() < 0.1, "the zone ignores vests");
+    g.pm(me).unwrap().hp = 100.0;
+    g.damage(
+        me,
+        None,
+        50.0,
+        Cause::Weapon(toon_shared::weapons::WeaponId::M4),
+        false,
+        ground,
+    );
+    let hit = 100.0 - g.p(me).unwrap().hp;
+    assert!(
+        (hit - 30.0).abs() < 0.1,
+        "a level II vest takes 40% ({hit})"
+    );
+
+    // the medkit takes three seconds and heals
+    let hp1 = g.p(me).unwrap().hp;
+    g.handle(me, C2S::UseMedkit);
+    step(&mut g, 1.0);
+    assert_eq!(g.p(me).unwrap().hp, hp1, "heals only once it is used up");
+    step(&mut g, 2.5);
+    let p = g.p(me).unwrap();
+    assert!(
+        p.hp > (hp1 + 59.0).min(99.9) && p.inv.medkits == 2,
+        "hp {} kits {}",
+        p.hp,
+        p.inv.medkits
+    );
+
+    // knocked out: everything ends up on the ground around the body
+    let before = g.br.loot.len();
+    g.kill(me, None, Cause::Zone, false);
+    let dropped: Vec<_> = g.br.loot[before..]
+        .iter()
+        .map(|l| (l.kind, l.amount))
+        .collect();
+    assert!(
+        dropped.contains(&(LootKind::Ammo(AmmoType::Sniper), 10)),
+        "{dropped:?}"
+    );
+    assert!(dropped.contains(&(LootKind::Medkit, 2)));
+    assert!(dropped.iter().any(|(k, _)| *k == LootKind::Armor(2)));
+    assert!(dropped.contains(&(LootKind::Backpack(1), 1)));
 }

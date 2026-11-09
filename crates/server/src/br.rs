@@ -6,6 +6,9 @@ use crate::game::{Dest, Game, WState};
 use crate::pickups::Pickup;
 use glam::{vec2, vec3, Vec2, Vec3};
 use toon_shared::consts::MAX_HEALTH;
+use toon_shared::inventory::{
+    armor_durability, helmet_durability, AmmoType, MEDKIT_HEAL, MEDKIT_TIME,
+};
 use toon_shared::lang::t;
 use toon_shared::physics::{Body, Chute, Stance};
 use toon_shared::protocol::{BrSnap, EntSnap, LootKind, MatchState, S2C};
@@ -67,6 +70,8 @@ impl Zone {
 pub struct Loot {
     pub id: u16,
     pub kind: LootKind,
+    /// Rounds, medkits, or per cent left of a vest or helmet.
+    pub amount: u16,
     pub pos: Vec3,
 }
 
@@ -150,7 +155,8 @@ impl Game {
                 pos: start,
                 ..Default::default()
             };
-            p.armor = 0.0;
+            p.inv = Default::default();
+            p.empty_slot = None;
             p.driving = None;
             p.respawn_at = f64::MAX;
             if p.is_bot() {
@@ -246,7 +252,8 @@ impl Game {
             if roll < 0.12 {
                 continue; // nothing here
             }
-            if roll < 0.55 {
+            if roll < 0.5 {
+                // a gun with a loaded magazine, and a box of its rounds beside it
                 let w = self.br_random_weapon();
                 let mag = self.tuning.weapon(w).mag;
                 let id = self.new_ent_id();
@@ -256,21 +263,44 @@ impl Game {
                     w: WState {
                         id: w,
                         mag,
-                        reserve: mag,
+                        reserve: 0,
                     },
                     pos,
                     yaw,
                     expire: f64::INFINITY,
                 });
+                let t = AmmoType::of(w);
+                let id = self.new_ent_id();
+                self.br.loot.push(Loot {
+                    id,
+                    kind: LootKind::Ammo(t),
+                    amount: t.box_size() * 2,
+                    pos: pos + vec3(0.7, 0.0, 0.2),
+                });
             } else {
-                let kind = match self.rng.f32() {
-                    k if k < 0.4 => LootKind::Ammo,
-                    k if k < 0.68 => LootKind::Medkit,
-                    k if k < 0.85 => LootKind::Armor,
-                    _ => LootKind::Grenades,
+                let level = |rng: &mut toon_shared::rng::Rng| match rng.f32() {
+                    k if k < 0.6 => 1,
+                    k if k < 0.9 => 2,
+                    _ => 3,
+                };
+                let (kind, amount) = match self.rng.f32() {
+                    k if k < 0.36 => {
+                        let t = AmmoType::ALL[self.rng.below(AmmoType::ALL.len())];
+                        (LootKind::Ammo(t), t.box_size())
+                    }
+                    k if k < 0.56 => (LootKind::Medkit, 1 + self.rng.chance(0.25) as u16),
+                    k if k < 0.7 => (LootKind::Armor(level(&mut self.rng)), 100),
+                    k if k < 0.82 => (LootKind::Helmet(level(&mut self.rng)), 100),
+                    k if k < 0.92 => (LootKind::Backpack(level(&mut self.rng)), 1),
+                    _ => (LootKind::Grenades, 1),
                 };
                 let id = self.new_ent_id();
-                self.br.loot.push(Loot { id, kind, pos });
+                self.br.loot.push(Loot {
+                    id,
+                    kind,
+                    amount,
+                    pos,
+                });
             }
         }
     }
@@ -333,7 +363,9 @@ impl Game {
         p.in_plane = false;
         p.alive = true;
         p.hp = MAX_HEALTH;
-        p.armor = 0.0;
+        p.inv = Default::default();
+        p.inv.ammo[AmmoType::Pistol.index()] = 15;
+        p.empty_slot = Some(1);
         p.body = Body {
             pos,
             vel: p.body.vel,
@@ -388,7 +420,7 @@ impl Game {
     }
 
     /// Plane, zone, supplies and the end of the round; called every tick while playing.
-    pub fn update_br(&mut self) {
+    pub fn update_br(&mut self, dt: f32) {
         if !self.br.running || self.state != MatchState::Playing {
             return;
         }
@@ -443,7 +475,23 @@ impl Game {
                 self.damage(id, None, zone.dps, Cause::Zone, false, pos);
             }
         }
-        self.br_take_loot();
+        // medkits being used; reserves following the inventory
+        for p in self.players.iter_mut().flatten() {
+            if !p.alive {
+                continue;
+            }
+            if p.inv.healing > 0.0 {
+                p.inv.healing -= dt;
+                if p.inv.healing <= 0.0 {
+                    p.inv.healing = 0.0;
+                    if p.inv.medkits > 0 {
+                        p.inv.medkits -= 1;
+                        p.hp = (p.hp + MEDKIT_HEAL).min(MAX_HEALTH);
+                    }
+                }
+            }
+            p.br_sync_ammo();
+        }
         // no real player left in the round: nobody needs to watch the bots play it out
         let humans_in = self
             .players
@@ -479,70 +527,177 @@ impl Game {
         }
     }
 
-    /// Walking over supplies takes them (when they are any use).
-    fn br_take_loot(&mut self) {
-        if self.br.loot.is_empty() {
+    /// Picks up battle royale supplies with the use key (returns false if `ent` is not
+    /// supplies). What does not fit stays on the ground; a better vest, helmet or
+    /// backpack is put on and the old one is left in its place.
+    pub fn br_pick(&mut self, id: u8, ent: u16) -> bool {
+        let Some(i) = self.br.loot.iter().position(|l| l.id == ent) else {
+            return false;
+        };
+        let l = self.br.loot[i];
+        let Some(p) = self.players[id as usize].as_mut() else {
+            return true;
+        };
+        let d = l.pos - p.body.pos;
+        if !p.alive || vec3(d.x, 0.0, d.z).length() > LOOT_RADIUS + 0.6 || d.y.abs() > 2.0 {
+            return true;
+        }
+        let mut left = l.amount;
+        // what it swaps out (dropped where the new one lay)
+        let mut swapped: Option<(LootKind, u16)> = None;
+        match l.kind {
+            LootKind::Ammo(t) => {
+                left -= p.inv.add_ammo(t, l.amount);
+                p.br_refresh_reserve();
+            }
+            LootKind::Medkit => {
+                let room = p.inv.medkit_cap().saturating_sub(p.inv.medkits) as u16;
+                let take = room.min(l.amount);
+                p.inv.medkits += take as u8;
+                left -= take;
+            }
+            LootKind::Armor(lv) => {
+                let hp = armor_durability(lv) * l.amount as f32 / 100.0;
+                if lv > p.inv.armor || lv == p.inv.armor && hp > p.inv.armor_hp + 1.0 {
+                    if p.inv.armor > 0 {
+                        let pct = (p.inv.armor_hp / armor_durability(p.inv.armor) * 100.0) as u16;
+                        swapped = Some((LootKind::Armor(p.inv.armor), pct.max(1)));
+                    }
+                    p.inv.armor = lv;
+                    p.inv.armor_hp = hp;
+                    left = 0;
+                }
+            }
+            LootKind::Helmet(lv) => {
+                let hp = helmet_durability(lv) * l.amount as f32 / 100.0;
+                if lv > p.inv.helmet || lv == p.inv.helmet && hp > p.inv.helmet_hp + 1.0 {
+                    if p.inv.helmet > 0 {
+                        let pct =
+                            (p.inv.helmet_hp / helmet_durability(p.inv.helmet) * 100.0) as u16;
+                        swapped = Some((LootKind::Helmet(p.inv.helmet), pct.max(1)));
+                    }
+                    p.inv.helmet = lv;
+                    p.inv.helmet_hp = hp;
+                    left = 0;
+                }
+            }
+            LootKind::Backpack(lv) => {
+                if lv > p.inv.backpack {
+                    if p.inv.backpack > 0 {
+                        swapped = Some((LootKind::Backpack(p.inv.backpack), 1));
+                    }
+                    p.inv.backpack = lv;
+                    left = 0;
+                }
+            }
+            LootKind::Grenades => {
+                let cap = p.inv.grenade_cap();
+                if p.grenades < cap || p.smokes < 2 {
+                    p.grenades = (p.grenades + 2).min(cap);
+                    p.smokes = (p.smokes + 1).min(2);
+                    left = 0;
+                }
+            }
+        }
+        let human = !p.is_bot();
+        let gear = matches!(
+            l.kind,
+            LootKind::Armor(_) | LootKind::Helmet(_) | LootKind::Backpack(_)
+        );
+        let taken = left < l.amount || swapped.is_some() || left == 0;
+        if left == 0 {
+            self.br.loot.remove(i);
+        } else {
+            self.br.loot[i].amount = left;
+        }
+        if let Some((kind, amount)) = swapped {
+            let id2 = self.new_ent_id();
+            self.br.loot.push(Loot {
+                id: id2,
+                kind,
+                amount,
+                pos: l.pos,
+            });
+        }
+        if human {
+            let name = l.kind.name();
+            self.say(Dest::One(id), || S2C::Center {
+                text: if taken {
+                    tr!("Підібрано: {name}", "Picked up: {name}")
+                } else if gear {
+                    t("На тобі вже не гірше", "What you wear is no worse").into()
+                } else {
+                    t(
+                        "Більше не влазить — потрібен більший рюкзак",
+                        "No room — get a bigger backpack",
+                    )
+                    .into()
+                },
+                secs: 1.2,
+            });
+        }
+        true
+    }
+
+    /// Starts using a medkit (it takes a few seconds; shooting puts it away).
+    pub fn br_use_medkit(&mut self, id: u8) {
+        if self.mode != Mode::Br {
             return;
         }
-        let mut taken = Vec::new();
-        let mut notes = Vec::new();
-        let tuning = &self.tuning;
-        for p in self.players.iter_mut().flatten() {
-            if !p.alive || p.body.chute != Chute::None {
-                continue;
-            }
-            for l in &self.br.loot {
-                if taken.contains(&l.id) {
-                    continue;
-                }
-                let d = l.pos - p.body.pos;
-                if vec3(d.x, 0.0, d.z).length() > LOOT_RADIUS || d.y.abs() > 2.0 {
-                    continue;
-                }
-                let used = match l.kind {
-                    LootKind::Medkit if p.hp < MAX_HEALTH => {
-                        p.hp = (p.hp + 50.0).min(MAX_HEALTH);
-                        true
-                    }
-                    LootKind::Armor if p.armor < 100.0 => {
-                        p.armor = 100.0;
-                        true
-                    }
-                    LootKind::Grenades if p.grenades < 4 || p.smokes < 2 => {
-                        p.grenades = (p.grenades + 2).min(4);
-                        p.smokes = (p.smokes + 1).min(2);
-                        true
-                    }
-                    LootKind::Ammo => {
-                        let mut any = false;
-                        for w in p.weapons.iter_mut() {
-                            if w.mag == 0 && w.reserve == 0 && w.id == WeaponId::Usp {
-                                continue; // the empty second slot
-                            }
-                            let mag = tuning.weapon(w.id).mag;
-                            let cap = mag * 6;
-                            if w.reserve < cap {
-                                w.reserve = (w.reserve + mag * 2).min(cap);
-                                any = true;
-                            }
-                        }
-                        any
-                    }
-                    _ => false,
-                };
-                if used {
-                    taken.push(l.id);
-                    if !p.is_bot() {
-                        notes.push((p.id, l.kind));
-                    }
-                }
+        let Some(p) = self.pm(id) else { return };
+        if p.alive && p.inv.medkits > 0 && p.inv.healing <= 0.0 && p.hp < MAX_HEALTH {
+            p.inv.healing = MEDKIT_TIME;
+        }
+    }
+
+    /// Everything a knocked out player carried goes on the ground around them.
+    fn br_drop_inventory(&mut self, victim: u8) {
+        let Some(v) = self.pm(victim) else { return };
+        let inv = std::mem::take(&mut v.inv);
+        let (grenades, smokes) = (
+            std::mem::take(&mut v.grenades),
+            std::mem::take(&mut v.smokes),
+        );
+        let pos = v.body.pos;
+        let mut items: Vec<(LootKind, u16)> = Vec::new();
+        for t in AmmoType::ALL {
+            if inv.ammo(t) > 0 {
+                items.push((LootKind::Ammo(t), inv.ammo(t)));
             }
         }
-        self.br.loot.retain(|l| !taken.contains(&l.id));
-        for (id, kind) in notes {
-            self.say(Dest::One(id), || S2C::Center {
-                text: tr!("Підібрано: {}", "Picked up: {}", kind.name()),
-                secs: 1.2,
+        if inv.medkits > 0 {
+            items.push((LootKind::Medkit, inv.medkits as u16));
+        }
+        if inv.armor > 0 {
+            let pct = (inv.armor_hp / armor_durability(inv.armor) * 100.0) as u16;
+            items.push((LootKind::Armor(inv.armor), pct.max(1)));
+        }
+        if inv.helmet > 0 {
+            let pct = (inv.helmet_hp / helmet_durability(inv.helmet) * 100.0) as u16;
+            items.push((LootKind::Helmet(inv.helmet), pct.max(1)));
+        }
+        if inv.backpack > 0 {
+            items.push((LootKind::Backpack(inv.backpack), 1));
+        }
+        if grenades > 0 || smokes > 0 {
+            items.push((LootKind::Grenades, 1));
+        }
+        let n = items.len().max(1) as f32;
+        for (k, (kind, amount)) in items.into_iter().enumerate() {
+            // in a small ring round the body
+            let a = k as f32 / n * std::f32::consts::TAU;
+            let at = pos + vec3(a.cos() * 0.9, 0.3, a.sin() * 0.9);
+            let floor = self
+                .world
+                .floor_below(at, 3.0)
+                .or_else(|| self.world.ground(at.x, at.z))
+                .unwrap_or(pos.y);
+            let id = self.new_ent_id();
+            self.br.loot.push(Loot {
+                id,
+                kind,
+                amount,
+                pos: vec3(at.x, floor, at.z),
             });
         }
     }
@@ -552,6 +707,7 @@ impl Game {
         if !self.br.running {
             return;
         }
+        self.br_drop_inventory(victim);
         let place = self.br_alive() + 1;
         self.say(Dest::One(victim), || S2C::Center {
             text: tr!("Ти вибув! Місце #{place}", "You are out! Place #{place}"),
@@ -595,7 +751,7 @@ impl Game {
                 )
             }),
             in_plane: me.is_some_and(|p| p.in_plane),
-            armor: me.map(|p| p.armor).unwrap_or(0.0),
+            inv: me.map(|p| p.inv).unwrap_or_default(),
         })
     }
 
@@ -603,6 +759,7 @@ impl Game {
         self.br.loot.iter().map(|l| EntSnap::Loot {
             id: l.id,
             kind: l.kind,
+            amount: l.amount,
             pos: l.pos.to_array(),
         })
     }
@@ -639,7 +796,8 @@ impl Game {
         let armed = me.weapons.iter().any(|w| {
             w.id.def().class != toon_shared::weapons::WeaponClass::Pistol && w.mag + w.reserve > 0
         });
-        let (hp, armor) = (me.hp, me.armor);
+        let (hp, inv) = (me.hp, me.inv);
+        let carried: Vec<AmmoType> = me.weapons.iter().map(|w| AmmoType::of(w.id)).collect();
         let have: Vec<WeaponId> = me
             .weapons
             .iter()
@@ -684,22 +842,34 @@ impl Game {
             }
         }
         if !skydiving {
+            // a medkit when hurt (and not using one already)
+            if hp < 70.0 && inv.medkits > 0 && inv.healing <= 0.0 {
+                self.br_use_medkit(id);
+            }
             let want = |k: LootKind| match k {
-                LootKind::Medkit => hp < 75.0,
-                LootKind::Armor => armor < 40.0,
-                LootKind::Ammo => low_ammo,
+                LootKind::Medkit => inv.medkits < inv.medkit_cap(),
+                LootKind::Armor(l) => l > inv.armor,
+                LootKind::Helmet(l) => l > inv.helmet,
+                LootKind::Backpack(l) => l > inv.backpack,
+                LootKind::Ammo(t) => {
+                    carried.contains(&t) && inv.ammo(t) < inv.ammo_cap(t) / 2 && low_ammo
+                        || carried.contains(&t) && inv.ammo(t) < t.box_size() * 2
+                }
                 LootKind::Grenades => false,
             };
-            let mut cands: Vec<Vec3> = self
+            let mut cands: Vec<(u16, Vec3)> = self
                 .br
                 .loot
                 .iter()
                 .filter(|l| want(l.kind) && near(l.pos) < 45.0)
-                .map(|l| l.pos)
+                .map(|l| (l.id, l.pos))
                 .collect();
-            cands.sort_by(|a, b| near(*a).total_cmp(&near(*b)));
-            let best = cands.into_iter().take(4).find(|at| self.reachable(*at));
-            if let Some(at) = best {
+            cands.sort_by(|a, b| near(a.1).total_cmp(&near(b.1)));
+            let best = cands.into_iter().take(4).find(|c| self.reachable(c.1));
+            if let Some((ent, at)) = best {
+                if near(at) < LOOT_RADIUS && (at.y - pos.y).abs() < 1.8 {
+                    self.br_pick(id, ent);
+                }
                 return (Some(at), false, false);
             }
         }
@@ -749,7 +919,8 @@ impl Game {
             pos,
             ..Default::default()
         };
-        p.armor = 0.0;
+        p.inv = Default::default();
+        p.empty_slot = None;
         p.respawn_at = f64::MAX;
         if let Some(b) = p.bot.as_mut() {
             b.br_jump_at = jump;
