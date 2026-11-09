@@ -1972,9 +1972,11 @@ impl Game {
                 EntSnap::Grenade { pos, .. }
                 | EntSnap::Smoke { pos, .. }
                 | EntSnap::Vehicle { pos, .. }
-                | EntSnap::Drop { pos, .. }
-                | EntSnap::Weapon { pos, .. }
-                | EntSnap::Loot { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
+                | EntSnap::Drop { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
+                // small things on the ground: a few pixels at most from further away
+                EntSnap::Weapon { pos, .. } | EntSnap::Loot { pos, .. } => {
+                    near(Vec3::from_array(*pos), LOOT_RANGE)
+                }
             });
         }
         // gunshots carry further than you can see

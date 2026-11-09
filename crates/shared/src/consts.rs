@@ -38,6 +38,8 @@ pub const QUERY_REPLY_MAGIC: &[u8; 4] = b"TWQ!";
 pub const MAX_PLAYERS: usize = 64;
 /// On big maps a player is told only about what is this close (m); the fog ends sooner.
 pub const INTEREST_RANGE: f32 = 400.0;
+/// Guns and supplies on the ground are sent this far (big maps).
+pub const LOOT_RANGE: f32 = 150.0;
 
 pub const PLAYER_RADIUS: f32 = 0.35;
 pub const STAND_HEIGHT: f32 = 1.9;

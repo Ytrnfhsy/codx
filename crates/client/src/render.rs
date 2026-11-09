@@ -39,6 +39,9 @@ pub struct Actor {
 }
 
 /// Everything the first-person weapon animation needs.
+/// Guns and supplies on the ground are drawn this far.
+const LOOT_DRAW: f32 = 80.0;
+
 pub struct VmState {
     pub weapon: WeaponId,
     /// Battle royale sight on it (0 = none).
@@ -338,9 +341,15 @@ pub fn render_world(
         Some(k) => k.bomb.as_ref(),
         None => g.bomb.as_ref(),
     };
-    // entities
+    // entities (guns and supplies on the ground only near enough to make out)
+    let cam = g.camera().0;
+    let far = |p: &[f32; 3]| {
+        let d = Vec3::from_array(*p) - cam;
+        d.x * d.x + d.z * d.z > LOOT_DRAW * LOOT_DRAW
+    };
     for e in ents {
         match e {
+            EntSnap::Weapon { pos, .. } | EntSnap::Loot { pos, .. } if far(pos) => {}
             EntSnap::Grenade { id, pos, smoke } => {
                 let t = now as f32 + *id as f32;
                 if *smoke {
