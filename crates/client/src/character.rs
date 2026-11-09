@@ -462,7 +462,12 @@ mod tests {
     fn characters_load() {
         let r = rig();
         assert_eq!(r.clips.len(), clip::NAMES.len());
-        assert_eq!(r.models.len(), 2);
+        // the two soldiers and every battle royale character
+        assert_eq!(r.models.len(), 2 + toon_shared::skins::count() as usize - 1);
+        for k in 1..toon_shared::skins::count() {
+            let name = toon_shared::skins::model(k).unwrap();
+            assert!(r.models.iter().any(|m| m.name == name), "{name} missing");
+        }
         // clip bone lengths agree with the bind pose the meshes were skinned in
         let local = r.sample(clip::IDLE, 0.0, true);
         for i in [
