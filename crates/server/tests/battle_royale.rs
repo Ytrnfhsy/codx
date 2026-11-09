@@ -108,7 +108,11 @@ fn a_round_of_battle_royale() {
     eprintln!("result: {winner:?} at zone phase {}", g.br.zone.phase);
     assert_eq!(g.state, MatchState::PostMatch, "the round never ended");
     assert!(winner.is_some());
-    assert!(g.br_alive() <= 1);
+    // either one survivor, or the round stopped once our player was out
+    assert!(
+        g.br_alive() <= 1 || winner.as_deref().is_some_and(|w| w.contains("вибули")),
+        "{winner:?}"
+    );
 }
 
 /// The battle royale's player limit and bots are its own: after a round of it the team
@@ -152,4 +156,43 @@ fn battle_royale_keeps_its_own_player_count() {
     let n = g.players.iter().flatten().count();
     assert!(n <= 12, "{n} players left in team deathmatch (limit 12)");
     assert_eq!(n, 6, "team deathmatch should fill to its own 6");
+}
+
+/// Once every real player is out, the bots do not play the round out on their own.
+#[test]
+fn round_ends_when_the_last_real_player_is_out() {
+    let mut cfg = ServerConfig {
+        data_dir: std::env::temp_dir().join("tw-br3").to_string_lossy().into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 12;
+    cfg.br.max_players = 12;
+    let mut g = Game::new(cfg);
+    g.rng = toon_shared::rng::Rng::new(5);
+    g.change_map(MapId::Island, Mode::Br);
+    let me = g
+        .connect(
+            "127.0.0.1:5005".parse().unwrap(),
+            "Гравець",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    for _ in 0..(40.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+        if g.br.running && g.p(me).is_some_and(|p| p.in_plane) {
+            g.handle(me, C2S::BrJump);
+        }
+    }
+    assert!(g.br.running && g.br_alive() > 3);
+    g.kill(me, None, toon_shared::weapons::Cause::Zone, false);
+    g.tick(TICK_DT);
+    assert_eq!(
+        g.state,
+        MatchState::PostMatch,
+        "the bots kept playing on their own"
+    );
 }

@@ -336,9 +336,14 @@ async fn amain(args: Args) {
                 cfg.max_players = cfg.max_players.max(n);
             }
         }
-        cfg.rotation.retain(|r| !(r.map == map && r.mode == mode));
-        cfg.rotation
-            .insert(0, toon_server::config::RotationEntry { map, mode });
+        if toon_shared::Mode::parse(&mode) == Some(toon_shared::Mode::Br) {
+            // a battle royale server plays round after round of it
+            cfg.rotation = vec![toon_server::config::RotationEntry { map, mode }];
+        } else {
+            cfg.rotation.retain(|r| !(r.map == map && r.mode == mode));
+            cfg.rotation
+                .insert(0, toon_server::config::RotationEntry { map, mode });
+        }
         toon_server::start(cfg, None)
     };
 

@@ -444,6 +444,23 @@ impl Game {
             }
         }
         self.br_take_loot();
+        // no real player left in the round: nobody needs to watch the bots play it out
+        let humans_in = self
+            .players
+            .iter()
+            .flatten()
+            .any(|p| !p.is_bot() && p.team.is_playing() && (p.alive || p.in_plane));
+        if !humans_in {
+            self.br.running = false;
+            self.end_match_text(|| {
+                t(
+                    "Усі гравці вибули — раунд завершено",
+                    "Every player is out — round over",
+                )
+                .into()
+            });
+            return;
+        }
         // the end
         let alive = self.br_alive();
         if alive <= 1 && (self.br.entrants >= 2 || alive == 0) {
