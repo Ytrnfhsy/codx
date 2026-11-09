@@ -349,11 +349,13 @@ impl Game {
         let walk_speed = self.tuning.movement.walk_speed;
         // how far it looks: as far as its best loaded gun reaches (a sniper scans the hills)
         let ballistic = Ballistics::of(weapon);
+        // (a scope lets it pick out targets further away)
         let reach = me
             .weapons
             .iter()
-            .filter(|w| w.mag + w.reserve > 0)
-            .map(|w| Ballistics::of(w.id).engage)
+            .zip(me.inv.sights)
+            .filter(|(w, _)| w.mag + w.reserve > 0)
+            .map(|(w, s)| Ballistics::of(w.id).engage * (1.0 + 0.08 * s as f32))
             .fold(ballistic.engage, f32::max);
         let sight = sk.max_sight.max(reach * lerp(0.7, 1.0, skill));
 

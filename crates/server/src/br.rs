@@ -7,7 +7,7 @@ use crate::pickups::Pickup;
 use glam::{vec2, vec3, Vec2, Vec3};
 use toon_shared::consts::MAX_HEALTH;
 use toon_shared::inventory::{
-    armor_durability, helmet_durability, AmmoType, MEDKIT_HEAL, MEDKIT_TIME,
+    armor_durability, helmet_durability, sight_fits, AmmoType, MEDKIT_HEAL, MEDKIT_TIME,
 };
 use toon_shared::lang::t;
 use toon_shared::physics::{Body, Chute, Stance};
@@ -374,14 +374,24 @@ impl Game {
                     _ => 3,
                 };
                 let (kind, amount) = match self.rng.f32() {
-                    k if k < 0.36 => {
+                    k if k < 0.33 => {
                         let t = AmmoType::ALL[self.rng.below(AmmoType::ALL.len())];
                         (LootKind::Ammo(t), t.box_size())
                     }
-                    k if k < 0.56 => (LootKind::Medkit, 1 + self.rng.chance(0.25) as u16),
-                    k if k < 0.7 => (LootKind::Armor(level(&mut self.rng)), 100),
-                    k if k < 0.82 => (LootKind::Helmet(level(&mut self.rng)), 100),
-                    k if k < 0.92 => (LootKind::Backpack(level(&mut self.rng)), 1),
+                    k if k < 0.51 => (LootKind::Medkit, 1 + self.rng.chance(0.25) as u16),
+                    k if k < 0.64 => (LootKind::Armor(level(&mut self.rng)), 100),
+                    k if k < 0.75 => (LootKind::Helmet(level(&mut self.rng)), 100),
+                    k if k < 0.84 => (LootKind::Backpack(level(&mut self.rng)), 1),
+                    // sights: red dots and 2× common, 8× rare
+                    k if k < 0.94 => {
+                        let l = match self.rng.f32() {
+                            r if r < 0.35 => 1,
+                            r if r < 0.65 => 2,
+                            r if r < 0.9 => 3,
+                            _ => 4,
+                        };
+                        (LootKind::Sight(l), 1)
+                    }
                     _ => (LootKind::Grenades, 1),
                 };
                 let id = self.new_ent_id();
@@ -680,6 +690,23 @@ impl Game {
                     left = 0;
                 }
             }
+            LootKind::Sight(lv) => {
+                // on the gun in hand if it fits and is better, otherwise on the other one
+                let slot = p.slot as usize;
+                let fits = |k: usize| {
+                    let w = p.weapons[k];
+                    (w.mag + w.reserve > 0 || Some(k as u8) != p.empty_slot)
+                        && sight_fits(lv, w.id)
+                        && lv > p.inv.sights[k]
+                };
+                if let Some(k) = [slot, 1 - slot].into_iter().find(|k| fits(*k)) {
+                    if p.inv.sights[k] > 0 {
+                        swapped = Some((LootKind::Sight(p.inv.sights[k]), 1));
+                    }
+                    p.inv.sights[k] = lv;
+                    left = 0;
+                }
+            }
             LootKind::Grenades => {
                 let cap = p.inv.grenade_cap();
                 if p.grenades < cap || p.smokes < 2 {
@@ -692,7 +719,7 @@ impl Game {
         let human = !p.is_bot();
         let gear = matches!(
             l.kind,
-            LootKind::Armor(_) | LootKind::Helmet(_) | LootKind::Backpack(_)
+            LootKind::Armor(_) | LootKind::Helmet(_) | LootKind::Backpack(_) | LootKind::Sight(_)
         );
         let taken = left < l.amount || swapped.is_some() || left == 0;
         if left == 0 {
@@ -715,7 +742,15 @@ impl Game {
                 text: if taken {
                     tr!("Підібрано: {name}", "Picked up: {name}")
                 } else if gear {
-                    t("На тобі вже не гірше", "What you wear is no worse").into()
+                    if matches!(l.kind, LootKind::Sight(_)) {
+                        t(
+                            "Не підходить або вже є не гірший",
+                            "Does not fit, or yours is no worse",
+                        )
+                    } else {
+                        t("На тобі вже не гірше", "What you wear is no worse")
+                    }
+                    .into()
                 } else {
                     t(
                         "Більше не влазить — потрібен більший рюкзак",
@@ -772,6 +807,11 @@ impl Game {
         if grenades > 0 || smokes > 0 {
             items.push((LootKind::Grenades, 1));
         }
+        for l in inv.sights {
+            if l > 0 {
+                items.push((LootKind::Sight(l), 1));
+            }
+        }
         let n = items.len().max(1) as f32;
         for (k, (kind, amount)) in items.into_iter().enumerate() {
             // in a small ring round the body
@@ -790,6 +830,22 @@ impl Game {
                 pos: vec3(at.x, floor, at.z),
             });
         }
+    }
+
+    /// Puts supplies on the floor at `pos`.
+    pub fn br_drop_loot(&mut self, kind: LootKind, amount: u16, pos: Vec3) {
+        let floor = self
+            .world
+            .floor_below(pos + vec3(0.0, 0.3, 0.0), 3.0)
+            .or_else(|| self.world.ground(pos.x, pos.z))
+            .unwrap_or(pos.y);
+        let id = self.new_ent_id();
+        self.br.loot.push(Loot {
+            id,
+            kind,
+            amount,
+            pos: vec3(pos.x, floor, pos.z),
+        });
     }
 
     /// A player is out: tell them their place.
@@ -895,6 +951,7 @@ impl Game {
         });
         let (hp, inv) = (me.hp, me.inv);
         let carried: Vec<AmmoType> = me.weapons.iter().map(|w| AmmoType::of(w.id)).collect();
+        let have_ids: Vec<WeaponId> = me.weapons.iter().map(|w| w.id).collect();
         let have: Vec<WeaponId> = me
             .weapons
             .iter()
@@ -953,6 +1010,13 @@ impl Game {
                         || carried.contains(&t) && inv.ammo(t) < t.box_size() * 2
                 }
                 LootKind::Grenades => false,
+                LootKind::Sight(l) => (0..2).any(|k| {
+                    have_ids.get(k).is_some_and(|w| {
+                        w.def().class != toon_shared::weapons::WeaponClass::Pistol
+                            && sight_fits(l, *w)
+                            && l > inv.sights[k]
+                    })
+                }),
             };
             let mut cands: Vec<(u16, Vec3)> = self
                 .br

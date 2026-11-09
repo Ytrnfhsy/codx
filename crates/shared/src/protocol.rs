@@ -251,6 +251,8 @@ pub enum LootKind {
     Backpack(u8),
     /// Two grenades and a smoke.
     Grenades,
+    /// A sight for a gun (level 1..4: red dot, 2×, 4×, 8×).
+    Sight(u8),
 }
 
 impl LootKind {
@@ -264,6 +266,7 @@ impl LootKind {
             LootKind::Helmet(l) => format!("{} {}", t("Шолом", "Helmet"), level_name(l)),
             LootKind::Backpack(l) => format!("{} {}", t("Рюкзак", "Backpack"), level_name(l)),
             LootKind::Grenades => t("Гранати", "Grenades").into(),
+            LootKind::Sight(l) => crate::inventory::sight_name(l).into(),
         }
     }
 }

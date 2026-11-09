@@ -1343,6 +1343,7 @@ impl GameClient {
     pub fn vm_state(&self) -> VmState {
         let now = self.now;
         VmState {
+            sight: self.sight(),
             weapon: self.weapon(),
             sleeve: self.vm_colors(self.my_id, self.team).0,
             hand: self.vm_colors(self.my_id, self.team).1,
@@ -1395,7 +1396,25 @@ impl GameClient {
     }
 
     pub fn scoped(&self) -> bool {
-        self.weapon().def().scoped && self.ads_t > 0.85
+        (self.weapon().def().scoped || self.sight() >= 2) && self.ads_t > 0.85
+    }
+
+    /// Battle royale sight on the gun in hand (0 = iron sights).
+    pub fn sight(&self) -> u8 {
+        let Some(br) = &self.br else { return 0 };
+        let l = br.inv.sights[self.slot as usize & 1];
+        if toon_shared::inventory::sight_fits(l, self.weapon()) {
+            l
+        } else {
+            0
+        }
+    }
+
+    /// Magnification when aiming: the gun's own, or its sight's if that is stronger.
+    pub fn ads_zoom(&self) -> f32 {
+        self.ws()
+            .ads_zoom
+            .max(toon_shared::inventory::sight_zoom(self.sight()))
     }
 
     /// Spawn protection active (and not given up yet).
@@ -1415,12 +1434,20 @@ impl GameClient {
             return Vec2::ZERO;
         }
         let scoped = self.weapon().def().scoped;
+        // a stronger sight shows the sway more
+        let magnified = scoped || self.sight() >= 2;
         let stance = match self.body.stance {
             Stance::Stand => 1.0,
             Stance::Crouch => 0.7,
             Stance::Prone => 0.4,
         };
-        let base = if scoped { 0.007 } else { 0.0018 };
+        let base = if scoped {
+            0.007
+        } else if magnified {
+            0.0018 + 0.0012 * self.ads_zoom()
+        } else {
+            0.0018
+        };
         let k = base * self.ws().sway * stance * if scoped { self.steady } else { 1.0 };
         let t = self.now as f32;
         vec2(
@@ -1622,7 +1649,7 @@ impl GameClient {
         if playing_input && self.piloting.is_some() {
             self.pilot_look(md, settings.sensitivity * 0.0011, settings.invert_y);
         } else if playing_input {
-            let zoom = 1.0 + (self.ws().ads_zoom - 1.0) * self.ads_t;
+            let zoom = 1.0 + (self.ads_zoom() - 1.0) * self.ads_t;
             let sens = settings.sensitivity * 0.0011 / zoom;
             self.yaw -= md.x * sens;
             let dy = md.y * sens * if settings.invert_y { -1.0 } else { 1.0 };

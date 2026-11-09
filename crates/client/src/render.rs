@@ -41,6 +41,8 @@ pub struct Actor {
 /// Everything the first-person weapon animation needs.
 pub struct VmState {
     pub weapon: WeaponId,
+    /// Battle royale sight on it (0 = none).
+    pub sight: u8,
     /// Sleeve and hand colours.
     pub sleeve: [u8; 3],
     pub hand: [u8; 3],
@@ -146,8 +148,12 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
             g.alive && g.piloting.is_none(),
         ),
     };
-    let zoom = 1.0 + (g.tuning.weapon(weapon).ads_zoom - 1.0) * ads;
-    let zoom = if weapon.def().scoped && !scoped {
+    let full = match &g.killcam {
+        Some(_) => g.tuning.weapon(weapon).ads_zoom,
+        None => g.ads_zoom(),
+    };
+    let zoom = 1.0 + (full - 1.0) * ads;
+    let zoom = if (weapon.def().scoped || g.killcam.is_none() && g.sight() >= 2) && !scoped {
         1.0 + (zoom - 1.0) * 0.25
     } else {
         zoom
@@ -711,7 +717,15 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     let ads = vm.ads;
     let hip = vec3(0.26, -0.27, -0.66);
     // line the top of the sights up just under the screen centre
-    let ads_pos = vec3(0.0, -models::sight_height(w) * 0.85 - 0.006, -0.5);
+    let parts = models::gun_parts_with(w, vm.sight);
+    let top = parts.iter().map(|p| p.c.y + p.h.y).fold(0.1, f32::max);
+    // (a red dot: look through the middle of its window)
+    let top = if vm.sight == 1 && !def.scoped {
+        top - 0.02
+    } else {
+        top
+    };
+    let ads_pos = vec3(0.0, -top * 0.85 - 0.006, -0.5);
     let mut pos = hip.lerp(ads_pos, ads);
     let mut pitch = 0.0f32;
     let mut yaw = 0.0f32;
@@ -801,7 +815,7 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     let base = trs(pos, yaw, pitch, roll) * Mat4::from_scale(Vec3::splat(0.85));
     let mut m = ToonMesh::new();
     let ow = if settings.outlines { 0.004 } else { 0.0 };
-    for p in models::gun_parts(w) {
+    for p in parts {
         let c = if p.mag {
             p.c + mag_off
         } else if p.pump {
@@ -977,7 +991,14 @@ pub fn draw_model_gallery(mats: &Materials) {
         let pos = vec3(4.4 - col * 2.2, 3.55 - row * 0.75, 2.0);
         let base =
             trs(pos, std::f32::consts::FRAC_PI_2, 0.0, 0.0) * Mat4::from_scale(Vec3::splat(1.7));
-        models::add_gun(&mut m, &base, w, 0.012);
+        // (GALLERY_SIGHTS=1: every gun with a battle royale sight, to check how they sit)
+        if std::env::var("GALLERY_SIGHTS").is_ok() {
+            for p in models::gun_parts_with(w, 1 + (i % 4) as u8) {
+                m.boxed(&(base * Mat4::from_translation(p.c)), p.h, p.col, 0.012);
+            }
+        } else {
+            models::add_gun(&mut m, &base, w, 0.012);
+        }
     }
     // battle royale supplies along the front
     {
@@ -986,6 +1007,7 @@ pub fn draw_model_gallery(mats: &Materials) {
         let mut kinds: Vec<LootKind> = AmmoType::ALL.iter().map(|a| LootKind::Ammo(*a)).collect();
         kinds.push(LootKind::Medkit);
         kinds.push(LootKind::Grenades);
+        kinds.extend((1..=4).map(LootKind::Sight));
         for lv in 1..=3 {
             kinds.push(LootKind::Armor(lv));
             kinds.push(LootKind::Helmet(lv));

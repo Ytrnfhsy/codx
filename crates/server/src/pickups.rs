@@ -111,6 +111,14 @@ impl Game {
         } else {
             old
         };
+        // a sight that does not go on the new gun comes off
+        let slot = p.slot as usize;
+        let loose = p.inv.sights[slot];
+        let loose =
+            (br && loose > 0 && !toon_shared::inventory::sight_fits(loose, pk.w.id)).then(|| {
+                p.inv.sights[slot] = 0;
+                loose
+            });
         p.reload_end = None;
         p.switch_end = time + swap as f64;
         p.shot_budget = p.shot_budget.min(1.0);
@@ -118,6 +126,9 @@ impl Game {
         let name = pk.w.id.def().name;
         self.pickups.remove(i);
         self.drop_weapon(old, pos);
+        if let Some(l) = loose {
+            self.br_drop_loot(toon_shared::protocol::LootKind::Sight(l), 1, pos);
+        }
         self.say(Dest::One(id), || S2C::Center {
             text: tr!("Підібрано: {name}", "Picked up: {name}"),
             secs: 1.5,

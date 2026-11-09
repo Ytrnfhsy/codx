@@ -122,6 +122,49 @@ pub fn level_name(level: u8) -> &'static str {
     ["", "I", "II", "III"][level.min(MAX_LEVEL) as usize]
 }
 
+/// Sights found as loot: 0 iron sights, 1 red dot, 2 a 2× scope, 3 a 4× scope, 4 an 8× scope.
+pub const MAX_SIGHT: u8 = 4;
+
+/// How much a sight magnifies.
+pub fn sight_zoom(level: u8) -> f32 {
+    [1.0, 1.5, 2.0, 4.0, 8.0][level.min(MAX_SIGHT) as usize]
+}
+
+/// A scope you look through (a black ring round it), not just a dot over the iron sights.
+pub fn sight_magnifies(level: u8) -> bool {
+    level >= 2
+}
+
+pub fn sight_name(level: u8) -> &'static str {
+    match level.min(MAX_SIGHT) {
+        0 => t("Мушка", "Iron sights"),
+        1 => t("Коліматор", "Red dot"),
+        2 => t("Приціл 2×", "2× scope"),
+        3 => t("Приціл 4×", "4× scope"),
+        _ => t("Приціл 8×", "8× scope"),
+    }
+}
+
+/// Short label for the HUD.
+pub fn sight_short(level: u8) -> &'static str {
+    match level.min(MAX_SIGHT) {
+        0 => "—",
+        1 => t("КОЛ", "DOT"),
+        2 => "2×",
+        3 => "4×",
+        _ => "8×",
+    }
+}
+
+/// Which sights go on which gun: pistols take only a red dot, shotguns up to a 2× scope.
+pub fn sight_fits(level: u8, w: WeaponId) -> bool {
+    match w.def().class {
+        WeaponClass::Pistol => level <= 1,
+        WeaponClass::Shotgun => level <= 2,
+        _ => true,
+    }
+}
+
 /// Seconds a medkit takes to use, and what it heals.
 pub const MEDKIT_TIME: f32 = 3.0;
 pub const MEDKIT_HEAL: f32 = 60.0;
@@ -139,6 +182,8 @@ pub struct Inventory {
     pub ammo: [u16; 6],
     /// Seconds left of using a medkit (0 = not healing).
     pub healing: f32,
+    /// Sight on the gun in each hand slot (see `sight_zoom`).
+    pub sights: [u8; 2],
 }
 
 impl Inventory {
@@ -221,5 +266,13 @@ mod tests {
         assert_eq!(inv.medkit_cap(), 8);
         assert_eq!(AmmoType::of(WeaponId::M40), AmmoType::Sniper);
         assert!(AmmoType::Rifle.guns().contains(&"M4A1"));
+    }
+
+    #[test]
+    fn sights_fit_their_guns() {
+        assert!(sight_fits(4, WeaponId::M40) && sight_fits(3, WeaponId::M4));
+        assert!(sight_fits(1, WeaponId::M9) && !sight_fits(2, WeaponId::M9));
+        assert!(sight_fits(2, WeaponId::W1200) && !sight_fits(3, WeaponId::W1200));
+        assert!(sight_zoom(4) > sight_zoom(3) && !sight_magnifies(1));
     }
 }

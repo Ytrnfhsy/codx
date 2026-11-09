@@ -49,6 +49,11 @@ impl GameClient {
         if self.scoped() && self.alive {
             self.draw_scope();
         }
+        // a red dot sight: the dot floats in the middle while aiming
+        if self.alive && self.sight() == 1 && self.ads_t > 0.8 {
+            draw_circle(cx, cy, 2.6, Color::new(1.0, 0.15, 0.1, 0.95));
+            draw_circle_lines(cx, cy, 5.0, 1.0, Color::new(1.0, 0.2, 0.1, 0.35));
+        }
 
         // low health / damage flash
         if self.alive {
@@ -965,6 +970,18 @@ impl GameClient {
             ACCENT,
             inv.backpack > 0,
         );
+        {
+            use toon_shared::inventory::sight_short;
+            let l = self.sight();
+            tile(
+                4,
+                t("Приціл", "Sight"),
+                sight_short(l),
+                0.0,
+                Color::new(1.0, 0.45, 0.35, 1.0),
+                l > 0,
+            );
+        }
         // rounds of every calibre carried
         let mut x = x0;
         let y = y0 + s + 18.0;

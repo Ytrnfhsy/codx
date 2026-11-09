@@ -278,20 +278,71 @@ pub fn gun_parts(w: WeaponId) -> Vec<GunPart> {
     gun_def(w).0
 }
 
+/// A sight found in battle royale (1 red dot, 2..4 scopes), standing on `y`.
+pub fn sight_parts(level: u8, y: f32) -> Vec<GunPart> {
+    let mut g = Gun::new();
+    match level {
+        0 => {}
+        1 => {
+            g.b([0.0, y + 0.01, -0.06], [0.016, 0.01, 0.035], BLACK)
+                .b([0.0, y + 0.038, -0.07], [0.02, 0.02, 0.006], BLACK)
+                .b(
+                    [0.0, y + 0.038, -0.064],
+                    [0.005, 0.005, 0.002],
+                    [255, 40, 40],
+                );
+        }
+        l => {
+            // longer and thicker the stronger it is
+            let r = 0.017 + 0.004 * l as f32;
+            let len = 0.06 + 0.025 * l as f32;
+            let cy = y + 0.022 + r;
+            g.b([0.0, y + 0.012, -0.11], [0.01, 0.014, 0.01], BLACK)
+                .b([0.0, y + 0.012, 0.0], [0.01, 0.014, 0.01], BLACK)
+                .b([0.0, cy, -0.055], [r, r, len], BLACK)
+                .b(
+                    [0.0, cy, -0.055 - len],
+                    [r + 0.008, r + 0.008, 0.018],
+                    BLACK,
+                )
+                .b(
+                    [0.0, cy, -0.055 + len],
+                    [r + 0.004, r + 0.004, 0.012],
+                    BLACK,
+                )
+                .b(
+                    [0.0, cy, -0.055 - len - 0.019],
+                    [r, r, 0.002],
+                    [90, 140, 200],
+                );
+        }
+    }
+    g.0
+}
+
+/// A gun with the sight it carries (snipers keep their own scope).
+pub fn gun_parts_with(w: WeaponId, sight: u8) -> Vec<GunPart> {
+    let mut parts = gun_parts(w);
+    if sight == 0 || w.def().scoped {
+        return parts;
+    }
+    // on top of the receiver (iron sights stick out further forward)
+    let top = parts
+        .iter()
+        .filter(|p| p.c.z > -0.25 && p.c.z < 0.1 && !p.mag)
+        .map(|p| p.c.y + p.h.y)
+        .fold(0.06, f32::max)
+        .min(0.13);
+    parts.extend(sight_parts(sight, top));
+    parts
+}
+
 /// Centre of the magazine (where the off hand goes when reloading).
 pub fn gun_mag(w: WeaponId) -> Option<(Vec3, Vec3, [u8; 3])> {
     gun_parts(w)
         .iter()
         .find(|p| p.mag)
         .map(|p| (p.c, p.h, p.col))
-}
-
-/// Height of the gun's highest point (sights) in gun space.
-pub fn sight_height(w: WeaponId) -> f32 {
-    gun_parts(w)
-        .iter()
-        .map(|p| p.c.y + p.h.y)
-        .fold(0.1, f32::max)
 }
 
 /// Where the off hand holds the gun.
@@ -881,6 +932,19 @@ pub fn add_loot(m: &mut ToonMesh, pos: Vec3, kind: toon_shared::protocol::LootKi
                 level_color(l),
                 0.0,
             );
+        }
+        LootKind::Sight(l) => {
+            // the sight itself, a little bigger than on a gun, on a small olive case
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, -0.08, 0.0))),
+                vec3(0.2, 0.05, 0.14),
+                [96, 104, 70],
+                0.02,
+            );
+            let at = base * Mat4::from_scale(Vec3::splat(2.2));
+            for p in sight_parts(l, 0.0) {
+                m.boxed(&(at * Mat4::from_translation(p.c)), p.h, p.col, 0.01);
+            }
         }
         LootKind::Grenades => {
             m.boxed(&base, vec3(0.3, 0.14, 0.24), [130, 100, 60], 0.02);

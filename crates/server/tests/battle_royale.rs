@@ -286,6 +286,26 @@ fn inventory_pick_up_heal_and_drop() {
     g.handle(me, C2S::PickUp(kits));
     assert_eq!(g.p(me).unwrap().inv.medkits, 3);
 
+    // sights: a 4× scope does not go on the pistol in hand, but on the rifle in the other
+    // hand; a red dot goes on the pistol
+    let scope = put(&mut g, LootKind::Sight(3), 1);
+    g.handle(me, C2S::PickUp(scope));
+    assert_eq!(g.p(me).unwrap().inv.sights, [0, 0], "no gun takes it yet");
+    {
+        let p = g.pm(me).unwrap();
+        p.weapons[1] = toon_server::game::WState {
+            id: toon_shared::weapons::WeaponId::M4,
+            mag: 30,
+            reserve: 0,
+        };
+        p.empty_slot = None;
+        p.slot = 0;
+    }
+    g.handle(me, C2S::PickUp(scope));
+    let dot = put(&mut g, LootKind::Sight(1), 1);
+    g.handle(me, C2S::PickUp(dot));
+    assert_eq!(g.p(me).unwrap().inv.sights, [1, 3]);
+
     // the vest takes its share of a hit
     let hp0 = g.p(me).unwrap().hp;
     g.damage(me, None, 50.0, Cause::Zone, false, ground);
@@ -334,6 +354,8 @@ fn inventory_pick_up_heal_and_drop() {
     assert!(dropped.contains(&(LootKind::Medkit, 2)));
     assert!(dropped.iter().any(|(k, _)| *k == LootKind::Armor(2)));
     assert!(dropped.contains(&(LootKind::Backpack(1), 1)));
+    assert!(dropped.contains(&(LootKind::Sight(3), 1)));
+    assert!(dropped.contains(&(LootKind::Sight(1), 1)));
 }
 
 /// Nobody waits for the round inside someone else, and the bots come down spread out
