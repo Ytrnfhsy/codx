@@ -305,6 +305,9 @@ pub struct Game {
     pub blasts: Vec<PendingBlast>,
     pub next_ent: u16,
     pub uav_until: [f64; 2],
+    /// Enemies bots have just spotted: (where, when, the team that saw them) — what a
+    /// bot shares with the teammates around it.
+    pub intel: Vec<(Vec3, f64, Team)>,
     pub sab: Sab,
     pub br: crate::br::BrState,
     pub rotation_idx: usize,
@@ -382,6 +385,7 @@ impl Game {
             blasts: Vec::new(),
             next_ent: 1,
             uav_until: [0.0; 2],
+            intel: Vec::new(),
             sab,
             br: Default::default(),
             rotation_idx: 0,
@@ -1475,6 +1479,7 @@ impl Game {
         self.blasts.clear();
         self.reset_bomb();
         self.br = Default::default();
+        self.intel.clear();
         for p in self.players.iter_mut().flatten() {
             p.in_plane = false;
             p.alive = false;

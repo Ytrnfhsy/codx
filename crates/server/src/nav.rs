@@ -537,6 +537,33 @@ impl Nav {
         p
     }
 
+    /// Up to `n` random reachable floor points within `r` metres of `p` on about the same
+    /// level (for picking cover or a spot to hold nearby).
+    pub fn sample_near(&self, p: Vec3, r: f32, n: usize, rng: &mut Rng) -> Vec<Vec3> {
+        let mut out = Vec::new();
+        for _ in 0..n * 4 {
+            if out.len() >= n {
+                break;
+            }
+            let a = rng.range(0.0, std::f32::consts::TAU);
+            let d = r * rng.f32().sqrt();
+            let q = p + vec3(a.cos() * d, 0.0, a.sin() * d);
+            let Some((g, i, j)) = self.locate(q) else {
+                continue;
+            };
+            let Some(col) = self.grids[g].col(i, j) else {
+                continue;
+            };
+            if let Some(&m) = col.iter().find(|&&m| {
+                let nd = &self.nodes[m as usize];
+                nd.reachable && (nd.pos.y - p.y).abs() < 2.5 && nd.pos.y > self.water
+            }) {
+                out.push(self.nodes[m as usize].pos);
+            }
+        }
+        out
+    }
+
     pub fn reachable_count(&self) -> usize {
         self.reachable_ids.len()
     }

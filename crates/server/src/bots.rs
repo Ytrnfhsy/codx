@@ -167,13 +167,50 @@ pub struct Bot {
     nade_ready: f64,
     attacked_by: Option<(u8, Vec3, f64)>,
     detour_until: f64,
+    /// What this bot does for the team.
+    pub role: Role,
+    /// A spot it holds (anchors and snipers).
+    hold: Option<Hold>,
+    /// Got there and is holding it.
+    hold_reached: bool,
+    /// Cover it is falling back to (reloading, hurt) and until when it counts.
+    cover: Option<(Vec3, f64)>,
+    cover_check: f64,
+    /// Stance picked for the current exchange of fire, and until when.
+    fight_stance: (Stance, f64),
+}
+
+/// What a bot does for its side, so that they do not all run the same way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// Goes for the enemy (or the objective) the direct way.
+    Rusher,
+    /// Comes at the enemy from the side.
+    Flanker,
+    /// Holds a spot with a view, crouched, and watches its sector.
+    Anchor,
+    /// Holds high ground lying down and picks off people from afar.
+    Sniper,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Hold {
+    spot: Vec3,
+    /// Where to watch (yaw).
+    look: f32,
+    until: f64,
 }
 
 impl Bot {
     /// What the bot is up to, for tests and logs.
     pub fn describe(&self) -> String {
         format!(
-            "target {:?}, roam {:?}, path {} pts (goal {:?}, fail until {:.1}), last seen {:?}, attacked {:?}",
+            "{:?} hold {:?} reached {} cover {:?} stance {:?}; target {:?}, roam {:?}, path {} pts (goal {:?}, fail until {:.1}), last seen {:?}, attacked {:?}",
+            self.role,
+            self.hold.map(|h| (h.spot, h.until)),
+            self.hold_reached,
+            self.cover,
+            self.fight_stance,
             self.target,
             self.roam_goal,
             self.path.len(),
@@ -216,7 +253,23 @@ impl Bot {
             nade_ready: 0.0,
             attacked_by: None,
             detour_until: 0.0,
+            role: match rng.f32() {
+                r if r < 0.35 => Role::Rusher,
+                r if r < 0.6 => Role::Flanker,
+                r if r < 0.85 => Role::Anchor,
+                _ => Role::Sniper,
+            },
+            hold: None,
+            hold_reached: false,
+            cover: None,
+            cover_check: 0.0,
+            fight_stance: (Stance::Stand, 0.0),
         }
+    }
+
+    /// Standing at a spot it holds (it stays put on purpose).
+    pub fn holding(&self) -> bool {
+        self.hold_reached && self.hold.is_some()
     }
 
     pub fn on_spawn(&mut self) {
@@ -229,6 +282,10 @@ impl Bot {
         self.stuck_count = 0;
         self.awareness.clear();
         self.alert = None;
+        self.hold = None;
+        self.hold_reached = false;
+        self.cover = None;
+        self.fight_stance = (Stance::Stand, 0.0);
     }
 
     /// Current target (for tests / debugging).
@@ -278,6 +335,7 @@ impl Game {
         let smokes = me.smokes;
         let team_now = me.team;
         let vel = me.body.vel;
+        let hp = me.hp;
         let protected_me = me.protected_until > time;
         let skill = (self.cfg.bot_skill + bot.skill_offset).clamp(0.0, 1.0);
         let sk = SkillProfile::new(skill);
@@ -361,6 +419,13 @@ impl Game {
             match best {
                 Some((t, _)) => {
                     if bot.target != Some(t) {
+                        // tell the teammates around
+                        if let Some(o) = self.p(t) {
+                            self.intel.push((o.body.pos, time, team));
+                            if self.intel.len() > 24 {
+                                self.intel.remove(0);
+                            }
+                        }
                         bot.target = Some(t);
                         bot.seen_at = time + self.rng.range(-0.1, 0.25) as f64;
                         let a = self.rng.range(0.0, std::f32::consts::TAU);
@@ -548,24 +613,94 @@ impl Game {
         let mut sprint = false;
         let mut jump = false;
         let mut stance = Stance::Stand;
-        if fighting && !urgent {
-            if time > bot.strafe_until {
-                bot.strafe_until = time + self.rng.range(0.6, 1.6) as f64;
-                bot.strafe = if self.rng.chance(0.5) { 1.0 } else { -1.0 };
-            }
-            let (f, r) = yaw_basis(yaw);
-            move_dir = r * bot.strafe;
-            if class == WeaponClass::Shotgun || class == WeaponClass::Smg {
-                if dist_to_target > 6.0 {
-                    move_dir += f * 0.8;
+        // at the spot it holds?
+        let at_hold = bot.hold.filter(|h| {
+            goal == Some(h.spot) && vec3(h.spot.x - pos.x, 0.0, h.spot.z - pos.z).length() < 1.3
+        });
+        if at_hold.is_some() {
+            bot.hold_reached = true;
+        }
+        let hold_stance = if bot.role == Role::Sniper {
+            Stance::Prone
+        } else {
+            Stance::Crouch
+        };
+        if fighting && !urgent && at_hold.is_some() {
+            // hold the spot and shoot from it
+            stance = if hold_stance == Stance::Prone && dist_to_target < 15.0 {
+                Stance::Crouch
+            } else {
+                hold_stance
+            };
+        } else if fighting && !urgent {
+            // hurt or reloading: duck behind something the enemy cannot see through
+            if (reloading || hp < 40.0) && time > bot.cover_check {
+                bot.cover_check = time + 2.0;
+                if let Some((_, _, enemy_eye, _, _)) = target {
+                    let cands = self.nav.sample_near(pos, 9.0, 8, &mut self.rng);
+                    bot.cover = cands
+                        .into_iter()
+                        .filter(|c| {
+                            !self
+                                .world
+                                .line_of_sight(enemy_eye, *c + vec3(0.0, 1.0, 0.0))
+                        })
+                        .min_by(|a, b| a.distance(pos).total_cmp(&b.distance(pos)))
+                        .map(|c| (c, time + 3.5));
                 }
-            } else if dist_to_target < 5.0 {
-                move_dir -= f * 0.6;
             }
-            if matches!(class, WeaponClass::Lmg | WeaponClass::Sniper) && dist_to_target > 20.0 {
+            if let Some((c, _)) = bot.cover.filter(|c| time < c.1) {
+                let to = vec3(c.x - pos.x, 0.0, c.z - pos.z);
+                if to.length() > 0.5 {
+                    move_dir = to.normalize();
+                }
                 stance = Stance::Crouch;
-                move_dir *= 0.3;
+            } else {
+                if time > bot.strafe_until {
+                    bot.strafe_until = time + self.rng.range(0.6, 1.6) as f64;
+                    bot.strafe = if self.rng.chance(0.5) { 1.0 } else { -1.0 };
+                }
+                let (f, r) = yaw_basis(yaw);
+                move_dir = r * bot.strafe;
+                if class == WeaponClass::Shotgun || class == WeaponClass::Smg {
+                    if dist_to_target > 6.0 {
+                        move_dir += f * 0.8;
+                    }
+                } else if dist_to_target < 5.0 {
+                    move_dir -= f * 0.6;
+                }
+                // at range: crouch (or lie down with a long gun) for a steadier aim
+                if time > bot.fight_stance.1 {
+                    let r = self.rng.f32();
+                    let long_gun = matches!(class, WeaponClass::Lmg | WeaponClass::Sniper);
+                    let st = if long_gun && dist_to_target > 28.0 && r < 0.4 {
+                        Stance::Prone
+                    } else if dist_to_target > 14.0
+                        && class != WeaponClass::Shotgun
+                        && r < if long_gun { 0.8 } else { 0.55 }
+                    {
+                        Stance::Crouch
+                    } else if dist_to_target > 8.0 && r < 0.2 {
+                        Stance::Crouch
+                    } else {
+                        Stance::Stand
+                    };
+                    bot.fight_stance = (st, time + self.rng.range(1.2, 2.8) as f64);
+                }
+                stance = bot.fight_stance.0;
+                match stance {
+                    Stance::Prone => move_dir = Vec3::ZERO,
+                    Stance::Crouch => move_dir *= 0.35,
+                    Stance::Stand => {}
+                }
             }
+        } else if let Some(h) = at_hold.filter(|_| !fighting) {
+            // holding: keep low and watch the sector, sweeping slowly across it
+            stance = hold_stance;
+            let want = h.look + ((time * 0.35).sin() as f32) * 0.55;
+            let dy = wrap_angle(want - yaw);
+            yaw = wrap_angle(yaw + dy.clamp(-1.2 * dt, 1.2 * dt));
+            pitch *= 1.0 - (2.0 * dt).min(1.0);
         } else if let Some(g) = goal.filter(|_| skydiving) {
             // falling from the plane: steer straight for where we want to land
             move_dir = vec3(g.x - pos.x, 0.0, g.z - pos.z).normalize_or_zero();
@@ -609,6 +744,23 @@ impl Game {
                 move_dir = vec3(wp.x - pos.x, 0.0, wp.z - pos.z).normalize_or_zero();
             } else if flat_d > 0.8 {
                 move_dir = vec3(g.x - pos.x, 0.0, g.z - pos.z).normalize_or_zero();
+            }
+            // keep a little apart from teammates instead of walking in a clump
+            if !self.mode.solo() && !fighting && move_dir.length_squared() > 0.01 {
+                let mut push = Vec3::ZERO;
+                for o in self.players.iter().flatten() {
+                    if o.id == id || !o.alive || o.team != team {
+                        continue;
+                    }
+                    let d = vec3(pos.x - o.body.pos.x, 0.0, pos.z - o.body.pos.z);
+                    let l = d.length();
+                    if l > 0.01 && l < 3.0 && (o.body.pos.y - pos.y).abs() < 1.5 {
+                        push += d / l * (3.0 - l) / 3.0;
+                    }
+                }
+                if push.length_squared() > 0.0 {
+                    move_dir = (move_dir + push * 0.9).normalize_or_zero();
+                }
             }
             sprint = flat_d > 8.0 && !use_key && !fighting;
             if fighting {
@@ -751,6 +903,30 @@ impl Game {
                 }
             }
         }
+        // anchors and snipers hold a spot with a view (they turn towards fire, they do
+        // not run after it)
+        if matches!(bot.role, Role::Anchor | Role::Sniper) && !self.mode.solo() {
+            if let Some(spot) = self.bot_hold(bot, team, pos) {
+                return (Some(spot), false, false);
+            }
+        }
+        // a teammate has just spotted somebody not far away: go and help
+        if matches!(bot.role, Role::Rusher | Role::Flanker) && !self.mode.solo() {
+            let help = self
+                .intel
+                .iter()
+                .rev()
+                .find(|i| {
+                    let d = i.0.distance(pos);
+                    i.2 == team && time - i.1 < 6.0 && d > 8.0 && d < 70.0
+                })
+                .map(|i| i.0);
+            if let Some(p) = help {
+                if bot.last_seen.is_none_or(|l| time - l.1 > 4.0) {
+                    return (Some(p), false, false);
+                }
+            }
+        }
         // deathmatch-style hunting / roaming
         if let Some((p, t)) = bot.last_seen {
             if time - t < 4.0 && pos.distance(p) > 2.0 {
@@ -789,9 +965,80 @@ impl Game {
             } else {
                 None
             };
+            // flankers come at the enemy from the side
+            let enemy = enemy.map(|e| {
+                if bot.role != Role::Flanker {
+                    return e;
+                }
+                let dir = vec3(e.x - pos.x, 0.0, e.z - pos.z).normalize_or_zero();
+                let side = vec3(-dir.z, 0.0, dir.x) * if self.rng.chance(0.5) { 1.0 } else { -1.0 };
+                let p = e + side * self.rng.range(15.0, 25.0) - dir * 6.0;
+                self.nav.snap(p).unwrap_or(e)
+            });
             bot.roam_goal = Some(enemy.unwrap_or_else(|| self.nav.random_point(&mut self.rng)));
         }
         (bot.roam_goal, false, false)
+    }
+
+    /// The spot an anchor or a sniper holds (a new one every half minute or so): a long
+    /// view towards the enemy side, something low in front to duck behind, and for a
+    /// sniper, height. Holders spread out over different spots.
+    fn bot_hold(&mut self, bot: &mut crate::bots::Bot, team: Team, _pos: Vec3) -> Option<Vec3> {
+        let time = self.time;
+        if bot.hold.is_none_or(|h| time > h.until) {
+            let home = self.map.spawns[team.index()].first()?.pos;
+            let away = self.map.spawns[team.enemy().index()].first()?.pos;
+            let mid = home.lerp(away, self.rng.range(0.25, 0.5));
+            let sniper = bot.role == Role::Sniper;
+            let cands: Vec<Vec3> = if sniper {
+                (0..30)
+                    .map(|_| self.nav.random_point(&mut self.rng))
+                    .filter(|p| vec3(p.x - mid.x, 0.0, p.z - mid.z).length() < 60.0)
+                    .collect()
+            } else {
+                self.nav.sample_near(mid, 22.0, 12, &mut self.rng)
+            };
+            let taken: Vec<Vec3> = self
+                .players
+                .iter()
+                .flatten()
+                .filter(|p| p.team == team)
+                .filter_map(|p| p.bot.as_ref().and_then(|b| b.hold).map(|h| h.spot))
+                .collect();
+            let mut best: Option<(Vec3, f32)> = None;
+            for c in cands {
+                let to = away - c;
+                let dir = vec3(to.x, 0.0, to.z).normalize_or_zero();
+                if dir == Vec3::ZERO {
+                    continue;
+                }
+                let eye = c + vec3(0.0, 1.1, 0.0);
+                let view = self.world.raycast(eye, dir, 60.0).map_or(60.0, |h| h.0);
+                let low_cover = self
+                    .world
+                    .raycast(c + vec3(0.0, 0.5, 0.0), dir, 2.0)
+                    .is_some()
+                    && view > 3.0;
+                let mut score = view.min(45.0) + if low_cover { 15.0 } else { 0.0 };
+                if sniper {
+                    score += (c.y - home.y).max(0.0) * 4.0;
+                }
+                if taken.iter().any(|t| t.distance(c) < 8.0) {
+                    score -= 40.0;
+                }
+                if best.is_none_or(|b| score > b.1) {
+                    best = Some((c, score));
+                }
+            }
+            let (spot, _) = best?;
+            bot.hold = Some(Hold {
+                spot,
+                look: yaw_of(away - spot),
+                until: time + self.rng.range(25.0, 50.0) as f64,
+            });
+            bot.hold_reached = false;
+        }
+        bot.hold.map(|h| h.spot)
     }
 
     fn guard_point(&mut self, bot: &mut crate::bots::Bot, around: Vec3, r: f32) -> Vec3 {

@@ -144,7 +144,16 @@ fn soak(map: MapId, mode: Mode, bots: usize, secs: f32) -> Report {
             } else {
                 inside.remove(&p.id);
             }
-            if p.is_bot() && playing {
+            // (a bot holding a spot stands still on purpose)
+            // (a bot holding a spot, or trading shots from cover, stands still on purpose)
+            let busy = p
+                .bot
+                .as_ref()
+                .is_some_and(|b| b.holding() || b.target().is_some());
+            if busy {
+                still.remove(&p.id);
+            }
+            if p.is_bot() && playing && !busy {
                 let e = still.entry(p.id).or_insert((pos, time));
                 if vec2(pos.x - e.0.x, pos.z - e.0.z).length() > 1.5 || (pos.y - e.0.y).abs() > 1.0
                 {
