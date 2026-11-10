@@ -424,6 +424,8 @@ pub struct BrSnap {
     pub squad: Vec<SquadMate>,
     /// Supply crates (for the map, wherever they are).
     pub drops: Vec<V3>,
+    /// The red zone: centre x, z, radius, seconds before the shelling starts.
+    pub red: Option<[f32; 4]>,
     /// The death box we are looking into.
     pub open_box: Option<BoxView>,
 }

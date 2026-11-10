@@ -969,6 +969,18 @@ impl GameClient {
             let n = to_map(vec3(br.next[0], 0.0, br.next[1]));
             draw_circle_lines(n.x, n.y, br.next[2] * scale, 2.0, WHITE);
         }
+        // the red zone
+        if let Some(rz) = self.br.as_ref().and_then(|b| b.red) {
+            let p = to_map(vec3(rz[0], 0.0, rz[1]));
+            draw_circle(p.x, p.y, rz[2] * scale, Color::new(0.9, 0.1, 0.1, 0.22));
+            draw_circle_lines(
+                p.x,
+                p.y,
+                rz[2] * scale,
+                2.0,
+                Color::new(0.9, 0.15, 0.1, 0.9),
+            );
+        }
         // supply crates (on the edge when further away)
         for d in self.br.iter().flat_map(|b| b.drops.iter()) {
             let p = to_map(vec3(d[0], 0.0, d[2]));
@@ -1862,6 +1874,30 @@ impl GameClient {
     fn draw_br_alerts(&self, ui: &Ui) {
         let Some(br) = &self.br else { return };
         let (w, h) = (screen_width(), screen_height());
+        if let Some(rz) = br.red.filter(|_| self.alive && !br.in_plane) {
+            let me = self.body.pos;
+            let inside = vec2(me.x - rz[0], me.z - rz[1]).length() < rz[2];
+            let text = match (inside, rz[3] > 0.0) {
+                (true, true) => tr!(
+                    "ЧЕРВОНА ЗОНА: обстріл через {} с — в укриття!",
+                    "RED ZONE: shelling in {} s — take cover!",
+                    rz[3].ceil() as i32
+                ),
+                (true, false) => t("ОБСТРІЛ! Сховайся в будинку", "SHELLING! Get indoors").into(),
+                (false, true) => tr!(
+                    "Червона зона позначена (обстріл через {} с)",
+                    "Red zone marked (shelling in {} s)",
+                    rz[3].ceil() as i32
+                ),
+                (false, false) => t("Червона зона: обстріл", "Red zone: shelling").into(),
+            };
+            let c = if inside {
+                BAD
+            } else {
+                Color::new(1.0, 0.6, 0.5, 0.9)
+            };
+            ui.centered(&text, w / 2.0, h * 0.16, if inside { 22 } else { 16 }, c);
+        }
         if br.in_plane {
             ui.centered(
                 &tr!(
@@ -2007,6 +2043,11 @@ impl GameClient {
             2.0,
             BLACK,
         );
+        if let Some(rz) = br.red {
+            let c = to_map(rz[0], rz[1]);
+            draw_circle(c.x, c.y, rz[2] * k, Color::new(0.9, 0.1, 0.1, 0.25));
+            draw_circle_lines(c.x, c.y, rz[2] * k, 2.0, Color::new(0.9, 0.15, 0.1, 0.9));
+        }
         for d in &br.drops {
             let p = to_map(d[0], d[2]);
             draw_crate_icon(p, 1.0);

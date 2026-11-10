@@ -121,7 +121,26 @@ pub struct BrState {
     pub launched: usize,
     /// What knocked-out players left.
     pub boxes: Vec<crate::boxes::DeathBox>,
+    /// The bombarded area, if any, and when the next one comes.
+    pub red: Option<RedZone>,
+    pub next_red: f64,
 }
+
+/// An area shelled for a while (after a warning): buildings and cover protect.
+#[derive(Clone, Copy, Debug)]
+pub struct RedZone {
+    pub c: Vec2,
+    pub r: f32,
+    /// Shells fall from this moment until `end`.
+    pub start: f64,
+    pub end: f64,
+    pub next_shell: f64,
+}
+
+const RED_FIRST: f64 = 130.0;
+const RED_EVERY: f64 = 90.0;
+const RED_WARNING: f64 = 8.0;
+const RED_TIME: f64 = 20.0;
 
 /// A supply crate: it comes down under a parachute inside the next circle and spills rare
 /// gear around it when it lands.
@@ -190,6 +209,8 @@ impl Game {
             next_drop: time + FIRST_DROP,
             launched: 0,
             boxes: Vec::new(),
+            red: None,
+            next_red: time + RED_FIRST,
         };
         self.br_next_phase(time);
         // everyone boards
@@ -467,6 +488,72 @@ impl Game {
         }
         for id in out {
             self.kill(id, None, Cause::Bleed, false);
+        }
+    }
+
+    /// The red zone: marked inside the circle (away from the next one), then shelled.
+    fn br_red_zone(&mut self) {
+        let time = self.time;
+        if let Some(rz) = self.br.red {
+            if time >= rz.end {
+                self.br.red = None;
+            } else if time >= rz.start && time >= rz.next_shell {
+                let mut z = rz;
+                z.next_shell = time + self.rng.range(0.25, 0.6) as f64;
+                self.br.red = Some(z);
+                let a = self.rng.range(0.0, std::f32::consts::TAU);
+                let d = self.rng.f32().sqrt() * rz.r;
+                let q = rz.c + vec2(a.cos(), a.sin()) * d;
+                // the shell lands on whatever is highest there (a roof shields those below)
+                let top = self
+                    .world
+                    .floor_below(vec3(q.x, 300.0, q.y), 400.0)
+                    .unwrap_or(0.0);
+                self.explode(
+                    vec3(q.x, top + 0.3, q.y),
+                    6.0,
+                    95.0,
+                    None,
+                    Cause::Artillery,
+                    true,
+                );
+            }
+            return;
+        }
+        if time < self.br.next_red || self.state != MatchState::Playing {
+            return;
+        }
+        self.br.next_red = time + RED_EVERY;
+        let (c, r) = self.br.zone.at(time);
+        if r < 160.0 {
+            return; // the end game is tight enough
+        }
+        let next = vec2(self.br.zone.to_c.x, self.br.zone.to_c.y);
+        let size = self.rng.range(80.0, 110.0);
+        for _ in 0..20 {
+            let a = self.rng.range(0.0, std::f32::consts::TAU);
+            let d = self.rng.range(0.0, (r - size).max(0.0));
+            let q = c + vec2(a.cos(), a.sin()) * d;
+            if q.distance(next) > self.br.zone.to_r + size * 0.5 {
+                self.br.red = Some(RedZone {
+                    c: q,
+                    r: size,
+                    start: time + RED_WARNING,
+                    end: time + RED_WARNING + RED_TIME,
+                    next_shell: time + RED_WARNING,
+                });
+                self.center_all(
+                    || {
+                        t(
+                            "Червона зона! Сховайся в будинку або тікай з неї",
+                            "Red zone! Get indoors or get out of it",
+                        )
+                        .into()
+                    },
+                    3.5,
+                );
+                return;
+            }
         }
     }
 
@@ -934,6 +1021,7 @@ impl Game {
         }
         self.br_downed(dt);
         self.br_airdrops(dt);
+        self.br_red_zone();
         // medkits being used; reserves following the inventory
         for p in self.players.iter_mut().flatten() {
             if !p.alive {
@@ -1611,6 +1699,10 @@ impl Game {
                 })
                 .unwrap_or_default(),
             drops: self.br.drops.iter().map(|d| d.pos.to_array()).collect(),
+            red: self
+                .br
+                .red
+                .map(|z| [z.c.x, z.c.y, z.r, (z.start - self.time).max(0.0) as f32]),
             open_box: self.box_view(id),
         })
     }
@@ -1659,6 +1751,19 @@ impl Game {
             }
         } else {
             bot.br_land = None;
+        }
+        // out of a red zone (marked or shelled), towards the circle's middle
+        if let Some(rz) = self.br.red.filter(|_| !skydiving) {
+            if flat.distance(rz.c) < rz.r + 6.0 {
+                let away = (flat - rz.c).normalize_or(vec2(1.0, 0.0));
+                let out = rz.c + away * (rz.r + 20.0);
+                let towards = out.lerp(c, 0.2);
+                let g = self
+                    .nav
+                    .snap(vec3(towards.x, pos.y, towards.y))
+                    .unwrap_or(vec3(towards.x, pos.y, towards.y));
+                return (Some(g), false, true);
+            }
         }
         // squads: crawl to a squadmate when down; pick up a squadmate who is down; keep up
         // with the squad

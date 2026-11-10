@@ -1275,3 +1275,68 @@ fn bandages_drinks_molotovs_and_flashbangs() {
     let blind = g.p(bot).unwrap().bot.as_ref().unwrap().blind_until;
     assert!(blind > g.time - 1.0 && blind > 0.0, "not blinded ({blind})");
 }
+
+/// The red zone: marked inside the circle with a warning, shelled for a while, then gone.
+#[test]
+fn red_zone_is_marked_then_shelled() {
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir()
+            .join("tw-br12")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 2;
+    cfg.br.max_players = 3;
+    let mut g = Game::new(cfg);
+    g.rng = toon_shared::rng::Rng::new(8);
+    g.change_map(MapId::Island, Mode::Br);
+    let me = g
+        .connect(
+            "127.0.0.1:5016".parse().unwrap(),
+            "Гравець",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    let mut booms = 0;
+    let mut tick = |g: &mut Game, secs: f32, booms: &mut usize| {
+        for _ in 0..(secs / TICK_DT).max(1.0) as usize {
+            if let Some(p) = g.pm(me) {
+                if p.alive {
+                    p.body.pos = glam::vec3(0.0, 400.0, 0.0);
+                    p.body.chute = Chute::None;
+                }
+            }
+            g.tick(TICK_DT);
+            for (_, m, _) in g.outbox.drain(..) {
+                if matches!(m, S2C::Explosion { big: true, .. }) {
+                    *booms += 1;
+                }
+            }
+            g.shots.clear();
+        }
+    };
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        tick(&mut g, TICK_DT, &mut booms);
+        if g.br.running {
+            break;
+        }
+    }
+    g.handle(me, C2S::BrJump);
+    g.br.next_red = g.time;
+    tick(&mut g, TICK_DT, &mut booms);
+    let rz = g.br.red.expect("no red zone");
+    let (c, r) = g.br.zone.at(g.time);
+    assert!(rz.c.distance(c) <= r, "outside the circle");
+    let snap = g.snapshot_for(me).br.unwrap().red.expect("not shown");
+    assert!(snap[3] > 7.0, "no warning time");
+    booms = 0;
+    tick(&mut g, 7.0, &mut booms);
+    assert_eq!(booms, 0, "shells during the warning");
+    tick(&mut g, 21.5, &mut booms);
+    assert!(booms > 25, "only {booms} shells");
+    assert!(g.br.red.is_none(), "still shelling");
+}
