@@ -1044,3 +1044,122 @@ pub fn level_color(level: u8) -> [u8; 3] {
         _ => [130, 136, 120],
     }
 }
+
+/// A battle royale jeep or boat (`hp` in per cent: a battered one looks it).
+pub fn add_car(
+    m: &mut ToonMesh,
+    kind: toon_shared::cars::CarKind,
+    s: &toon_shared::cars::CarState,
+    hp: u8,
+    t: f32,
+) {
+    use toon_shared::cars::CarKind;
+    let rot = Mat4::from_rotation_y(s.yaw + std::f32::consts::PI);
+    let worn = if hp < 35 { 0.7 } else { 1.0 };
+    let mut part = |local: Vec3, half: Vec3, c: [u8; 3], outline: f32| {
+        let at = s.to_world(local);
+        let c = toon_shared::map::shade(c, worn);
+        m.boxed(&(Mat4::from_translation(at) * rot), half, c, outline);
+    };
+    let o = 0.03;
+    match kind {
+        CarKind::Jeep => {
+            let body = [104, 124, 72];
+            let dark = [70, 84, 50];
+            part(vec3(0.0, 0.62, -0.1), vec3(1.0, 0.3, 1.95), body, o);
+            // the hood, a little higher in front
+            part(vec3(0.0, 0.98, 1.3), vec3(0.95, 0.08, 0.6), body, o);
+            part(vec3(0.0, 0.7, 2.0), vec3(0.9, 0.2, 0.08), dark, o);
+            // windshield frame and roll bar
+            part(vec3(0.0, 1.35, 0.72), vec3(0.95, 0.04, 0.04), dark, 0.0);
+            part(vec3(-0.92, 1.15, 0.72), vec3(0.04, 0.25, 0.04), dark, 0.0);
+            part(vec3(0.92, 1.15, 0.72), vec3(0.04, 0.25, 0.04), dark, 0.0);
+            part(vec3(0.0, 1.6, -0.95), vec3(0.95, 0.04, 0.04), dark, 0.0);
+            part(vec3(-0.92, 1.25, -0.95), vec3(0.04, 0.35, 0.04), dark, 0.0);
+            part(vec3(0.92, 1.25, -0.95), vec3(0.04, 0.35, 0.04), dark, 0.0);
+            // seats and the steering wheel (on the driver's side)
+            for (x, z) in [(-0.45, 0.35), (0.45, 0.35), (-0.45, -0.85), (0.45, -0.85)] {
+                part(
+                    vec3(x, 1.0, z - 0.25),
+                    vec3(0.3, 0.3, 0.06),
+                    [60, 50, 40],
+                    0.0,
+                );
+            }
+            part(
+                vec3(-0.45, 1.25, 0.62),
+                vec3(0.18, 0.18, 0.03),
+                [30, 30, 30],
+                0.0,
+            );
+            // spare wheel and wheels (turning with the speed)
+            part(
+                vec3(0.0, 0.85, -2.1),
+                vec3(0.32, 0.32, 0.12),
+                [36, 36, 36],
+                o,
+            );
+            let spin = (t * s.speed * 1.5).sin() * 0.02;
+            for (x, z) in [(-1.05, 1.3), (1.05, 1.3), (-1.05, -1.35), (1.05, -1.35)] {
+                part(
+                    vec3(x, 0.4 + spin, z),
+                    vec3(0.16, 0.38, 0.38),
+                    [36, 36, 36],
+                    o,
+                );
+            }
+            // headlights
+            part(
+                vec3(-0.6, 0.85, 2.09),
+                vec3(0.14, 0.1, 0.02),
+                [250, 240, 170],
+                0.0,
+            );
+            part(
+                vec3(0.6, 0.85, 2.09),
+                vec3(0.14, 0.1, 0.02),
+                [250, 240, 170],
+                0.0,
+            );
+        }
+        CarKind::Boat => {
+            let hull = [236, 236, 228];
+            let stripe = [200, 60, 50];
+            part(vec3(0.0, 0.15, -0.2), vec3(1.0, 0.32, 2.1), hull, o);
+            part(vec3(0.0, 0.2, 2.15), vec3(0.6, 0.27, 0.35), hull, o);
+            part(vec3(0.0, 0.3, 2.6), vec3(0.25, 0.18, 0.2), hull, o);
+            part(vec3(0.0, 0.32, -0.2), vec3(1.02, 0.06, 2.12), stripe, 0.0);
+            // seats, the console and the outboard motor
+            for (x, z) in [(-0.45, 0.35), (0.45, 0.35), (-0.45, -0.85), (0.45, -0.85)] {
+                part(
+                    vec3(x, 0.55, z - 0.2),
+                    vec3(0.3, 0.08, 0.25),
+                    [70, 90, 120],
+                    0.0,
+                );
+            }
+            part(
+                vec3(-0.45, 0.75, 0.75),
+                vec3(0.25, 0.25, 0.12),
+                [80, 80, 86],
+                0.0,
+            );
+            part(
+                vec3(0.0, 0.55, -2.45),
+                vec3(0.22, 0.4, 0.22),
+                [40, 40, 44],
+                o,
+            );
+            // a wake when it moves
+            if s.speed.abs() > 2.0 {
+                let k = (s.speed.abs() / 16.0).min(1.0);
+                part(
+                    vec3(0.0, -0.1, -2.9),
+                    vec3(0.6 * k, 0.04, 0.5 * k),
+                    [240, 250, 255],
+                    0.0,
+                );
+            }
+        }
+    }
+}

@@ -161,6 +161,47 @@ impl GameClient {
         if self.alive && self.piloting.is_none() {
             self.draw_weapon_panel(ui);
         }
+        // in a car: speed, its health, how to get out
+        if let Some((c, k)) = self.seat() {
+            let (w, h) = (screen_width(), screen_height());
+            let kmh = c.state.speed.abs() * 3.6;
+            let x = w / 2.0 - 110.0;
+            let y = h - 92.0;
+            draw_rectangle(x, y, 220.0, 64.0, Color::new(0.0, 0.0, 0.0, 0.5));
+            ui.bold(
+                &format!("{kmh:.0} {}", t("км/год", "km/h")),
+                x + 12.0,
+                y + 30.0,
+                24,
+                TEXT,
+            );
+            ui.text(c.kind.name(), x + 140.0, y + 26.0, 15, MUTED);
+            let f = c.hp as f32 / 100.0;
+            draw_rectangle(
+                x + 12.0,
+                y + 40.0,
+                196.0,
+                7.0,
+                Color::new(0.0, 0.0, 0.0, 0.6),
+            );
+            draw_rectangle(
+                x + 12.0,
+                y + 40.0,
+                196.0 * f,
+                7.0,
+                if f > 0.35 { GOOD } else { BAD },
+            );
+            let hint = if k == 0 {
+                tr!(
+                    "{} — вийти · Пробіл — ручник",
+                    "{} — get out · Space — handbrake",
+                    key(Action::Use)
+                )
+            } else {
+                tr!("{} — вийти", "{} — get out", key(Action::Use))
+            };
+            ui.text(&hint, x + 12.0, y + 60.0, 13, MUTED);
+        }
 
         // dropped weapon prompt
         if self.alive && self.overlay == Overlay::None {
@@ -172,6 +213,8 @@ impl GameClient {
                         "{} — step off the bomb to pick it up",
                         what
                     )
+                } else if let Pick::Car(_) = pick {
+                    tr!("{} — сісти: {}", "{} — get in: {}", key(Action::Use), what)
                 } else {
                     tr!(
                         "{} — підібрати {}",
@@ -1030,6 +1073,17 @@ impl GameClient {
             let p = to_map(*t);
             let pulse = 0.5 + 0.5 * ((self.now - at) * 6.0).sin() as f32;
             draw_circle_lines(p.x, p.y, r * scale, 2.0 + pulse * 2.0, BAD);
+        }
+        // jeeps and boats
+        for c in self.cars.values() {
+            let p = to_map(c.state.pos);
+            let col = if c.seats.contains(&self.my_id) {
+                ACCENT
+            } else {
+                Color::new(0.85, 0.85, 0.8, 0.9)
+            };
+            draw_rectangle(p.x - 4.0, p.y - 3.0, 8.0, 6.0, BLACK);
+            draw_rectangle(p.x - 3.0, p.y - 2.0, 6.0, 4.0, col);
         }
         // vehicles: ours always, enemy ones like enemies (on radar)
         for e in &self.ents {
@@ -3200,6 +3254,7 @@ fn draw_bomb_icon(x: f32, y: f32, scale: f32, pulse: f32) {
 fn pick_label(p: Pick) -> String {
     match p {
         Pick::Weapon(w) => w.def().name.into(),
+        Pick::Car(k) => k.name().into(),
         Pick::Loot(k, n) => match k {
             LootKind::Ammo(_) | LootKind::Medkit if n > 1 => format!("{} ×{n}", k.name()),
             LootKind::Armor(_) | LootKind::Helmet(_) if n < 100 => format!("{} ({n}%)", k.name()),

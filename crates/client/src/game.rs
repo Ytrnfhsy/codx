@@ -65,6 +65,27 @@ pub enum Pick {
     Weapon(WeaponId),
     /// Battle royale supplies and how many (or per cent left).
     Loot(LootKind, u16),
+    /// A jeep or a boat to get into.
+    Car(toon_shared::cars::CarKind),
+}
+
+/// A jeep or a boat as we draw it: smoothed towards where the server says it is.
+#[derive(Clone, Debug)]
+pub struct CarView {
+    pub kind: toon_shared::cars::CarKind,
+    /// What we draw.
+    pub state: toon_shared::cars::CarState,
+    /// The latest from the server, and when it came.
+    pub target: toon_shared::cars::CarState,
+    pub at: f64,
+    pub hp: u8,
+    pub seats: [u8; toon_shared::cars::SEATS],
+}
+
+impl CarView {
+    pub fn seat_pos(&self, k: usize) -> Vec3 {
+        self.state.to_world(self.kind.seat(k))
+    }
 }
 
 pub struct KillLine {
@@ -139,6 +160,10 @@ pub struct GameClient {
     pub ready: Option<(u8, u8, bool)>,
     /// Battle royale squad (0 = on our own).
     pub squad: u8,
+    /// Jeeps and boats around.
+    pub cars: HashMap<u16, CarView>,
+    /// When the driving controls were last sent.
+    next_drive: f64,
     pub ents: Vec<EntSnap>,
     pub scoreboard: Vec<ScoreRow>,
     latest_tick: u32,
@@ -376,6 +401,8 @@ impl GameClient {
             marker: None,
             ready: None,
             squad: 0,
+            cars: HashMap::new(),
+            next_drive: 0.0,
             ents: Vec::new(),
             scoreboard: Vec::new(),
             latest_tick: 0,
@@ -1106,6 +1133,42 @@ impl GameClient {
         }
         self.br = s.br;
         self.ready = s.ready;
+        // cars: the latest of each
+        let now = self.now;
+        let mut seen_cars = Vec::new();
+        for e in &s.ents {
+            if let EntSnap::Car {
+                id,
+                kind,
+                pos,
+                yaw,
+                speed,
+                hp,
+                seats,
+            } = e
+            {
+                seen_cars.push(*id);
+                let target = toon_shared::cars::CarState {
+                    pos: Vec3::from_array(*pos),
+                    yaw: *yaw,
+                    speed: *speed,
+                    vy: 0.0,
+                };
+                let c = self.cars.entry(*id).or_insert(CarView {
+                    kind: *kind,
+                    state: target,
+                    target,
+                    at: now,
+                    hp: *hp,
+                    seats: *seats,
+                });
+                c.target = target;
+                c.at = now;
+                c.hp = *hp;
+                c.seats = *seats;
+            }
+        }
+        self.cars.retain(|id, _| seen_cars.contains(id));
         self.ents = s.ents;
         let mut present = Vec::new();
         for e in &self.ents {
@@ -1295,6 +1358,16 @@ impl GameClient {
                     amount,
                     pos,
                 } => near(pos, 1.5).map(|d| (d, *id, Pick::Loot(*kind, *amount))),
+                // a car with a free seat (a little further: it is big)
+                EntSnap::Car {
+                    id,
+                    kind,
+                    pos,
+                    seats,
+                    ..
+                } if seats.contains(&255) => {
+                    near(pos, 3.6).map(|d| (d + 1.0, *id, Pick::Car(*kind)))
+                }
                 _ => None,
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -1336,8 +1409,54 @@ impl GameClient {
             && self.now - self.death_time > 4.0
     }
 
-    /// Living remote players, interpolated for this frame.
+    /// Where somebody sits in a car (in the car as we draw it).
+    fn seated_at(&self, id: u8) -> Option<(Vec3, f32)> {
+        self.cars.values().find_map(|c| {
+            c.seats
+                .iter()
+                .position(|s| *s == id)
+                .map(|k| (c.seat_pos(k), c.state.yaw))
+        })
+    }
+
+    /// Living remote players, interpolated for this frame (those in cars sit in them;
+    /// in a car we see ourselves too, from behind).
     pub fn live_actors(&self) -> Vec<Actor> {
+        let now = self.now;
+        let mut out: Vec<Actor> = self.live_actors_raw();
+        for a in out.iter_mut() {
+            if let Some((pos, yaw)) = self.seated_at(a.id) {
+                a.pos = pos;
+                a.yaw = yaw;
+                a.stance = Stance::Crouch;
+                a.walk = 0.0;
+                a.sprint = 0.0;
+            }
+        }
+        if let Some((pos, yaw)) = self.seat().and_then(|_| self.seated_at(self.my_id)) {
+            out.push(Actor {
+                id: self.my_id,
+                pos,
+                yaw,
+                pitch: self.pitch,
+                stance: Stance::Crouch,
+                team: self.team,
+                weapon: self.weapon(),
+                flags: 0,
+                phase: 0.0,
+                walk: 0.0,
+                sprint: 0.0,
+                melee: 0.0,
+                reload: None,
+                protected: false,
+                chute: 0,
+            });
+        }
+        let _ = now;
+        out
+    }
+
+    fn live_actors_raw(&self) -> Vec<Actor> {
         let now = self.now;
         self.remotes
             .iter()
@@ -1737,6 +1856,7 @@ impl GameClient {
             self.net.send(C2S::BrJump);
         }
 
+        self.update_cars(dt);
         // ---- local player
         let steer = self.alive && playing_input && !self.frozen() && self.killcam.is_none();
         self.update_piloting(dt, steer);
@@ -1856,11 +1976,34 @@ impl GameClient {
                 weight: def.weight,
             };
             let eye_before = self.body.stance.eye();
-            let mut t = dt.min(0.1);
-            while t > 0.0 {
-                let h = t.min(1.0 / 60.0);
-                self.body.step(&self.world, &inp, &self.tuning.movement, h);
-                t -= h;
+            let seat = self
+                .seat()
+                .map(|(c, k)| (c.seat_pos(k), c.state.velocity(), k));
+            if let Some((at, vel, k)) = seat {
+                // in a car: it carries us (and the driver drives it)
+                self.body.pos = at;
+                self.body.vel = vel;
+                self.body.on_ground = true;
+                self.body.stance = Stance::Crouch;
+                self.want_stance = Stance::Crouch;
+                if k == 0 && now >= self.next_drive {
+                    self.next_drive = now + 1.0 / 30.0;
+                    let throttle = (key(Action::Forward) as i8 - key(Action::Back) as i8) * 100;
+                    let steer = (key(Action::Left) as i8 - key(Action::Right) as i8) * 100;
+                    self.net
+                        .send(C2S::Car(toon_shared::protocol::CarCmd::Drive {
+                            throttle,
+                            steer,
+                            brake: key(Action::Jump),
+                        }));
+                }
+            } else {
+                let mut t = dt.min(0.1);
+                while t > 0.0 {
+                    let h = t.min(1.0 / 60.0);
+                    self.body.step(&self.world, &inp, &self.tuning.movement, h);
+                    t -= h;
+                }
             }
             if !self.body.on_ground {
                 self.fall_speed = self.fall_speed.max(-self.body.vel.y);
@@ -1965,7 +2108,8 @@ impl GameClient {
                 // fall through with attacks blocked below
             }
             // (knocked down: no attacks of any kind)
-            let shielded = self.is_protected() || self.downed();
+            let shielded =
+                self.is_protected() || self.downed() || self.seat().is_some_and(|(_, k)| k == 0);
             let trigger = if def.auto { trig_down } else { trig_pressed };
             let raising = now - self.sprint_end < def.sprint_out_time as f64;
             let busy = shielded
@@ -2083,10 +2227,20 @@ impl GameClient {
             }
             self.using = key(Action::Use);
             // dropped weapons: F swaps (unless F is needed for the bomb right here)
-            self.pickup_target = self.find_pickup();
-            if let Some((ent, _)) = self.pickup_target {
+            let seated = self.me.seat.is_some();
+            self.pickup_target = if seated { None } else { self.find_pickup() };
+            if seated && pressed(Action::Use) && now >= self.next_pickup {
+                self.net.send(C2S::Car(toon_shared::protocol::CarCmd::Exit));
+                self.next_pickup = now + 0.6;
+            }
+            if let Some((ent, pick)) = self.pickup_target {
                 if pressed(Action::Use) && now >= self.next_pickup && !self.near_objective() {
-                    self.net.send(C2S::PickUp(ent));
+                    match pick {
+                        Pick::Car(_) => self
+                            .net
+                            .send(C2S::Car(toon_shared::protocol::CarCmd::Enter(ent))),
+                        _ => self.net.send(C2S::PickUp(ent)),
+                    }
                     self.next_pickup = now + 0.6;
                 }
             }
@@ -2454,6 +2608,38 @@ impl GameClient {
         }
     }
 
+    /// The car we sit in and our seat (seat 0 drives).
+    pub fn seat(&self) -> Option<(&CarView, usize)> {
+        if !self.alive {
+            return None;
+        }
+        let (car, k) = self.me.seat?;
+        self.cars.get(&car).map(|c| (c, k as usize))
+    }
+
+    /// Follows the server's cars smoothly (our own one a little ahead, for the delay).
+    fn update_cars(&mut self, dt: f32) {
+        let now = self.now;
+        let mine = self.me.seat.map(|s| s.0);
+        // (our own car: about the one-way delay ahead)
+        let lead = 0.06;
+        let k = 1.0 - (-14.0 * dt).exp();
+        for (id, c) in self.cars.iter_mut() {
+            let ahead = (now - c.at) + if Some(*id) == mine { lead } else { 0.0 };
+            let ahead = ahead.min(0.3) as f32;
+            let t = &c.target;
+            let want = t.pos + t.forward() * t.speed * ahead;
+            if c.state.pos.distance(want) > 8.0 {
+                c.state.pos = want;
+                c.state.yaw = t.yaw;
+            } else {
+                c.state.pos = c.state.pos.lerp(want, k);
+                c.state.yaw = wrap_angle(c.state.yaw + wrap_angle(t.yaw - c.state.yaw) * k);
+            }
+            c.state.speed = t.speed;
+        }
+    }
+
     /// Knocked down (battle royale squads): crawling, no shooting.
     pub fn downed(&self) -> bool {
         self.alive && self.me.downed
@@ -2530,6 +2716,15 @@ impl GameClient {
             ((self.now * 53.0).sin() as f32) * self.shake * 0.02,
             ((self.now * 61.0).cos() as f32) * self.shake * 0.02,
         );
+        // in a car: from behind and above it
+        if let Some((c, _)) = self.seat() {
+            let dir = look_dir(self.yaw, self.pitch.min(0.6));
+            let mut cam = c.state.pos + vec3(0.0, 2.4, 0.0) - dir * 7.5;
+            if let Some(g) = self.world.ground(cam.x, cam.z) {
+                cam.y = cam.y.max(g + 0.8);
+            }
+            return (cam, self.yaw, self.pitch);
+        }
         if self.alive {
             let s = self.sway_offset();
             return (

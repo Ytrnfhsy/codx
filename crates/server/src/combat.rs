@@ -17,6 +17,7 @@ pub enum Hit {
     Player(u8, f32, HitZone),
     Heli(usize, f32),
     Vehicle(usize, f32),
+    Car(usize, f32),
 }
 
 /// A bullet in flight.
@@ -117,6 +118,15 @@ impl Game {
                 }
             }
         }
+        for (i, c) in self.cars.iter().enumerate() {
+            let (cc, r) = c.sphere();
+            if let Some(dist) = ray_sphere(o, d, cc, r) {
+                if dist < best {
+                    best = dist;
+                    hit = Hit::Car(i, dist);
+                }
+            }
+        }
         (best, hit)
     }
 
@@ -128,6 +138,10 @@ impl Game {
         let Some(cur) = self.p(id).map(|p| p.weapon().id) else {
             return;
         };
+        // the driver keeps both hands on the wheel
+        if matches!(self.seat_of(id), Some((_, 0))) {
+            return;
+        }
         // nobody shoots while skydiving
         if self
             .p(id)
@@ -289,6 +303,7 @@ impl Game {
         let mut counted: Vec<(u8, u32)> = Vec::new();
         let mut heli_dmg: Vec<(u8, Team, usize, f32)> = Vec::new();
         let mut vehicle_dmg: Vec<(u8, usize, f32)> = Vec::new();
+        let mut car_dmg: Vec<(u8, usize, f32)> = Vec::new();
         for (bi, hit, dist) in hits {
             let bl = &self.bullets[bi];
             let def = self.tuning.weapon(bl.weapon);
@@ -328,6 +343,7 @@ impl Game {
                 }
                 Hit::Heli(i, _) => heli_dmg.push((bl.owner, bl.team, i, base)),
                 Hit::Vehicle(i, _) => vehicle_dmg.push((bl.owner, i, base)),
+                Hit::Car(i, _) => car_dmg.push((bl.owner, i, base)),
                 Hit::None => {}
             }
         }
@@ -345,6 +361,9 @@ impl Game {
         }
         for (owner, i, dmg) in vehicle_dmg {
             self.damage_vehicle(i, dmg, Some(owner));
+        }
+        for (owner, i, dmg) in car_dmg {
+            self.damage_car(i, dmg, Some(owner));
         }
         for (owner, team, i, dmg) in heli_dmg {
             if let Some(h) = self.helis.get_mut(i) {
@@ -860,6 +879,20 @@ impl Game {
             .collect();
         for (i, dmg) in hits {
             self.damage_vehicle(i, dmg, owner);
+        }
+        // and cars
+        let hits: Vec<(usize, f32)> = self
+            .cars
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                let (cc, r) = c.sphere();
+                let d = (cc.distance(pos) - r).max(0.0);
+                (d < radius).then(|| (i, max_dmg * 1.5 * (1.0 - d / radius)))
+            })
+            .collect();
+        for (i, dmg) in hits {
+            self.damage_car(i, dmg, owner);
         }
         // helicopters caught in big blasts
         if big {

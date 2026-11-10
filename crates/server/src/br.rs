@@ -192,6 +192,7 @@ impl Game {
         self.br.entrants = entrants;
         self.br_make_squads();
         self.br_scatter_loot();
+        self.spawn_cars();
         self.br_assign_drops(&jumps);
         self.center_all(
             || {

@@ -955,6 +955,7 @@ mod tests {
             terrain: None,
             loot: Vec::new(),
             nav_detail: Vec::new(),
+            car_spots: Vec::new(),
         };
         let w = World::from_map(&map);
         let (stop, _, pierced) = w.bullet_trace(vec3(0.0, 1.5, 0.0), vec3(1.0, 0.0, 0.0), 50.0);
@@ -1006,6 +1007,7 @@ mod tests {
             terrain: None,
             loot: Vec::new(),
             nav_detail: Vec::new(),
+            car_spots: Vec::new(),
         };
         let w = World::from_map(&map);
         let t = mt();
@@ -1093,6 +1095,7 @@ mod tests {
             terrain: Some(std::sync::Arc::new(hm)),
             loot: Vec::new(),
             nav_detail: Vec::new(),
+            car_spots: Vec::new(),
         };
         World::from_map(&map)
     }

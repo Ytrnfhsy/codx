@@ -349,6 +349,8 @@ pub struct Game {
     pub rng: Rng,
     pub grenades: Vec<Grenade>,
     pub vehicles: Vec<crate::vehicles::Vehicle>,
+    /// Battle royale jeeps and boats.
+    pub cars: Vec<crate::cars::Car>,
     pub drops: Vec<crate::vehicles::BombDrop>,
     /// Where and when players died or spawned lately (spawns avoid both).
     pub recent_deaths: Vec<(Vec3, f64)>,
@@ -436,6 +438,7 @@ impl Game {
             rng: Rng::from_time(),
             grenades: Vec::new(),
             vehicles: Vec::new(),
+            cars: Vec::new(),
             drops: Vec::new(),
             recent_deaths: Vec::new(),
             recent_spawns: Vec::new(),
@@ -1207,6 +1210,18 @@ impl Game {
             C2S::BrJump => self.br_jump(id),
             C2S::UseMedkit => self.br_use_medkit(id),
             C2S::Item(a) => self.br_item(id, a),
+            C2S::Car(cmd) => match cmd {
+                toon_shared::protocol::CarCmd::Enter(c) => {
+                    self.car_enter(id, c);
+                    self.car_hint(id);
+                }
+                toon_shared::protocol::CarCmd::Exit => self.car_exit(id),
+                toon_shared::protocol::CarCmd::Drive {
+                    throttle,
+                    steer,
+                    brake,
+                } => self.car_drive(id, throttle, steer, brake),
+            },
             C2S::Marker(m) => {
                 if let Some(p) = self.pm(id) {
                     p.marker = m.filter(|m| m[0].is_finite() && m[1].is_finite());
@@ -1311,6 +1326,8 @@ impl Game {
 
     fn on_input(&mut self, id: u8, inp: InputState) {
         let frozen = self.state == MatchState::PreRound || self.state == MatchState::PostMatch;
+        // in a car the car moves you: only where you look counts
+        let seated = !self.cars.is_empty() && self.seat_of(id).is_some();
         let world = &self.world;
         let Some(p) = self.players[id as usize].as_mut() else {
             return;
@@ -1332,6 +1349,10 @@ impl Game {
         p.flags = inp.flags & (flags::SPRINT | flags::ADS | flags::ON_GROUND | flags::USE);
         if p.flags & flags::SPRINT != 0 {
             p.last_sprint = self.time;
+        }
+        if seated {
+            p.flags &= !flags::SPRINT;
+            return;
         }
         let new = Vec3::from_array(inp.pos);
         if !new.is_finite() {
@@ -1498,6 +1519,7 @@ impl Game {
         self.lobby_spots = None;
         self.smokes.clear();
         self.vehicles.clear();
+        self.cars.clear();
         self.drops.clear();
         for p in self.players.iter_mut().flatten() {
             p.driving = None;
@@ -1851,6 +1873,7 @@ impl Game {
         self.update_blasts();
         self.update_helis(dt);
         self.update_vehicles(dt);
+        self.update_cars(dt);
 
         if self.time >= self.next_housekeeping {
             self.next_housekeeping = self.time + 1.0;
@@ -1995,6 +2018,7 @@ impl Game {
                 protected: (p.protected_until - self.time).max(0.0) as f32,
                 vehicle: self.vehicle_hud(p.id),
                 downed: p.downed,
+                seat: self.seat_of(p.id).map(|(i, k)| (self.cars[i].id, k as u8)),
             },
             None => MeSnap::default(),
         };
@@ -2035,6 +2059,7 @@ impl Game {
             ents.push(pk.snap());
         }
         ents.extend(self.br_loot_snaps());
+        ents.extend(self.car_snaps());
         for h in &self.helis {
             ents.push(EntSnap::Heli {
                 id: h.id,
@@ -2065,7 +2090,8 @@ impl Game {
                 EntSnap::Grenade { pos, .. }
                 | EntSnap::Smoke { pos, .. }
                 | EntSnap::Vehicle { pos, .. }
-                | EntSnap::Drop { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
+                | EntSnap::Drop { pos, .. }
+                | EntSnap::Car { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
                 // small things on the ground: a few pixels at most from further away
                 EntSnap::Weapon { pos, .. } | EntSnap::Loot { pos, .. } => {
                     near(Vec3::from_array(*pos), LOOT_RANGE)

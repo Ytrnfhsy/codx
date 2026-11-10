@@ -416,12 +416,20 @@ pub fn render_world(
                 let target = g.pickup_target.map(|t| t.0) == Some(*id) && kc.is_none();
                 models::add_dropped_gun(&mut m, Vec3::from_array(*pos), *yaw, *weapon, age, target);
             }
+            // (drawn from the smoothed cars below)
+            EntSnap::Car { .. } => {}
             EntSnap::Loot { id, kind, pos, .. } => models::add_loot(
                 &mut m,
                 Vec3::from_array(*pos),
                 *kind,
                 now as f32 + *id as f32,
             ),
+        }
+    }
+    // jeeps and boats
+    if kc.is_none() {
+        for c in g.cars.values() {
+            models::add_car(&mut m, c.kind, &c.state, c.hp, now as f32);
         }
     }
     // the battle royale plane
@@ -695,7 +703,9 @@ pub fn render_viewmodel(
             vm
         }
         Some(_) => return,
-        None if g.alive && !g.scoped() && g.piloting.is_none() => g.vm_state(),
+        None if g.alive && !g.scoped() && g.piloting.is_none() && g.me.seat.is_none() => {
+            g.vm_state()
+        }
         None => return,
     };
     let cam = ViewmodelCamera(Camera3D {
@@ -1043,6 +1053,19 @@ pub fn draw_model_gallery(mats: &Materials) {
             let (col, row) = (i % 9, i / 9);
             let x = 4.6 - col as f32 * 0.8 - row as f32 * 0.4;
             models::add_loot(&mut m, vec3(x, 2.0 + row as f32 * 0.45, 0.5), k, 0.0);
+        }
+    }
+    // (GALLERY_CARS=1: a jeep and a boat in front)
+    if std::env::var("GALLERY_CARS").is_ok() {
+        use toon_shared::cars::{CarKind, CarState};
+        for (kind, x, yaw) in [(CarKind::Jeep, 2.0, 0.9), (CarKind::Boat, -2.2, -0.9)] {
+            let s = CarState {
+                pos: vec3(x, 0.0, -2.5),
+                yaw,
+                speed: 8.0,
+                vy: 0.0,
+            };
+            models::add_car(&mut m, kind, &s, 100, 0.0);
         }
     }
     // soldiers of both teams

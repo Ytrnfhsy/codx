@@ -382,6 +382,7 @@ impl Game {
                     self.vehicles[j].hp -= self.tuning.streaks.nrk_damage;
                 }
             }
+            Hit::Car(j, _) => self.damage_car(j, self.tuning.streaks.nrk_damage, Some(owner)),
             Hit::None => {}
         }
         self.shots.push(ShotFx {

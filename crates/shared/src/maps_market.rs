@@ -1266,6 +1266,7 @@ pub fn market() -> Map {
         terrain: None,
         loot: Vec::new(),
         nav_detail: Vec::new(),
+        car_spots: Vec::new(),
     }
 }
 

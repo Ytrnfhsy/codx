@@ -4,6 +4,7 @@
 pub mod admin;
 pub mod bots;
 pub mod br;
+pub mod cars;
 pub mod combat;
 pub mod config;
 pub mod game;

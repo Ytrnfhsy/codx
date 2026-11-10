@@ -2,6 +2,7 @@
 //! gameplay constants, weapons, maps, movement physics, raycasts and the network protocol.
 
 pub mod ballistics;
+pub mod cars;
 pub mod consts;
 pub mod inventory;
 pub mod lang;

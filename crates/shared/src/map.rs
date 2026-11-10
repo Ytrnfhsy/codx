@@ -167,6 +167,8 @@ pub struct Map {
     /// Big maps: areas (min x, min z, max x, max z) with buildings, where the bots'
     /// navigation needs a fine grid (doors, staircases).
     pub nav_detail: Vec<[f32; 4]>,
+    /// Jeeps and boats waiting for the battle royale.
+    pub car_spots: Vec<crate::cars::CarSpot>,
 }
 
 impl Map {

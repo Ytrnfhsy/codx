@@ -105,6 +105,20 @@ pub enum C2S {
     Ready(bool),
     /// The map marker shown to the squad (None removes it).
     Marker(Option<[f32; 2]>),
+    /// Jeeps and boats.
+    Car(CarCmd),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CarCmd {
+    Enter(u16),
+    Exit,
+    /// The driver's controls: throttle and steering in -100..100, handbrake.
+    Drive {
+        throttle: i8,
+        steer: i8,
+        brake: bool,
+    },
 }
 
 /// What can be thrown out of the battle royale inventory.
@@ -200,6 +214,8 @@ pub struct MeSnap {
     pub vehicle: Option<VehicleHud>,
     /// Battle royale: knocked down (crawling; `hp` is what is left before bleeding out).
     pub downed: bool,
+    /// The car and seat we sit in (seat 0 drives).
+    pub seat: Option<(u16, u8)>,
 }
 
 /// The vehicle a player steers, as the server sees it.
@@ -269,6 +285,18 @@ pub enum EntSnap {
         /// Rounds, medkits, or per cent left of a vest or helmet.
         amount: u16,
         pos: V3,
+    },
+    /// A jeep or a boat.
+    Car {
+        id: u16,
+        kind: crate::cars::CarKind,
+        pos: V3,
+        yaw: f32,
+        speed: f32,
+        /// Per cent of its health left.
+        hp: u8,
+        /// Who sits in each seat (255 = nobody; the driver first).
+        seats: [u8; crate::cars::SEATS],
     },
 }
 

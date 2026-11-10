@@ -716,3 +716,156 @@ fn squads_knock_down_and_revive() {
         "a squad with nobody standing is out"
     );
 }
+
+/// Jeeps: get in, drive (the car carries you), a passenger beside you, run an enemy over,
+/// get out beside the car; enough bullets blow it up and hurt those inside.
+#[test]
+fn jeeps_drive_carry_and_blow_up() {
+    use toon_shared::protocol::CarCmd;
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir().join("tw-br8").to_string_lossy().into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 3;
+    cfg.br.max_players = 4;
+    let mut g = Game::new(cfg);
+    g.rng = toon_shared::rng::Rng::new(4);
+    g.change_map(MapId::Island, Mode::Br);
+    let join = |g: &mut Game, port: u16| {
+        let id = g
+            .connect(
+                format!("127.0.0.1:{port}").parse().unwrap(),
+                "Водій",
+                "",
+                toon_shared::consts::PROTOCOL_VERSION,
+            )
+            .unwrap();
+        g.handle(id, C2S::JoinTeam(None));
+        id
+    };
+    let me = join(&mut g, 5011);
+    let friend = join(&mut g, 5012);
+    let tick = |g: &mut Game, secs: f32| {
+        for _ in 0..(secs / TICK_DT).max(1.0) as usize {
+            g.tick(TICK_DT);
+            g.outbox.clear();
+            g.shots.clear();
+        }
+    };
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        tick(&mut g, TICK_DT);
+        if g.br.running {
+            break;
+        }
+    }
+    assert!(g.br.running);
+    assert!(g.cars.len() >= 15, "{} cars", g.cars.len());
+    g.handle(me, C2S::BrJump);
+    g.handle(friend, C2S::BrJump);
+    // land both next to a jeep
+    let (car_id, at) = g
+        .cars
+        .iter()
+        .find(|c| c.kind == toon_shared::cars::CarKind::Jeep)
+        .map(|c| (c.id, c.state.pos))
+        .unwrap();
+    for (id, dx) in [(me, -2.0), (friend, 2.0)] {
+        let p = g.pm(id).unwrap();
+        p.body.chute = Chute::None;
+        p.body.pos = at + glam::vec3(dx, 0.0, 0.0);
+        p.protected_until = 0.0;
+    }
+    g.handle(me, C2S::Car(CarCmd::Enter(car_id)));
+    g.handle(friend, C2S::Car(CarCmd::Enter(car_id)));
+    assert_eq!(g.seat_of(me).map(|s| s.1), Some(0), "the first in drives");
+    assert_eq!(g.seat_of(friend).map(|s| s.1), Some(1));
+    // the driver cannot shoot, the passenger can
+    let mag = g.p(me).unwrap().weapon().mag;
+    let fire = |g: &mut Game, id: u8| {
+        let p = g.p(id).unwrap();
+        let (w, eye) = (p.weapon().id, p.eye());
+        let d = toon_shared::look_dir(p.yaw, p.pitch);
+        g.handle(
+            id,
+            C2S::Fire {
+                weapon: w,
+                origin: eye.to_array(),
+                dirs: vec![d.to_array()],
+            },
+        );
+    };
+    fire(&mut g, me);
+    assert_eq!(g.p(me).unwrap().weapon().mag, mag, "the driver fired");
+
+    // drive for three seconds
+    for _ in 0..90 {
+        g.handle(
+            me,
+            C2S::Car(CarCmd::Drive {
+                throttle: 100,
+                steer: 0,
+                brake: false,
+            }),
+        );
+        tick(&mut g, TICK_DT);
+    }
+    let c = g.cars.iter().find(|c| c.id == car_id).unwrap();
+    let moved = c.state.pos.distance(at);
+    assert!(moved > 15.0, "the jeep moved only {moved:.1} m");
+    let seat = c.seat_pos(0);
+    assert!(
+        g.p(me).unwrap().body.pos.distance(seat) < 0.01,
+        "the driver rides along"
+    );
+    fire(&mut g, friend);
+    assert!(
+        g.p(friend).unwrap().weapon().mag < mag,
+        "the passenger could not fire"
+    );
+
+    // an enemy in the way is run over
+    let enemy = g
+        .players
+        .iter()
+        .flatten()
+        .find(|p| p.is_bot() && p.alive)
+        .map(|p| p.id);
+    if let Some(e) = enemy {
+        let c = g.cars.iter().find(|c| c.id == car_id).unwrap();
+        let ahead = c.state.to_world(glam::vec3(0.0, 0.0, 3.5));
+        let p = g.pm(e).unwrap();
+        p.body.pos = ahead;
+        p.protected_until = 0.0;
+        p.hp = 100.0;
+        g.handle(
+            me,
+            C2S::Car(CarCmd::Drive {
+                throttle: 100,
+                steer: 0,
+                brake: false,
+            }),
+        );
+        tick(&mut g, TICK_DT);
+        let p = g.p(e).unwrap();
+        assert!(p.hp < 100.0 || !p.alive, "not run over");
+    }
+
+    // out beside the car
+    g.handle(me, C2S::Car(CarCmd::Exit));
+    assert!(g.seat_of(me).is_none());
+    let c = g.cars.iter().find(|c| c.id == car_id).unwrap();
+    let d = g.p(me).unwrap().body.pos.distance(c.state.pos);
+    assert!((1.0..4.0).contains(&d), "got out {d:.1} m away");
+
+    // shot to pieces: it blows up and the passenger is hurt
+    let i = g.cars.iter().position(|c| c.id == car_id).unwrap();
+    g.damage_car(i, 10_000.0, Some(me));
+    tick(&mut g, TICK_DT);
+    assert!(g.cars.iter().all(|c| c.id != car_id), "still there");
+    let p = g.p(friend).unwrap();
+    assert!(
+        !p.alive || p.hp < 100.0 || p.downed,
+        "the passenger was not hurt"
+    );
+}

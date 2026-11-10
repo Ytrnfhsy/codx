@@ -976,6 +976,61 @@ pub fn island() -> Map {
     let at = |x: f32, z: f32| vec3(x, m.height(x, z), z);
     let centre = &PLACES[0];
 
+    // jeeps by every town and village and in the camps, boats on the lake and the river
+    let free = |x: f32, z: f32, y: f32| {
+        b.boxes.iter().all(|bx| {
+            !bx.solid
+                || bx.max.x < x - 2.6
+                || bx.min.x > x + 2.6
+                || bx.max.z < z - 2.6
+                || bx.min.z > z + 2.6
+                || bx.max.y < y + 0.3
+                || bx.min.y > y + 2.0
+        })
+    };
+    let mut car_spots = Vec::new();
+    for pl in PLACES {
+        let spots: Vec<(f32, f32)> = match pl.kind {
+            Kind::Base => vec![
+                (pl.x - 18.0, pl.max().y - 12.0),
+                (pl.x + 18.0, pl.max().y - 12.0),
+            ],
+            _ => vec![(pl.max().x + 7.0, pl.z + 1.5)],
+        };
+        for (x, z) in spots {
+            // a little further out until it stands clear of trees and walls
+            let mut x = x;
+            for _ in 0..6 {
+                if free(x, z, m.height(x, z)) {
+                    break;
+                }
+                x += 3.0;
+            }
+            if free(x, z, m.height(x, z)) && m.height(x, z) > WATER + 0.5 {
+                car_spots.push(crate::cars::CarSpot {
+                    pos: at(x, z),
+                    yaw: crate::yaw_of(vec3(1.0, 0.0, 0.0)),
+                    kind: crate::cars::CarKind::Jeep,
+                });
+            }
+        }
+    }
+    let boats = [
+        (LAKE.0 + 20.0, LAKE.1, RIVER[1]),
+        (RIVER[2].0, RIVER[2].1, RIVER[3]),
+        (RIVER[5].0, RIVER[5].1, RIVER[6]),
+        (RIVER[7].0, RIVER[7].1, RIVER[8]),
+    ];
+    for (x, z, towards) in boats {
+        if m.height(x, z) < WATER - 0.6 {
+            car_spots.push(crate::cars::CarSpot {
+                pos: vec3(x, WATER - 0.15, z),
+                yaw: crate::yaw_of(vec3(towards.0 - x, 0.0, towards.1 - z)),
+                kind: crate::cars::CarKind::Boat,
+            });
+        }
+    }
+
     Map {
         id: MapId::Island,
         name: "Острів",
@@ -999,6 +1054,7 @@ pub fn island() -> Map {
                 [a.x - 4.0, a.y - 4.0, b.x + 4.0, b.y + 4.0]
             })
             .collect(),
+        car_spots,
     }
 }
 
@@ -1037,6 +1093,13 @@ mod tests {
         );
         assert!(!bridges().is_empty());
         assert!(map.boxes.len() < 70_000, "{}", map.boxes.len());
+        let jeeps = map
+            .car_spots
+            .iter()
+            .filter(|c| c.kind == crate::cars::CarKind::Jeep)
+            .count();
+        let boats = map.car_spots.len() - jeeps;
+        assert!(jeeps >= 14 && boats >= 3, "{jeeps} jeeps, {boats} boats");
     }
 
     #[test]

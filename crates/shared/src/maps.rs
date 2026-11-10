@@ -254,6 +254,7 @@ fn depot() -> Map {
         terrain: None,
         loot: Vec::new(),
         nav_detail: Vec::new(),
+        car_spots: Vec::new(),
     }
 }
 
@@ -324,6 +325,7 @@ fn cargo() -> Map {
         terrain: None,
         loot: Vec::new(),
         nav_detail: Vec::new(),
+        car_spots: Vec::new(),
     }
 }
 
