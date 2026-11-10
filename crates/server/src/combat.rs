@@ -154,6 +154,8 @@ impl Game {
         let Some(p) = self.players[id as usize].as_mut() else {
             return;
         };
+        let cur_mag = p.mag_cap(cur_mag);
+        let quiet = p.suppressed();
         // The client finishes reloads/switches by its own clock, which runs ahead of ours by
         // roughly the one-way latency; accept shots that arrive slightly "early".
         let slack = (p.ping * 0.5 + 0.12).min(0.35) as f64;
@@ -230,6 +232,7 @@ impl Game {
                     from: origin.to_array(),
                     to: path.end().to_array(),
                     flesh: false,
+                    quiet,
                 });
                 self.shots.len() - 1
             });
@@ -693,7 +696,7 @@ impl Game {
         if !p.alive || p.reload_end.is_some() {
             return;
         }
-        if p.weapon().mag >= def.mag || p.weapon().reserve == 0 {
+        if p.weapon().mag >= p.mag_cap(def.mag) || p.weapon().reserve == 0 {
             return;
         }
         let k = if p.has_perk2(Perk2::SleightOfHand) {
@@ -1180,6 +1183,7 @@ impl Game {
                 from: from.to_array(),
                 to: (from + d * dist).to_array(),
                 flesh,
+                quiet: false,
             });
         }
     }

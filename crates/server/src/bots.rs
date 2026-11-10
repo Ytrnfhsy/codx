@@ -402,7 +402,13 @@ impl Game {
                 // sounds outside the view make the bot turn around
                 let moving = vec2(o.body.vel.x, o.body.vel.z).length() > 2.0
                     && o.body.stance == Stance::Stand;
-                let audible = (shooting && d < sk.hearing)
+                // (a suppressor: heard only close by)
+                let hearing = if o.suppressed() {
+                    sk.hearing * 0.35
+                } else {
+                    sk.hearing
+                };
+                let audible = (shooting && d < hearing)
                     || (moving && !o.has_perk3(Perk3::DeadSilence) && d < sk.footsteps)
                     || hit_me;
                 if !los && audible && heard.map(|h| d < h.1).unwrap_or(true) {

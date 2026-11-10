@@ -337,6 +337,48 @@ pub fn gun_parts_with(w: WeaponId, sight: u8) -> Vec<GunPart> {
     parts
 }
 
+/// A gun with its sight and other attachments: a suppressor or compensator on the muzzle,
+/// a longer magazine, a grip under the barrel.
+pub fn gun_parts_full(w: WeaponId, sight: u8, mods: [u8; 3]) -> Vec<GunPart> {
+    use toon_shared::inventory::{MOD_COMPENSATOR, MOD_EXTMAG, MOD_GRIP, MOD_SUPPRESSOR};
+    let mut parts = gun_parts_with(w, sight);
+    let mz = muzzle(w);
+    match mods[0] {
+        MOD_SUPPRESSOR => parts.push(GunPart {
+            c: mz + vec3(0.0, 0.0, -0.1),
+            h: vec3(0.024, 0.024, 0.1),
+            col: [36, 38, 42],
+            mag: false,
+            pump: false,
+        }),
+        MOD_COMPENSATOR => parts.push(GunPart {
+            c: mz + vec3(0.0, 0.0, -0.03),
+            h: vec3(0.026, 0.026, 0.035),
+            col: [70, 72, 78],
+            mag: false,
+            pump: false,
+        }),
+        _ => {}
+    }
+    if mods[1] == MOD_EXTMAG {
+        for p in parts.iter_mut().filter(|p| p.mag) {
+            p.c.y -= p.h.y * 0.5;
+            p.h.y *= 1.5;
+        }
+    }
+    if mods[2] == MOD_GRIP {
+        let g = fore_grip(w);
+        parts.push(GunPart {
+            c: g + vec3(0.0, -0.065, 0.0),
+            h: vec3(0.016, 0.05, 0.018),
+            col: [42, 44, 50],
+            mag: false,
+            pump: false,
+        });
+    }
+    parts
+}
+
 /// Centre of the magazine (where the off hand goes when reloading).
 pub fn gun_mag(w: WeaponId) -> Option<(Vec3, Vec3, [u8; 3])> {
     gun_parts(w)
@@ -945,6 +987,27 @@ pub fn add_loot(m: &mut ToonMesh, pos: Vec3, kind: toon_shared::protocol::LootKi
             for p in sight_parts(l, 0.0) {
                 m.boxed(&(at * Mat4::from_translation(p.c)), p.h, p.col, 0.01);
             }
+        }
+        LootKind::Mod(k) => {
+            use toon_shared::inventory::{MOD_COMPENSATOR, MOD_EXTMAG, MOD_SUPPRESSOR};
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, -0.08, 0.0))),
+                vec3(0.2, 0.05, 0.14),
+                [96, 104, 70],
+                0.02,
+            );
+            let (h, c) = match k {
+                MOD_SUPPRESSOR => (vec3(0.05, 0.05, 0.22), [36, 38, 42]),
+                MOD_COMPENSATOR => (vec3(0.06, 0.06, 0.08), [80, 82, 88]),
+                MOD_EXTMAG => (vec3(0.05, 0.16, 0.08), [50, 52, 58]),
+                _ => (vec3(0.04, 0.12, 0.04), [42, 44, 50]),
+            };
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, 0.08, 0.0))),
+                h,
+                c,
+                0.015,
+            );
         }
         LootKind::Grenades => {
             m.boxed(&base, vec3(0.3, 0.14, 0.24), [130, 100, 60], 0.02);

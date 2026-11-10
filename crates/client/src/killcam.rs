@@ -628,6 +628,7 @@ impl Killcam {
         let since = |t: f64| (self.pt - t) as f32;
         VmState {
             sight: 0,
+            mods: [0; 3],
             weapon: self.weapon,
             sleeve: [200, 200, 200],
             hand: [255, 214, 170],

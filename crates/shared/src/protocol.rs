@@ -131,6 +131,8 @@ pub enum Item {
     Backpack,
     /// A spare sight of this level, from the backpack.
     Sight(u8),
+    /// A spare attachment of this kind, from the backpack.
+    Mod(u8),
     /// The gun in this hand slot.
     Weapon(u8),
 }
@@ -143,6 +145,11 @@ pub enum ItemAction {
     AttachSight { level: u8, slot: u8 },
     /// Take the sight off the gun in `slot` into the backpack.
     DetachSight(u8),
+    /// Put a spare attachment on the gun in `slot` (one already in its place goes in the
+    /// backpack).
+    AttachMod { kind: u8, slot: u8 },
+    /// Take every attachment off the gun in `slot` into the backpack.
+    DetachMods(u8),
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -323,6 +330,8 @@ pub enum LootKind {
     Grenades,
     /// A sight for a gun (level 1..4: red dot, 2×, 4×, 8×).
     Sight(u8),
+    /// Another attachment (`inventory::MOD_*`).
+    Mod(u8),
 }
 
 impl LootKind {
@@ -337,6 +346,7 @@ impl LootKind {
             LootKind::Backpack(l) => format!("{} {}", t("Рюкзак", "Backpack"), level_name(l)),
             LootKind::Grenades => t("Гранати", "Grenades").into(),
             LootKind::Sight(l) => crate::inventory::sight_name(l).into(),
+            LootKind::Mod(k) => crate::inventory::mod_name(k).into(),
         }
     }
 }
@@ -402,6 +412,8 @@ pub struct ShotFx {
     pub to: V3,
     /// Hit a player (spawn a toon "pow" instead of dust).
     pub flesh: bool,
+    /// Fired through a suppressor: hardly heard, no flash.
+    pub quiet: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

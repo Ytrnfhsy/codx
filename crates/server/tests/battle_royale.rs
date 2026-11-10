@@ -960,3 +960,119 @@ fn supply_drops_come_down_with_rare_gear() {
     tick(&mut g, TICK_DT);
     assert!(g.br.drops.is_empty());
 }
+
+/// Attachments: an extended magazine holds half as many rounds more, a suppressed shot is
+/// quiet, a grip a pistol cannot take waits in the backpack, and taking the magazine off
+/// puts the extra rounds back in the bag.
+#[test]
+fn attachments_change_the_gun() {
+    use toon_shared::inventory::{AmmoType, MOD_EXTMAG, MOD_GRIP, MOD_SUPPRESSOR};
+    use toon_shared::protocol::{ItemAction, LootKind};
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir()
+            .join("tw-br10")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 2;
+    cfg.br.max_players = 3;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Island, Mode::Br);
+    let me = g
+        .connect(
+            "127.0.0.1:5014".parse().unwrap(),
+            "Гравець",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    let tick = |g: &mut Game, secs: f32| {
+        for _ in 0..(secs / TICK_DT).max(1.0) as usize {
+            if let Some(p) = g.pm(me) {
+                if p.alive {
+                    p.body.pos = glam::vec3(0.0, 400.0, 0.0);
+                    p.body.chute = Chute::None;
+                    p.protected_until = 0.0;
+                }
+            }
+            g.tick(TICK_DT);
+            g.outbox.clear();
+        }
+    };
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        tick(&mut g, TICK_DT);
+        g.shots.clear();
+        if g.br.running {
+            break;
+        }
+    }
+    g.handle(me, C2S::BrJump);
+    tick(&mut g, 0.2);
+    // a rifle in the first hand, rounds for it
+    {
+        let p = g.pm(me).unwrap();
+        p.weapons[0] = toon_server::game::WState {
+            id: WeaponId::M4,
+            mag: 30,
+            reserve: 0,
+        };
+        p.slot = 0;
+        p.inv.add_ammo(AmmoType::Rifle, 90);
+        p.br_refresh_reserve();
+    }
+    let at = g.p(me).unwrap().body.pos;
+    let put = |g: &mut Game, kind: LootKind| {
+        let id = g.new_ent_id();
+        g.br.loot.push(toon_server::br::Loot {
+            id,
+            kind,
+            amount: 1,
+            pos: at,
+        });
+        id
+    };
+    for k in [MOD_EXTMAG, MOD_SUPPRESSOR, MOD_GRIP] {
+        let e = put(&mut g, LootKind::Mod(k));
+        g.handle(me, C2S::PickUp(e));
+    }
+    assert_eq!(
+        g.p(me).unwrap().inv.mods[0],
+        [MOD_SUPPRESSOR, MOD_EXTMAG, MOD_GRIP]
+    );
+    // the magazine: 45 after a reload
+    g.pm(me).unwrap().weapons[0].mag = 10;
+    g.start_reload(me);
+    tick(&mut g, 3.0);
+    assert_eq!(g.p(me).unwrap().weapons[0].mag, 45);
+    // quiet shots
+    g.shots.clear();
+    let p = g.p(me).unwrap();
+    let (eye, d) = (p.eye(), toon_shared::look_dir(p.yaw, p.pitch));
+    g.pm(me).unwrap().switch_end = 0.0;
+    g.handle(
+        me,
+        C2S::Fire {
+            weapon: WeaponId::M4,
+            origin: eye.to_array(),
+            dirs: vec![d.to_array()],
+        },
+    );
+    assert!(g.shots.iter().all(|s| s.quiet) && !g.shots.is_empty());
+    // a grip the pistol cannot take goes in the backpack
+    let e = put(&mut g, LootKind::Mod(MOD_GRIP));
+    g.pm(me).unwrap().slot = 1;
+    g.handle(me, C2S::PickUp(e));
+    let p = g.p(me).unwrap();
+    assert_eq!(p.inv.spare_mods[MOD_GRIP as usize - 1], 1);
+    // everything off the rifle: the magazine's extra rounds go back in the bag
+    g.pm(me).unwrap().inv.backpack = 3;
+    let before = g.p(me).unwrap().inv.ammo(AmmoType::Rifle);
+    g.handle(me, C2S::Item(ItemAction::DetachMods(0)));
+    let p = g.p(me).unwrap();
+    assert_eq!(p.inv.mods[0], [0, 0, 0]);
+    assert_eq!(p.weapons[0].mag, 30);
+    assert_eq!(p.inv.ammo(AmmoType::Rifle), before + 14);
+}

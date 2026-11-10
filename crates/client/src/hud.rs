@@ -1417,7 +1417,7 @@ impl GameClient {
         for k in 0..2usize {
             let (wid, mag, res) = self.weapons[k];
             let empty = br.empty_slot == Some(k as u8);
-            draw_rectangle(lx, ly, cw, 64.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_rectangle(lx, ly, cw, 84.0, Color::new(0.0, 0.0, 0.0, 0.3));
             if empty {
                 ui.text(
                     t("— порожньо —", "— empty —"),
@@ -1438,44 +1438,61 @@ impl GameClient {
                         TEXT
                     },
                 );
-                ui.text(
-                    &format!(
-                        "{mag} / {res} · {}",
-                        if inv.sights[k] > 0 {
-                            sight_name(inv.sights[k])
-                        } else {
-                            t("без прицілу", "no sight")
-                        }
-                    ),
-                    lx + 12.0,
-                    ly + 48.0,
-                    15,
-                    MUTED,
+                let mut what = vec![if inv.sights[k] > 0 {
+                    sight_name(inv.sights[k]).to_string()
+                } else {
+                    t("без прицілу", "no sight").to_string()
+                }];
+                what.extend(
+                    inv.mods[k]
+                        .iter()
+                        .filter(|m| **m != 0)
+                        .map(|m| toon_shared::inventory::mod_name(*m).to_string()),
                 );
+                let line = format!("{mag} / {res} · {}", what.join(" · "));
+                let mut size = 15u16;
+                while size > 11 && ui.width(&line, size, false) > cw - 24.0 {
+                    size -= 1;
+                }
+                ui.text(&line, lx + 12.0, ly + 74.0, size, MUTED);
+                if inv.mods[k].iter().any(|m| *m != 0)
+                    && small(
+                        ui,
+                        t("Зняти обвіси", "Mods off"),
+                        lx + cw - 2.0 * 104.0 - 16.0,
+                        ly + 40.0,
+                        104.0,
+                    )
+                {
+                    act = Some(ItemAction::DetachMods(k as u8));
+                }
                 let bw = 104.0;
                 if inv.sights[k] > 0
                     && small(
                         ui,
                         t("Зняти приціл", "Sight off"),
                         lx + cw - 2.0 * bw - 16.0,
-                        ly + 18.0,
+                        ly + 8.0,
                         bw,
                     )
                 {
                     act = Some(ItemAction::DetachSight(k as u8));
                 }
                 let other_real = br.empty_slot != Some(1 - k as u8);
-                if other_real && small(ui, drop_txt, lx + cw - bw - 8.0, ly + 18.0, bw) {
+                if other_real && small(ui, drop_txt, lx + cw - bw - 8.0, ly + 8.0, bw) {
                     act = Some(ItemAction::Drop(Item::Weapon(k as u8), 1));
                 }
             }
-            ly += 72.0;
+            ly += 92.0;
         }
         ly += 16.0;
         ui.bold(
             &format!(
                 "{} ({}/{})",
-                t("Приціли в рюкзаку", "Sights in the backpack"),
+                t(
+                    "Приціли й обвіси в рюкзаку",
+                    "Sights and mods in the backpack"
+                ),
                 inv.spare_count(),
                 inv.sight_cap()
             ),
@@ -1511,6 +1528,39 @@ impl GameClient {
                     if small(ui, &tr!("На {}", "On {}", k + 1), bx, ly + 4.0, 54.0) {
                         act = Some(ItemAction::AttachSight {
                             level,
+                            slot: k as u8,
+                        });
+                    }
+                }
+            }
+            ly += 42.0;
+        }
+        for kind in toon_shared::inventory::MODS {
+            let n = inv.spare_mods[kind as usize - 1];
+            if n == 0 {
+                continue;
+            }
+            any = true;
+            draw_rectangle(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            let name = toon_shared::inventory::mod_name(kind);
+            let label = if n > 1 {
+                format!("{name} ×{n}")
+            } else {
+                name.to_string()
+            };
+            ui.text(&label, lx + 12.0, ly + 24.0, 16, TEXT);
+            let mut bx = lx + cw - 8.0 - 84.0;
+            if small(ui, drop_txt, bx, ly + 4.0, 84.0) {
+                act = Some(ItemAction::Drop(Item::Mod(kind), 1));
+            }
+            for k in (0..2usize).rev() {
+                let ok = br.empty_slot != Some(k as u8)
+                    && toon_shared::inventory::mod_fits(kind, self.weapons[k].0);
+                if ok {
+                    bx -= 58.0;
+                    if small(ui, &tr!("На {}", "On {}", k + 1), bx, ly + 4.0, 54.0) {
+                        act = Some(ItemAction::AttachMod {
+                            kind,
                             slot: k as u8,
                         });
                     }
@@ -2131,7 +2181,7 @@ impl GameClient {
             110.0,
             Color::new(0.0, 0.0, 0.0, 0.35),
         );
-        let mag_max = self.tuning.weapon(wid).mag;
+        let mag_max = self.mag_cap();
         let mag_c = if mag == 0 {
             BAD
         } else if (mag as f32) < mag_max as f32 * 0.3 {

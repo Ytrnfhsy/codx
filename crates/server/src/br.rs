@@ -7,7 +7,8 @@ use crate::pickups::Pickup;
 use glam::{vec2, vec3, Vec2, Vec3};
 use toon_shared::consts::MAX_HEALTH;
 use toon_shared::inventory::{
-    armor_durability, helmet_durability, sight_fits, AmmoType, MAX_SIGHT, MEDKIT_HEAL, MEDKIT_TIME,
+    armor_durability, helmet_durability, mag_size, mod_fits, mod_place, sight_fits, AmmoType,
+    MAX_SIGHT, MEDKIT_HEAL, MEDKIT_TIME, MODS, MOD_EXTMAG, MOD_SUPPRESSOR,
 };
 use toon_shared::lang::t;
 use toon_shared::physics::{Body, Chute, Stance};
@@ -550,7 +551,11 @@ impl Game {
     /// A crate has landed: the rare gear inside goes round it.
     fn br_fill_drop(&mut self, i: usize) {
         let at = self.br.drops[i].pos;
-        let mut items: Vec<(LootKind, u16)> = vec![(LootKind::Sight(4), 1), (LootKind::Medkit, 3)];
+        let mut items: Vec<(LootKind, u16)> = vec![
+            (LootKind::Sight(4), 1),
+            (LootKind::Medkit, 3),
+            (LootKind::Mod(MOD_SUPPRESSOR), 1),
+        ];
         let gear = [
             LootKind::Armor(3),
             LootKind::Helmet(3),
@@ -722,8 +727,10 @@ impl Game {
                     k if k < 0.64 => (LootKind::Armor(level(&mut self.rng)), 100),
                     k if k < 0.75 => (LootKind::Helmet(level(&mut self.rng)), 100),
                     k if k < 0.84 => (LootKind::Backpack(level(&mut self.rng)), 1),
+                    // other attachments
+                    k if k < 0.89 => (LootKind::Mod(MODS[self.rng.below(MODS.len())]), 1),
                     // sights: red dots and 2× common, 8× rare
-                    k if k < 0.94 => {
+                    k if k < 0.95 => {
                         let l = match self.rng.f32() {
                             r if r < 0.35 => 1,
                             r if r < 0.65 => 2,
@@ -1073,6 +1080,23 @@ impl Game {
                     left = 0;
                 }
             }
+            LootKind::Mod(kind) => {
+                // on a gun in hand that takes it and has its place free, otherwise in the
+                // backpack
+                let slot = p.slot as usize;
+                let place = mod_place(kind);
+                let fits = |k: usize| {
+                    Some(k as u8) != p.empty_slot
+                        && mod_fits(kind, p.weapons[k].id)
+                        && p.inv.mods[k][place] == 0
+                };
+                if let Some(k) = [slot, 1 - slot].into_iter().find(|k| fits(*k)) {
+                    p.inv.mods[k][place] = kind;
+                    left = 0;
+                } else if p.inv.stash_mod(kind) {
+                    left = 0;
+                }
+            }
             LootKind::Grenades => {
                 let cap = p.inv.grenade_cap();
                 if p.grenades < cap || p.smokes < 2 {
@@ -1085,7 +1109,11 @@ impl Game {
         let human = !p.is_bot();
         let gear = matches!(
             l.kind,
-            LootKind::Armor(_) | LootKind::Helmet(_) | LootKind::Backpack(_) | LootKind::Sight(_)
+            LootKind::Armor(_)
+                | LootKind::Helmet(_)
+                | LootKind::Backpack(_)
+                | LootKind::Sight(_)
+                | LootKind::Mod(_)
         );
         let taken = left < l.amount || swapped.is_some() || left == 0;
         if left == 0 {
@@ -1183,6 +1211,16 @@ impl Game {
                 items.push((LootKind::Sight(k as u8 + 1), 1));
             }
         }
+        for m in inv.mods.iter().flatten() {
+            if *m != 0 {
+                items.push((LootKind::Mod(*m), 1));
+            }
+        }
+        for (k, n) in inv.spare_mods.iter().enumerate() {
+            for _ in 0..*n {
+                items.push((LootKind::Mod(k as u8 + 1), 1));
+            }
+        }
         let n = items.len().max(1) as f32;
         for (k, (kind, amount)) in items.into_iter().enumerate() {
             // in a small ring round the body
@@ -1266,9 +1304,14 @@ impl Game {
                         out.push((LootKind::Medkit, over as u16));
                     }
                     while p.inv.spare_count() > p.inv.sight_cap() {
-                        let k = p.inv.spare_sights.iter().position(|n| *n > 0).unwrap_or(0);
-                        p.inv.spare_sights[k] -= 1;
-                        out.push((LootKind::Sight(k as u8 + 1), 1));
+                        if let Some(k) = p.inv.spare_mods.iter().position(|n| *n > 0) {
+                            p.inv.spare_mods[k] -= 1;
+                            out.push((LootKind::Mod(k as u8 + 1), 1));
+                        } else {
+                            let k = p.inv.spare_sights.iter().position(|n| *n > 0).unwrap_or(0);
+                            p.inv.spare_sights[k] -= 1;
+                            out.push((LootKind::Sight(k as u8 + 1), 1));
+                        }
                     }
                     p.grenades = p.grenades.min(p.inv.grenade_cap());
                 }
@@ -1277,6 +1320,13 @@ impl Game {
                     if p.inv.spare_sights[k] > 0 {
                         p.inv.spare_sights[k] -= 1;
                         out.push((LootKind::Sight(l), 1));
+                    }
+                }
+                Item::Mod(m) if MODS.contains(&m) => {
+                    let k = m as usize - 1;
+                    if p.inv.spare_mods[k] > 0 {
+                        p.inv.spare_mods[k] -= 1;
+                        out.push((LootKind::Mod(m), 1));
                     }
                 }
                 // a gun can go while the other hand still holds one
@@ -1295,6 +1345,11 @@ impl Game {
                         let l = std::mem::take(&mut p.inv.sights[k]);
                         if l > 0 && !p.inv.stash_sight(l) {
                             out.push((LootKind::Sight(l), 1));
+                        }
+                        for m in std::mem::take(&mut p.inv.mods[k]) {
+                            if m != 0 && !p.inv.stash_mod(m) {
+                                out.push((LootKind::Mod(m), 1));
+                            }
                         }
                         if p.slot as usize == k {
                             p.slot = other as u8;
@@ -1320,11 +1375,47 @@ impl Game {
                     }
                 }
             }
+            ItemAction::AttachMod { kind, slot } => {
+                let k = slot as usize;
+                if k < 2
+                    && MODS.contains(&kind)
+                    && p.inv.spare_mods[kind as usize - 1] > 0
+                    && p.empty_slot != Some(slot)
+                    && mod_fits(kind, p.weapons[k].id)
+                {
+                    let place = mod_place(kind);
+                    p.inv.spare_mods[kind as usize - 1] -= 1;
+                    let old = std::mem::replace(&mut p.inv.mods[k][place], kind);
+                    if old != 0 {
+                        p.inv.spare_mods[old as usize - 1] += 1;
+                    }
+                }
+            }
+            ItemAction::DetachMods(slot) => {
+                let k = slot as usize;
+                if k < 2 {
+                    for place in 0..3 {
+                        let m = p.inv.mods[k][place];
+                        if m != 0 && p.inv.stash_mod(m) {
+                            p.inv.mods[k][place] = 0;
+                        }
+                    }
+                }
+            }
             ItemAction::DetachSight(slot) => {
                 let k = slot as usize;
                 if k < 2 && p.inv.sights[k] > 0 && p.inv.stash_sight(p.inv.sights[k]) {
                     p.inv.sights[k] = 0;
                 }
+            }
+        }
+        // a magazine holding more than it may now: the extra rounds go back in the bag
+        for k in 0..2 {
+            let w = p.weapons[k];
+            let cap = mag_size(self.tuning.weapon(w.id).mag, p.inv.has_mod(k, MOD_EXTMAG));
+            if w.mag > cap {
+                p.weapons[k].mag = cap;
+                p.inv.add_ammo(AmmoType::of(w.id), w.mag - cap);
             }
         }
         p.br_refresh_reserve();
@@ -1615,6 +1706,13 @@ impl Game {
                         || carried.contains(&t) && inv.ammo(t) < t.box_size() * 2
                 }
                 LootKind::Grenades => false,
+                LootKind::Mod(m) => (0..2).any(|k| {
+                    have_ids.get(k).is_some_and(|w| {
+                        w.def().class != toon_shared::weapons::WeaponClass::Pistol
+                            && mod_fits(m, *w)
+                            && inv.mods[k][mod_place(m)] == 0
+                    })
+                }),
                 LootKind::Sight(l) => (0..2).any(|k| {
                     have_ids.get(k).is_some_and(|w| {
                         w.def().class != toon_shared::weapons::WeaponClass::Pistol

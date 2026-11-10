@@ -165,6 +165,53 @@ pub fn sight_fits(level: u8, w: WeaponId) -> bool {
     }
 }
 
+/// Gun attachments found as loot (besides sights): kinds 1..4.
+pub const MOD_SUPPRESSOR: u8 = 1;
+pub const MOD_COMPENSATOR: u8 = 2;
+pub const MOD_EXTMAG: u8 = 3;
+pub const MOD_GRIP: u8 = 4;
+pub const MODS: [u8; 4] = [MOD_SUPPRESSOR, MOD_COMPENSATOR, MOD_EXTMAG, MOD_GRIP];
+
+pub fn mod_name(kind: u8) -> &'static str {
+    match kind {
+        MOD_SUPPRESSOR => t("Глушник", "Suppressor"),
+        MOD_COMPENSATOR => t("Компенсатор", "Compensator"),
+        MOD_EXTMAG => t("Збільшений магазин", "Extended magazine"),
+        _ => t("Руків'я", "Vertical grip"),
+    }
+}
+
+/// Where on a gun it goes: 0 the muzzle (suppressor or compensator), 1 the magazine,
+/// 2 under the barrel.
+pub fn mod_place(kind: u8) -> usize {
+    match kind {
+        MOD_SUPPRESSOR | MOD_COMPENSATOR => 0,
+        MOD_EXTMAG => 1,
+        _ => 2,
+    }
+}
+
+/// Which attachments go on which gun.
+pub fn mod_fits(kind: u8, w: WeaponId) -> bool {
+    let c = w.def().class;
+    match kind {
+        MOD_SUPPRESSOR => c != WeaponClass::Shotgun,
+        MOD_COMPENSATOR => !matches!(c, WeaponClass::Shotgun | WeaponClass::Pistol),
+        MOD_EXTMAG => c != WeaponClass::Shotgun,
+        MOD_GRIP => matches!(c, WeaponClass::Rifle | WeaponClass::Smg | WeaponClass::Lmg),
+        _ => false,
+    }
+}
+
+/// A magazine's size with or without the extended one.
+pub fn mag_size(base: u16, extended: bool) -> u16 {
+    if extended {
+        base + base / 2
+    } else {
+        base
+    }
+}
+
 /// Seconds a medkit takes to use, and what it heals.
 pub const MEDKIT_TIME: f32 = 3.0;
 pub const MEDKIT_HEAL: f32 = 60.0;
@@ -186,6 +233,11 @@ pub struct Inventory {
     pub sights: [u8; 2],
     /// Spare sights in the backpack, by level (index 0 = red dot … 3 = 8×).
     pub spare_sights: [u8; 4],
+    /// Attachments on the gun in each hand slot, by place (`mod_place`): the kind there
+    /// (0 = none).
+    pub mods: [[u8; 3]; 2],
+    /// Spare attachments in the backpack, by kind (index kind - 1).
+    pub spare_mods: [u8; 4],
 }
 
 impl Inventory {
@@ -202,8 +254,21 @@ impl Inventory {
     pub fn sight_cap(&self) -> u8 {
         2 + self.backpack
     }
+    /// Spare sights and attachments (they share the room).
     pub fn spare_count(&self) -> u8 {
-        self.spare_sights.iter().sum()
+        self.spare_sights.iter().sum::<u8>() + self.spare_mods.iter().sum::<u8>()
+    }
+    /// Puts an attachment in the backpack; false when there is no room.
+    pub fn stash_mod(&mut self, kind: u8) -> bool {
+        if !MODS.contains(&kind) || self.spare_count() >= self.sight_cap() {
+            return false;
+        }
+        self.spare_mods[kind as usize - 1] += 1;
+        true
+    }
+    /// The gun in `slot` has this kind of attachment on.
+    pub fn has_mod(&self, slot: usize, kind: u8) -> bool {
+        self.mods[slot & 1][mod_place(kind)] == kind
     }
     /// Puts a sight in the backpack; false when there is no room.
     pub fn stash_sight(&mut self, level: u8) -> bool {
@@ -294,6 +359,17 @@ mod tests {
         assert_eq!(inv.medkit_cap(), 8);
         assert_eq!(AmmoType::of(WeaponId::M40), AmmoType::Sniper);
         assert!(AmmoType::Rifle.guns().contains(&"M4A1"));
+    }
+
+    #[test]
+    fn attachments_fit_and_share_the_backpack() {
+        assert!(mod_fits(MOD_SUPPRESSOR, WeaponId::M9) && !mod_fits(MOD_GRIP, WeaponId::M9));
+        assert!(!mod_fits(MOD_SUPPRESSOR, WeaponId::W1200));
+        assert!(mod_fits(MOD_GRIP, WeaponId::M4) && !mod_fits(MOD_GRIP, WeaponId::M40));
+        assert_eq!(mag_size(30, true), 45);
+        let mut inv = Inventory::default();
+        assert!(inv.stash_sight(2) && inv.stash_mod(MOD_GRIP) && !inv.stash_mod(MOD_EXTMAG));
+        assert_eq!(mod_place(MOD_COMPENSATOR), mod_place(MOD_SUPPRESSOR));
     }
 
     #[test]

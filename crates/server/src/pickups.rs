@@ -115,6 +115,7 @@ impl Game {
         // ground, if it is full); a bare gun gets the best spare that fits it
         let slot = p.slot as usize;
         let mut loose = None;
+        let mut loose_mods: Vec<u8> = Vec::new();
         if br {
             let l = p.inv.sights[slot];
             if l > 0 && !toon_shared::inventory::sight_fits(l, pk.w.id) {
@@ -126,6 +127,28 @@ impl Game {
             if p.inv.sights[slot] == 0 {
                 p.inv.sights[slot] = p.inv.take_best_sight(pk.w.id);
             }
+            // attachments the new gun cannot take go in the backpack (or the ground); free
+            // places get spares that fit
+            use toon_shared::inventory::{mod_fits, MODS};
+            for place in 0..3 {
+                let m = p.inv.mods[slot][place];
+                if m != 0 && !mod_fits(m, pk.w.id) {
+                    p.inv.mods[slot][place] = 0;
+                    if !p.inv.stash_mod(m) {
+                        loose_mods.push(m);
+                    }
+                }
+            }
+            for m in MODS {
+                let place = toon_shared::inventory::mod_place(m);
+                if p.inv.mods[slot][place] == 0
+                    && mod_fits(m, pk.w.id)
+                    && p.inv.spare_mods[m as usize - 1] > 0
+                {
+                    p.inv.spare_mods[m as usize - 1] -= 1;
+                    p.inv.mods[slot][place] = m;
+                }
+            }
         }
         p.reload_end = None;
         p.switch_end = time + swap as f64;
@@ -136,6 +159,9 @@ impl Game {
         self.drop_weapon(old, pos);
         if let Some(l) = loose {
             self.br_drop_loot(toon_shared::protocol::LootKind::Sight(l), 1, pos);
+        }
+        for m in loose_mods {
+            self.br_drop_loot(toon_shared::protocol::LootKind::Mod(m), 1, pos);
         }
         self.say(Dest::One(id), || S2C::Center {
             text: tr!("Підібрано: {name}", "Picked up: {name}"),

@@ -117,6 +117,21 @@ pub struct Player {
 }
 
 impl Player {
+    /// How many rounds the gun in hand holds (an extended magazine holds more).
+    pub fn mag_cap(&self, base: u16) -> u16 {
+        toon_shared::inventory::mag_size(
+            base,
+            self.inv
+                .has_mod(self.slot as usize, toon_shared::inventory::MOD_EXTMAG),
+        )
+    }
+
+    /// The gun in hand has a suppressor on.
+    pub fn suppressed(&self) -> bool {
+        self.inv
+            .has_mod(self.slot as usize, toon_shared::inventory::MOD_SUPPRESSOR)
+    }
+
     /// Battle royale: every gun's reserve is the inventory's ammo of its calibre.
     pub fn br_refresh_reserve(&mut self) {
         for (k, w) in self.weapons.iter_mut().enumerate() {
@@ -1830,7 +1845,7 @@ impl Game {
             }
             let def = tuning.weapon(p.weapon().id);
             p.shot_budget = (p.shot_budget + dt * def.rpm / 60.0).min(2.0);
-            let mag_max = def.mag;
+            let mag_max = p.mag_cap(def.mag);
             if let Some(end) = p.reload_end {
                 if time >= end {
                     let w = p.weapon_mut();

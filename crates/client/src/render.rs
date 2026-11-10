@@ -46,6 +46,8 @@ pub struct VmState {
     pub weapon: WeaponId,
     /// Battle royale sight on it (0 = none).
     pub sight: u8,
+    /// Its other attachments by place.
+    pub mods: [u8; 3],
     /// Sleeve and hand colours.
     pub sleeve: [u8; 3],
     pub hand: [u8; 3],
@@ -756,7 +758,7 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     let ads = vm.ads;
     let hip = vec3(0.26, -0.27, -0.66);
     // line the top of the sights up just under the screen centre
-    let parts = models::gun_parts_with(w, vm.sight);
+    let parts = models::gun_parts_full(w, vm.sight, vm.mods);
     let top = parts.iter().map(|p| p.c.y + p.h.y).fold(0.1, f32::max);
     // (a red dot: look through the middle of its window)
     let top = if vm.sight == 1 && !def.scoped {
@@ -1032,7 +1034,8 @@ pub fn draw_model_gallery(mats: &Materials) {
             trs(pos, std::f32::consts::FRAC_PI_2, 0.0, 0.0) * Mat4::from_scale(Vec3::splat(1.7));
         // (GALLERY_SIGHTS=1: every gun with a battle royale sight, to check how they sit)
         if std::env::var("GALLERY_SIGHTS").is_ok() {
-            for p in models::gun_parts_with(w, 1 + (i % 4) as u8) {
+            let mods = [1 + (i % 2) as u8, 3, 4];
+            for p in models::gun_parts_full(w, 1 + (i % 4) as u8, mods) {
                 m.boxed(&(base * Mat4::from_translation(p.c)), p.h, p.col, 0.012);
             }
         } else {

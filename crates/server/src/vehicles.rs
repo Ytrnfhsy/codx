@@ -391,6 +391,7 @@ impl Game {
             from: from.to_array(),
             to: (from + d * dist).to_array(),
             flesh,
+            quiet: false,
         });
     }
 

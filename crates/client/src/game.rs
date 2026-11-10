@@ -1227,7 +1227,8 @@ impl GameClient {
             } else {
                 self.fx.impact(to);
             }
-            if shot.id != 255 {
+            // (a suppressor: no flash, and hardly heard)
+            if shot.id != 255 && !shot.quiet {
                 self.fx.muzzle(from);
             }
             if let Some(a) = audio {
@@ -1236,7 +1237,7 @@ impl GameClient {
                 } else {
                     Sfx::for_weapon(shot.weapon)
                 };
-                a.play_shot(sfx, from, eye, 0.75);
+                a.play_shot(sfx, from, eye, if shot.quiet { 0.2 } else { 0.75 });
                 if shot.flesh {
                     a.play_at(Sfx::Flesh, to, eye, 0.5, 30.0);
                 }
@@ -1493,6 +1494,7 @@ impl GameClient {
         let now = self.now;
         VmState {
             sight: self.sight(),
+            mods: self.mods(),
             weapon: self.weapon(),
             sleeve: self.vm_colors(self.my_id, self.team).0,
             hand: self.vm_colors(self.my_id, self.team).1,
@@ -1536,7 +1538,13 @@ impl GameClient {
             * def.move_spread
             * (1.0 - self.ads_t * 0.8);
         let air = if self.body.on_ground { 0.0 } else { 3.0 };
-        base + mv + air + self.spread_bonus
+        // a vertical grip steadies the gun
+        let grip = if self.has_mod(toon_shared::inventory::MOD_GRIP) {
+            0.8
+        } else {
+            1.0
+        };
+        (base + mv) * grip + air + self.spread_bonus
     }
 
     pub fn spread_px(&self, fovy: f32) -> f32 {
@@ -1557,6 +1565,27 @@ impl GameClient {
         } else {
             0
         }
+    }
+
+    /// Attachments on the gun in hand, by place (muzzle, magazine, grip).
+    pub fn mods(&self) -> [u8; 3] {
+        self.br
+            .as_ref()
+            .map(|b| b.inv.mods[self.slot as usize & 1])
+            .unwrap_or_default()
+    }
+
+    /// The gun in hand has this attachment on.
+    pub fn has_mod(&self, kind: u8) -> bool {
+        self.mods()[toon_shared::inventory::mod_place(kind)] == kind
+    }
+
+    /// Rounds the magazine of the gun in hand holds.
+    pub fn mag_cap(&self) -> u16 {
+        toon_shared::inventory::mag_size(
+            self.ws().mag,
+            self.has_mod(toon_shared::inventory::MOD_EXTMAG),
+        )
     }
 
     /// Magnification when aiming: the gun's own, or its sight's if that is stronger.
@@ -1685,6 +1714,18 @@ impl GameClient {
         };
         let ramp = def.recoil_scale(self.shot_streak);
         self.shot_streak += 1;
+        // a compensator and a grip tame the kick
+        let stance_k = stance_k
+            * if self.has_mod(toon_shared::inventory::MOD_COMPENSATOR) {
+                0.7
+            } else {
+                1.0
+            }
+            * if self.has_mod(toon_shared::inventory::MOD_GRIP) {
+                0.85
+            } else {
+                1.0
+            };
         let kick =
             (def.recoil_v * 0.55 * ads_k * stance_k * ramp * self.rng.range(0.8, 1.2)).to_radians();
         self.pitch = (self.pitch + kick).min(1.5);
@@ -1697,7 +1738,8 @@ impl GameClient {
         self.recoil_vis = (self.recoil_vis + 0.5 + heft * 0.5).min(1.4);
         self.shake = (self.shake + heft * 0.05).min(0.3);
         if let Some(a) = audio {
-            a.play(Sfx::for_weapon(w), 0.85);
+            let quiet = self.has_mod(toon_shared::inventory::MOD_SUPPRESSOR);
+            a.play(Sfx::for_weapon(w), if quiet { 0.3 } else { 0.85 });
             a.play_later(Sfx::Shell, 0.35 + self.rng.range(0.0, 0.2), 0.25);
         }
     }
@@ -1714,7 +1756,7 @@ impl GameClient {
     fn start_reload(&mut self) {
         let (w, mag, res) = self.weapons[self.slot as usize];
         let def = self.tuning.weapon(w);
-        if self.reload_until.is_some() || mag >= def.mag || res == 0 {
+        if self.reload_until.is_some() || mag >= self.mag_cap() || res == 0 {
             return;
         }
         let k = if self.loadout.perk2 == Perk2::SleightOfHand {
@@ -2067,7 +2109,7 @@ impl GameClient {
             if let Some((end, _)) = self.reload_until {
                 if now >= end {
                     let s = self.slot as usize;
-                    let m = self.tuning.weapon(self.weapons[s].0).mag;
+                    let m = self.mag_cap();
                     let take = m.saturating_sub(self.weapons[s].1).min(self.weapons[s].2);
                     self.weapons[s].1 += take;
                     self.weapons[s].2 -= take;
