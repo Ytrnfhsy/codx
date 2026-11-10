@@ -418,6 +418,9 @@ pub fn render_world(
             }
             // (drawn from the smoothed cars below)
             EntSnap::Car { .. } => {}
+            EntSnap::AirDrop { pos, landed, .. } => {
+                models::add_airdrop(&mut m, Vec3::from_array(*pos), *landed, now as f32)
+            }
             EntSnap::Loot { id, kind, pos, .. } => models::add_loot(
                 &mut m,
                 Vec3::from_array(*pos),
@@ -1067,6 +1070,8 @@ pub fn draw_model_gallery(mats: &Materials) {
             };
             models::add_car(&mut m, kind, &s, 100, 0.0);
         }
+        models::add_airdrop(&mut m, vec3(0.0, 0.0, 0.5), true, 0.0);
+        models::add_airdrop(&mut m, vec3(-4.0, 1.0, 2.0), false, 0.0);
     }
     // soldiers of both teams
     let looks = [

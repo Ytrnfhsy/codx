@@ -164,6 +164,8 @@ pub struct GameClient {
     pub cars: HashMap<u16, CarView>,
     /// When the driving controls were last sent.
     next_drive: f64,
+    /// When the crates' signal smoke puffs next.
+    next_flare: f64,
     pub ents: Vec<EntSnap>,
     pub scoreboard: Vec<ScoreRow>,
     latest_tick: u32,
@@ -403,6 +405,7 @@ impl GameClient {
             squad: 0,
             cars: HashMap::new(),
             next_drive: 0.0,
+            next_flare: 0.0,
             ents: Vec::new(),
             scoreboard: Vec::new(),
             latest_tick: 0,
@@ -1857,6 +1860,23 @@ impl GameClient {
         }
 
         self.update_cars(dt);
+        // red smoke over landed supply crates
+        if now >= self.next_flare {
+            self.next_flare = now + 0.15;
+            let flares: Vec<Vec3> = self
+                .ents
+                .iter()
+                .filter_map(|e| match e {
+                    EntSnap::AirDrop {
+                        pos, landed: true, ..
+                    } => Some(Vec3::from_array(*pos) + vec3(0.0, 1.5, 0.0)),
+                    _ => None,
+                })
+                .collect();
+            for p in flares {
+                self.fx.flare_smoke(p);
+            }
+        }
         // ---- local player
         let steer = self.alive && playing_input && !self.frozen() && self.killcam.is_none();
         self.update_piloting(dt, steer);

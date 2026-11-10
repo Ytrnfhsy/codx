@@ -112,7 +112,31 @@ pub struct BrState {
     pub loot: Vec<Loot>,
     /// Next whole second at which the zone hurts those outside it.
     pub next_burn: f64,
+    /// Supply crates coming down (or down) and when the next one comes.
+    pub drops: Vec<AirDrop>,
+    pub next_drop: f64,
+    /// Crates sent this round.
+    pub launched: usize,
 }
+
+/// A supply crate: it comes down under a parachute inside the next circle and spills rare
+/// gear around it when it lands.
+#[derive(Clone, Debug)]
+pub struct AirDrop {
+    pub id: u16,
+    pub pos: Vec3,
+    pub ground: f32,
+    pub landed: bool,
+    /// The loot it left (gone once all of it is taken).
+    pub items: Vec<u16>,
+}
+
+/// Supply crates per round, the first one this long after the plane leaves, then apart.
+const DROPS: usize = 3;
+const FIRST_DROP: f64 = 100.0;
+const DROP_EVERY: f64 = 120.0;
+/// How fast a crate sinks under its parachute.
+const DROP_SINK: f32 = 5.0;
 
 impl BrState {
     pub fn plane_pos(&self, time: f64) -> Vec3 {
@@ -158,6 +182,9 @@ impl Game {
             entrants: 0,
             loot: Vec::new(),
             next_burn: time + 1.0,
+            drops: Vec::new(),
+            next_drop: time + FIRST_DROP,
+            launched: 0,
         };
         self.br_next_phase(time);
         // everyone boards
@@ -436,6 +463,151 @@ impl Game {
         for id in out {
             self.kill(id, None, Cause::Bleed, false);
         }
+    }
+
+    /// Supply crates: a new one now and then, falling ones come down, landed ones spill
+    /// their gear; a crate emptied of it goes away.
+    fn br_airdrops(&mut self, dt: f32) {
+        let time = self.time;
+        if time >= self.br.next_drop {
+            self.br.next_drop = time + DROP_EVERY;
+            if self.br.launched < DROPS {
+                self.br_launch_drop();
+            }
+        }
+        let mut landed = Vec::new();
+        for (i, d) in self.br.drops.iter_mut().enumerate() {
+            if !d.landed {
+                d.pos.y -= DROP_SINK * dt;
+                if d.pos.y <= d.ground {
+                    d.pos.y = d.ground;
+                    d.landed = true;
+                    landed.push(i);
+                }
+            }
+        }
+        for i in landed {
+            self.br_fill_drop(i);
+        }
+        let loot = &self.br.loot;
+        let pickups = &self.pickups;
+        self.br.drops.retain(|d| {
+            !d.landed
+                || d.items.iter().any(|id| {
+                    loot.iter().any(|l| l.id == *id) || pickups.iter().any(|p| p.id == *id)
+                })
+        });
+    }
+
+    /// Where the next crate comes down: dry, walkable ground inside the next circle.
+    fn br_launch_drop(&mut self) {
+        let z = self.br.zone;
+        let mut spot = None;
+        for _ in 0..40 {
+            let a = self.rng.range(0.0, std::f32::consts::TAU);
+            let r = self.rng.range(0.0, z.to_r.max(30.0) * 0.7);
+            let q = z.to_c + vec2(a.cos(), a.sin()) * r;
+            let Some(n) = self.nav.snap(vec3(q.x, 400.0, q.y)) else {
+                continue;
+            };
+            let dry = self
+                .world
+                .terrain
+                .as_ref()
+                .is_none_or(|t| t.height(n.x, n.z) > t.water + 0.5);
+            // in the open (not on a roof or inside a house)
+            let open = self
+                .world
+                .ground(n.x, n.z)
+                .is_none_or(|g| (n.y - g).abs() < 0.5);
+            if dry && open {
+                spot = Some(n);
+                break;
+            }
+        }
+        let Some(at) = spot else { return };
+        let id = self.new_ent_id();
+        self.br.drops.push(AirDrop {
+            id,
+            pos: vec3(at.x, at.y + 170.0, at.z),
+            ground: at.y,
+            landed: false,
+            items: Vec::new(),
+        });
+        self.br.launched += 1;
+        self.center_all(
+            || {
+                t(
+                    "Скидання припасів! Позначено на карті",
+                    "Supply drop! Marked on the map",
+                )
+                .into()
+            },
+            3.0,
+        );
+    }
+
+    /// A crate has landed: the rare gear inside goes round it.
+    fn br_fill_drop(&mut self, i: usize) {
+        let at = self.br.drops[i].pos;
+        let mut items: Vec<(LootKind, u16)> = vec![(LootKind::Sight(4), 1), (LootKind::Medkit, 3)];
+        let gear = [
+            LootKind::Armor(3),
+            LootKind::Helmet(3),
+            LootKind::Backpack(3),
+        ];
+        let skip = self.rng.below(3);
+        for (k, g) in gear.into_iter().enumerate() {
+            if k != skip {
+                items.push((
+                    g,
+                    if matches!(g, LootKind::Backpack(_)) {
+                        1
+                    } else {
+                        100
+                    },
+                ));
+            }
+        }
+        let guns = [WeaponId::M40, WeaponId::R700, WeaponId::M249, WeaponId::G3];
+        let gun = guns[self.rng.below(guns.len())];
+        let ammo = AmmoType::of(gun);
+        items.push((LootKind::Ammo(ammo), ammo.box_size() * 3));
+        let mut ids = Vec::new();
+        let n = items.len() as f32 + 1.0;
+        for (k, (kind, amount)) in items.into_iter().enumerate() {
+            let a = k as f32 / n * std::f32::consts::TAU;
+            let p = at + vec3(a.cos() * 1.8, 0.3, a.sin() * 1.8);
+            let id = self.new_ent_id();
+            let floor = self
+                .world
+                .floor_below(p + vec3(0.0, 1.0, 0.0), 3.0)
+                .unwrap_or(at.y);
+            self.br.loot.push(Loot {
+                id,
+                kind,
+                amount,
+                pos: vec3(p.x, floor, p.z),
+            });
+            ids.push(id);
+        }
+        // the gun on top of the crate
+        let id = self.new_ent_id();
+        let mag = self.tuning.weapon(gun).mag;
+        let yaw = self.rng.range(0.0, std::f32::consts::TAU);
+        self.pickups.push(Pickup {
+            id,
+            w: WState {
+                id: gun,
+                mag,
+                reserve: 0,
+            },
+            pos: at + vec3(0.0, 1.45, 0.0),
+            yaw,
+            expire: f64::INFINITY,
+        });
+        ids.push(id);
+        self.br.drops[i].items = ids;
     }
 
     /// Picks where the zone shrinks to next.
@@ -746,6 +918,7 @@ impl Game {
             }
         }
         self.br_downed(dt);
+        self.br_airdrops(dt);
         // medkits being used; reserves following the inventory
         for p in self.players.iter_mut().flatten() {
             if !p.alive {
@@ -1267,16 +1440,25 @@ impl Game {
                         .collect()
                 })
                 .unwrap_or_default(),
+            drops: self.br.drops.iter().map(|d| d.pos.to_array()).collect(),
         })
     }
 
     pub fn br_loot_snaps(&self) -> impl Iterator<Item = EntSnap> + '_ {
-        self.br.loot.iter().map(|l| EntSnap::Loot {
-            id: l.id,
-            kind: l.kind,
-            amount: l.amount,
-            pos: l.pos.to_array(),
-        })
+        self.br
+            .loot
+            .iter()
+            .map(|l| EntSnap::Loot {
+                id: l.id,
+                kind: l.kind,
+                amount: l.amount,
+                pos: l.pos.to_array(),
+            })
+            .chain(self.br.drops.iter().map(|d| EntSnap::AirDrop {
+                id: d.id,
+                pos: d.pos.to_array(),
+                landed: d.landed,
+            }))
     }
 
     /// Where a battle royale bot heads: into the zone first, then to a gun if it has
@@ -1407,6 +1589,15 @@ impl Game {
                 if skydiving || !Self::br_bot_gave_up(bot, ent, at, pos, time) {
                     return (Some(at), false, false);
                 }
+            }
+        }
+        // a landed supply crate not too far away (inside the zone): the best gear there is
+        if !skydiving && armed {
+            if let Some(d) = self.br.drops.iter().find(|d| {
+                d.landed && zone.contains(time, d.pos) && (25.0..220.0).contains(&near(d.pos))
+            }) {
+                let g = self.nav.snap(d.pos).unwrap_or(d.pos);
+                return (Some(g), false, false);
             }
         }
         if !skydiving {

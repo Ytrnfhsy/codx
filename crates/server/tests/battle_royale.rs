@@ -869,3 +869,94 @@ fn jeeps_drive_carry_and_blow_up() {
         "the passenger was not hurt"
     );
 }
+
+/// Supply crates: announced, come down inside the next circle under a parachute, spill
+/// rare gear (level III, an 8× scope, a heavy gun) and go once it is all taken.
+#[test]
+fn supply_drops_come_down_with_rare_gear() {
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir().join("tw-br9").to_string_lossy().into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 2;
+    cfg.br.max_players = 4;
+    let mut g = Game::new(cfg);
+    g.rng = toon_shared::rng::Rng::new(6);
+    g.change_map(MapId::Island, Mode::Br);
+    let me = g
+        .connect(
+            "127.0.0.1:5013".parse().unwrap(),
+            "Гравець",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    let tick = |g: &mut Game, secs: f32| {
+        for _ in 0..(secs / TICK_DT).max(1.0) as usize {
+            if let Some(p) = g.pm(me) {
+                if p.alive {
+                    p.body.pos = glam::vec3(0.0, 400.0, 0.0);
+                    p.body.chute = Chute::None;
+                }
+            }
+            g.tick(TICK_DT);
+            g.outbox.clear();
+            g.shots.clear();
+        }
+    };
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        tick(&mut g, TICK_DT);
+        if g.br.running {
+            break;
+        }
+    }
+    g.handle(me, C2S::BrJump);
+    g.br.next_drop = g.time;
+    tick(&mut g, TICK_DT);
+    assert_eq!(g.br.drops.len(), 1, "no crate");
+    let d = g.br.drops[0].clone();
+    assert!(!d.landed && d.pos.y > d.ground + 100.0);
+    let (c, r) = (g.br.zone.to_c, g.br.zone.to_r.max(30.0));
+    assert!(
+        glam::vec2(d.pos.x, d.pos.z).distance(c) <= r,
+        "outside the next circle"
+    );
+    assert_eq!(
+        g.snapshot_for(me).br.unwrap().drops.len(),
+        1,
+        "not on the map"
+    );
+    tick(&mut g, 36.0);
+    let d = g.br.drops[0].clone();
+    assert!(d.landed, "still falling at {}", d.pos);
+    let kinds: Vec<_> =
+        g.br.loot
+            .iter()
+            .filter(|l| d.items.contains(&l.id))
+            .map(|l| l.kind)
+            .collect();
+    assert!(
+        kinds.contains(&toon_shared::protocol::LootKind::Sight(4)),
+        "{kinds:?}"
+    );
+    let level3 = kinds
+        .iter()
+        .filter(|k| {
+            matches!(
+                k,
+                toon_shared::protocol::LootKind::Armor(3)
+                    | toon_shared::protocol::LootKind::Helmet(3)
+                    | toon_shared::protocol::LootKind::Backpack(3)
+            )
+        })
+        .count();
+    assert_eq!(level3, 2);
+    assert!(g.pickups.iter().any(|p| d.items.contains(&p.id)), "no gun");
+    // everything taken: the crate goes
+    g.br.loot.retain(|l| !d.items.contains(&l.id));
+    g.pickups.retain(|p| !d.items.contains(&p.id));
+    tick(&mut g, TICK_DT);
+    assert!(g.br.drops.is_empty());
+}

@@ -2091,7 +2091,8 @@ impl Game {
                 | EntSnap::Smoke { pos, .. }
                 | EntSnap::Vehicle { pos, .. }
                 | EntSnap::Drop { pos, .. }
-                | EntSnap::Car { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
+                | EntSnap::Car { pos, .. }
+                | EntSnap::AirDrop { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
                 // small things on the ground: a few pixels at most from further away
                 EntSnap::Weapon { pos, .. } | EntSnap::Loot { pos, .. } => {
                     near(Vec3::from_array(*pos), LOOT_RANGE)

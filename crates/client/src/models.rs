@@ -1163,3 +1163,24 @@ pub fn add_car(
         }
     }
 }
+
+/// A supply crate (under its parachute while it falls).
+pub fn add_airdrop(m: &mut ToonMesh, pos: Vec3, landed: bool, t: f32) {
+    let base = Mat4::from_translation(pos + vec3(0.0, 0.7, 0.0));
+    m.boxed(&base, vec3(0.75, 0.7, 0.75), [60, 110, 170], 0.04);
+    for (dx, dz) in [(0.0, 0.76), (0.0, -0.76), (0.76, 0.0), (-0.76, 0.0)] {
+        m.boxed(
+            &(base * Mat4::from_translation(vec3(dx, 0.0, dz))),
+            vec3(
+                if dx == 0.0 { 0.78 } else { 0.02 },
+                0.16,
+                if dz == 0.0 { 0.78 } else { 0.02 },
+            ),
+            [240, 150, 40],
+            0.0,
+        );
+    }
+    if !landed {
+        add_parachute(m, pos - vec3(0.0, 1.0, 0.0), t * 0.2, t);
+    }
+}

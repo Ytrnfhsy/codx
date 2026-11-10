@@ -286,6 +286,12 @@ pub enum EntSnap {
         amount: u16,
         pos: V3,
     },
+    /// A supply crate, coming down under its parachute or landed.
+    AirDrop {
+        id: u16,
+        pos: V3,
+        landed: bool,
+    },
     /// A jeep or a boat.
     Car {
         id: u16,
@@ -359,6 +365,8 @@ pub struct BrSnap {
     pub empty_slot: Option<u8>,
     /// The squad (us included), in a fixed order.
     pub squad: Vec<SquadMate>,
+    /// Supply crates (for the map, wherever they are).
+    pub drops: Vec<V3>,
 }
 
 /// A member of our battle royale squad.

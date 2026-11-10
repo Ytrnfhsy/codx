@@ -220,6 +220,22 @@ impl Effects {
         }
     }
 
+    /// Red signal smoke rising from a landed supply crate.
+    pub fn flare_smoke(&mut self, pos: Vec3) {
+        let v = self.rv(0.4) + vec3(0.0, 2.6, 0.0);
+        self.push(Particle {
+            pos,
+            vel: v,
+            life: 0.0,
+            max: 4.0,
+            size: 0.5,
+            grow: 0.9,
+            color: [230, 70, 60],
+            kind: Kind::Smoke,
+            grav: -0.3,
+        });
+    }
+
     /// A thin, short-lived trail behind a flying grenade: just enough to show its arc.
     pub fn smoke_trail(&mut self, pos: Vec3) {
         self.push(Particle {

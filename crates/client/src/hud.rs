@@ -952,6 +952,18 @@ impl GameClient {
             let n = to_map(vec3(br.next[0], 0.0, br.next[1]));
             draw_circle_lines(n.x, n.y, br.next[2] * scale, 2.0, WHITE);
         }
+        // supply crates (on the edge when further away)
+        for d in self.br.iter().flat_map(|b| b.drops.iter()) {
+            let p = to_map(vec3(d[0], 0.0, d[2]));
+            let r = size / 2.0 - 8.0;
+            let dd = p - c;
+            let p = if dd.length() > r {
+                c + dd.normalize() * r
+            } else {
+                p
+            };
+            draw_crate_icon(p, 0.7);
+        }
         // squadmates' markers
         for m in self
             .br
@@ -1767,6 +1779,10 @@ impl GameClient {
             2.0,
             BLACK,
         );
+        for d in &br.drops {
+            let p = to_map(d[0], d[2]);
+            draw_crate_icon(p, 1.0);
+        }
         if let Some(mk) = self.marker {
             let p = to_map(mk.x, mk.y);
             draw_marker_pin(p, 1.0);
@@ -3278,4 +3294,30 @@ fn draw_marker_pin(p: Vec2, k: f32) {
     draw_circle(top.x, top.y, 8.0 * k, c);
     draw_circle_lines(top.x, top.y, 8.0 * k, 2.0, BLACK);
     draw_circle(top.x, top.y, 3.0 * k, BLACK);
+}
+
+/// A supply crate on a map: a blue box with an orange band.
+fn draw_crate_icon(p: Vec2, k: f32) {
+    let s = 7.0 * k;
+    draw_rectangle(
+        p.x - s - 1.5,
+        p.y - s - 1.5,
+        2.0 * s + 3.0,
+        2.0 * s + 3.0,
+        BLACK,
+    );
+    draw_rectangle(
+        p.x - s,
+        p.y - s,
+        2.0 * s,
+        2.0 * s,
+        Color::new(0.24, 0.43, 0.67, 1.0),
+    );
+    draw_rectangle(
+        p.x - s,
+        p.y - 1.5 * k,
+        2.0 * s,
+        3.0 * k,
+        Color::new(0.94, 0.59, 0.16, 1.0),
+    );
 }
