@@ -7,14 +7,14 @@ use crate::pickups::Pickup;
 use glam::{vec2, vec3, Vec2, Vec3};
 use toon_shared::consts::MAX_HEALTH;
 use toon_shared::inventory::{
-    armor_durability, helmet_durability, sight_fits, AmmoType, MEDKIT_HEAL, MEDKIT_TIME,
+    armor_durability, helmet_durability, sight_fits, AmmoType, MAX_SIGHT, MEDKIT_HEAL, MEDKIT_TIME,
 };
 use toon_shared::lang::t;
 use toon_shared::physics::{Body, Chute, Stance};
-use toon_shared::protocol::{BrSnap, EntSnap, LootKind, MatchState, S2C};
+use toon_shared::protocol::{BrSnap, EntSnap, Item, ItemAction, LootKind, MatchState, S2C};
 use toon_shared::tr;
 use toon_shared::weapons::{Cause, WeaponId};
-use toon_shared::{yaw_of, Mode};
+use toon_shared::{look_dir, yaw_of, Mode};
 
 /// The plane flies this high above the sea…
 pub const PLANE_HEIGHT: f32 = 230.0;
@@ -700,10 +700,15 @@ impl Game {
                         && lv > p.inv.sights[k]
                 };
                 if let Some(k) = [slot, 1 - slot].into_iter().find(|k| fits(*k)) {
-                    if p.inv.sights[k] > 0 {
-                        swapped = Some((LootKind::Sight(p.inv.sights[k]), 1));
-                    }
+                    // the old one goes in the backpack, or on the ground if it is full
+                    let old = p.inv.sights[k];
                     p.inv.sights[k] = lv;
+                    if old > 0 && !p.inv.stash_sight(old) {
+                        swapped = Some((LootKind::Sight(old), 1));
+                    }
+                    left = 0;
+                } else if p.inv.stash_sight(lv) {
+                    // for a gun found later
                     left = 0;
                 }
             }
@@ -753,7 +758,7 @@ impl Game {
                     .into()
                 } else {
                     t(
-                        "Більше не влазить — потрібен більший рюкзак",
+                        "Більше не влазить — потрібен більший рюкзак або викинь щось (I)",
                         "No room — get a bigger backpack",
                     )
                     .into()
@@ -812,6 +817,11 @@ impl Game {
                 items.push((LootKind::Sight(l), 1));
             }
         }
+        for (k, n) in inv.spare_sights.iter().enumerate() {
+            for _ in 0..*n {
+                items.push((LootKind::Sight(k as u8 + 1), 1));
+            }
+        }
         let n = items.len().max(1) as f32;
         for (k, (kind, amount)) in items.into_iter().enumerate() {
             // in a small ring round the body
@@ -829,6 +839,139 @@ impl Game {
                 amount,
                 pos: vec3(at.x, floor, at.z),
             });
+        }
+    }
+
+    /// The inventory screen: throwing things away and moving sights between the guns
+    /// and the backpack.
+    pub fn br_item(&mut self, id: u8, action: ItemAction) {
+        if self.mode != Mode::Br || !self.br.running {
+            return;
+        }
+        let Some(p) = self.players[id as usize].as_mut() else {
+            return;
+        };
+        if !p.alive || p.in_plane {
+            return;
+        }
+        p.br_sync_ammo();
+        // things land a step in front
+        let at = p.body.pos + look_dir(p.yaw, 0.0) * 0.9;
+        let mut out: Vec<(LootKind, u16)> = Vec::new();
+        let mut gun: Option<WState> = None;
+        match action {
+            ItemAction::Drop(item, n) => match item {
+                Item::Ammo(t) => {
+                    let n = n.min(p.inv.ammo(t));
+                    if n > 0 {
+                        p.inv.ammo[t.index()] -= n;
+                        out.push((LootKind::Ammo(t), n));
+                    }
+                }
+                Item::Medkit => {
+                    let n = (n as u8).min(p.inv.medkits);
+                    if n > 0 {
+                        p.inv.medkits -= n;
+                        p.inv.healing = 0.0;
+                        out.push((LootKind::Medkit, n as u16));
+                    }
+                }
+                Item::Armor if p.inv.armor > 0 => {
+                    let pct = (p.inv.armor_hp / armor_durability(p.inv.armor) * 100.0) as u16;
+                    out.push((LootKind::Armor(p.inv.armor), pct.max(1)));
+                    p.inv.armor = 0;
+                    p.inv.armor_hp = 0.0;
+                }
+                Item::Helmet if p.inv.helmet > 0 => {
+                    let pct = (p.inv.helmet_hp / helmet_durability(p.inv.helmet) * 100.0) as u16;
+                    out.push((LootKind::Helmet(p.inv.helmet), pct.max(1)));
+                    p.inv.helmet = 0;
+                    p.inv.helmet_hp = 0.0;
+                }
+                Item::Backpack if p.inv.backpack > 0 => {
+                    out.push((LootKind::Backpack(p.inv.backpack), 1));
+                    p.inv.backpack = 0;
+                    // what no longer fits falls out with it
+                    for t in AmmoType::ALL {
+                        let over = p.inv.ammo(t).saturating_sub(p.inv.ammo_cap(t));
+                        if over > 0 {
+                            p.inv.ammo[t.index()] -= over;
+                            out.push((LootKind::Ammo(t), over));
+                        }
+                    }
+                    let over = p.inv.medkits.saturating_sub(p.inv.medkit_cap());
+                    if over > 0 {
+                        p.inv.medkits -= over;
+                        out.push((LootKind::Medkit, over as u16));
+                    }
+                    while p.inv.spare_count() > p.inv.sight_cap() {
+                        let k = p.inv.spare_sights.iter().position(|n| *n > 0).unwrap_or(0);
+                        p.inv.spare_sights[k] -= 1;
+                        out.push((LootKind::Sight(k as u8 + 1), 1));
+                    }
+                    p.grenades = p.grenades.min(p.inv.grenade_cap());
+                }
+                Item::Sight(l) if (1..=MAX_SIGHT).contains(&l) => {
+                    let k = l as usize - 1;
+                    if p.inv.spare_sights[k] > 0 {
+                        p.inv.spare_sights[k] -= 1;
+                        out.push((LootKind::Sight(l), 1));
+                    }
+                }
+                // a gun can go while the other hand still holds one
+                Item::Weapon(k) if k < 2 => {
+                    let (k, other) = (k as usize, 1 - k as usize);
+                    let real = |j: usize| p.empty_slot != Some(j as u8);
+                    if real(k) && real(other) {
+                        let w = p.weapons[k];
+                        gun = Some(WState { reserve: 0, ..w });
+                        p.weapons[k] = WState {
+                            id: WeaponId::Usp,
+                            mag: 0,
+                            reserve: 0,
+                        };
+                        p.empty_slot = Some(k as u8);
+                        let l = std::mem::take(&mut p.inv.sights[k]);
+                        if l > 0 && !p.inv.stash_sight(l) {
+                            out.push((LootKind::Sight(l), 1));
+                        }
+                        if p.slot as usize == k {
+                            p.slot = other as u8;
+                            p.reload_end = None;
+                            p.switch_end = self.time + 0.4;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            ItemAction::AttachSight { level, slot } => {
+                let (k, l) = (slot as usize, level as usize);
+                if k < 2
+                    && (1..=MAX_SIGHT as usize).contains(&l)
+                    && p.inv.spare_sights[l - 1] > 0
+                    && p.empty_slot != Some(slot)
+                    && sight_fits(level, p.weapons[k].id)
+                {
+                    p.inv.spare_sights[l - 1] -= 1;
+                    let old = std::mem::replace(&mut p.inv.sights[k], level);
+                    if old > 0 {
+                        p.inv.spare_sights[old as usize - 1] += 1;
+                    }
+                }
+            }
+            ItemAction::DetachSight(slot) => {
+                let k = slot as usize;
+                if k < 2 && p.inv.sights[k] > 0 && p.inv.stash_sight(p.inv.sights[k]) {
+                    p.inv.sights[k] = 0;
+                }
+            }
+        }
+        p.br_refresh_reserve();
+        for (kind, n) in out {
+            self.br_drop_loot(kind, n, at);
+        }
+        if let Some(w) = gun {
+            self.drop_weapon(w, at);
         }
     }
 
@@ -898,6 +1041,7 @@ impl Game {
             }),
             in_plane: me.is_some_and(|p| p.in_plane),
             inv: me.map(|p| p.inv).unwrap_or_default(),
+            empty_slot: me.and_then(|p| p.empty_slot),
         })
     }
 

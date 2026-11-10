@@ -97,6 +97,32 @@ pub enum C2S {
     SetSkin(u8),
     /// Battle royale: use a medkit.
     UseMedkit,
+    /// Battle royale: something done with an item in the inventory screen.
+    Item(ItemAction),
+}
+
+/// What can be thrown out of the battle royale inventory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Item {
+    Ammo(crate::inventory::AmmoType),
+    Medkit,
+    Armor,
+    Helmet,
+    Backpack,
+    /// A spare sight of this level, from the backpack.
+    Sight(u8),
+    /// The gun in this hand slot.
+    Weapon(u8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ItemAction {
+    /// Throw this many of it on the ground in front of you.
+    Drop(Item, u16),
+    /// Put a spare sight of `level` on the gun in `slot` (the old one goes in the backpack).
+    AttachSight { level: u8, slot: u8 },
+    /// Take the sight off the gun in `slot` into the backpack.
+    DetachSight(u8),
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -291,6 +317,8 @@ pub struct BrSnap {
     pub in_plane: bool,
     /// What we carry.
     pub inv: crate::inventory::Inventory,
+    /// The hand slot without a gun yet (or after throwing one away).
+    pub empty_slot: Option<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

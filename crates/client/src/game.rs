@@ -96,6 +96,8 @@ pub enum Overlay {
     Controls,
     /// Battle royale: picking a character.
     Skin,
+    /// Battle royale: what you carry, to throw away or move sights around.
+    Inventory,
 }
 
 pub struct Welcome {
@@ -246,6 +248,8 @@ pub struct GameClient {
     pub killcam: Option<Killcam>,
     /// A killcam waiting to start: (real time to start, info, final killcam).
     pending_killcam: Option<(f64, KillInfo, bool)>,
+    /// When the inventory screen was opened (its key closes it again only after that).
+    pub inventory_opened: f64,
     pub ragdolls: Vec<(u8, Ragdoll)>,
     /// How each recently killed player died (for ragdoll impulses).
     blows: HashMap<u8, (DeathBlow, f64)>,
@@ -265,7 +269,9 @@ pub struct GameClient {
 }
 
 /// Server time the client currently sees (clock offset applied).
-const KILLCAM_DELAY: f64 = 1.1;
+const KILLCAM_DELAY: f64 = 2.5;
+/// The final killcam (end of a round or match) waits a little longer: first the result.
+const FINAL_KILLCAM_DELAY: f64 = 3.0;
 
 pub fn build_map_mesh(map: &Map) -> ToonMesh {
     crate::level::boxes_mesh(map.boxes.iter(), map.id as u64 + 3, true)
@@ -453,6 +459,7 @@ impl GameClient {
             recorder: Recorder::default(),
             killcam: None,
             pending_killcam: None,
+            inventory_opened: 0.0,
             ragdolls: Vec::new(),
             blows: HashMap::new(),
             explosions: Vec::new(),
@@ -1216,7 +1223,7 @@ impl GameClient {
             .unwrap_or(Team::Spectator);
         self.killcam = None;
         self.pending_killcam = Some((
-            now + 0.9,
+            now + FINAL_KILLCAM_DELAY,
             KillInfo {
                 killer,
                 victim,
@@ -1248,7 +1255,7 @@ impl GameClient {
             (d < r && (p.y - me.y).abs() < 1.8).then_some(d)
         };
         // (the battle royale's empty second slot holds a placeholder pistol)
-        let empty_slot = self.mode == Mode::Br && self.weapons[1].1 == 0 && self.weapons[1].2 == 0;
+        let empty_slot = self.br.as_ref().and_then(|b| b.empty_slot);
         self.ents
             .iter()
             .filter_map(|e| match e {
@@ -1259,7 +1266,7 @@ impl GameClient {
                         .weapons
                         .iter()
                         .enumerate()
-                        .any(|(k, w)| w.0 == *weapon && !(k == 1 && empty_slot));
+                        .any(|(k, w)| w.0 == *weapon && empty_slot != Some(k as u8));
                     near(pos, 1.6)
                         .filter(|_| !have)
                         .map(|d| (d, *id, Pick::Weapon(*weapon)))
@@ -2041,6 +2048,13 @@ impl GameClient {
             }
             if self.mode == Mode::Br && pressed(Action::Heal) {
                 self.net.send(C2S::UseMedkit);
+            }
+            if self.mode == Mode::Br
+                && self.br.as_ref().is_some_and(|b| !b.in_plane)
+                && pressed(Action::Inventory)
+            {
+                self.overlay = Overlay::Inventory;
+                self.inventory_opened = now;
             }
             if !shielded && pressed(Action::Killstreak) {
                 match self.me.rewards.last() {

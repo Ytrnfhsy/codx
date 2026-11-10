@@ -111,14 +111,22 @@ impl Game {
         } else {
             old
         };
-        // a sight that does not go on the new gun comes off
+        // a sight that does not go on the new gun comes off into the backpack (or the
+        // ground, if it is full); a bare gun gets the best spare that fits it
         let slot = p.slot as usize;
-        let loose = p.inv.sights[slot];
-        let loose =
-            (br && loose > 0 && !toon_shared::inventory::sight_fits(loose, pk.w.id)).then(|| {
+        let mut loose = None;
+        if br {
+            let l = p.inv.sights[slot];
+            if l > 0 && !toon_shared::inventory::sight_fits(l, pk.w.id) {
                 p.inv.sights[slot] = 0;
-                loose
-            });
+                if !p.inv.stash_sight(l) {
+                    loose = Some(l);
+                }
+            }
+            if p.inv.sights[slot] == 0 {
+                p.inv.sights[slot] = p.inv.take_best_sight(pk.w.id);
+            }
+        }
         p.reload_end = None;
         p.switch_end = time + swap as f64;
         p.shot_budget = p.shot_budget.min(1.0);

@@ -19,7 +19,7 @@ pub const PREROUND_FIRST: f64 = 8.0;
 /// Most bot route searches in one tick (the rest wait for the next ones).
 pub const PATHS_PER_TICK: u32 = 6;
 pub const PREROUND_NEXT: f64 = 5.0;
-pub const ROUND_END_TIME: f64 = 6.0;
+pub const ROUND_END_TIME: f64 = 9.0;
 pub const POSTMATCH_TIME: f64 = 12.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -1171,6 +1171,7 @@ impl Game {
             C2S::PickUp(ent) => self.pick_up(id, ent),
             C2S::BrJump => self.br_jump(id),
             C2S::UseMedkit => self.br_use_medkit(id),
+            C2S::Item(a) => self.br_item(id, a),
             C2S::SetSkin(s) => {
                 if let Some(p) = self.pm(id) {
                     p.skin = s.min(toon_shared::skins::count() - 1);

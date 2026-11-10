@@ -9,7 +9,7 @@ pub const INTERP_DELAY: f32 = 0.1;
 pub const MAX_REWIND: f32 = 0.35;
 
 pub const DEFAULT_PORT: u16 = 27015;
-pub const PROTOCOL_VERSION: u16 = 20;
+pub const PROTOCOL_VERSION: u16 = 21;
 /// Version of the game build: the release tag (`TW_VERSION`, set by CI for `v*` tags,
 /// without the `v`); for builds made by hand the nearest `v*` git tag (see build.rs), or
 /// the crate version without git.

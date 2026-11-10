@@ -1011,6 +1011,274 @@ impl GameClient {
         }
     }
 
+    /// The battle royale inventory screen (I): guns and their sights, spare sights, gear,
+    /// medkits and rounds, each with a button to throw it away.
+    fn draw_inventory_screen(&mut self, ui: &mut Ui) {
+        use toon_shared::inventory::{
+            armor_durability, helmet_durability, level_name, sight_fits, sight_name, AmmoType,
+            MAX_SIGHT,
+        };
+        use toon_shared::protocol::{Item, ItemAction};
+        let Some(br) = self.br.clone() else {
+            self.overlay = Overlay::None;
+            return;
+        };
+        if !self.alive || br.in_plane {
+            self.overlay = Overlay::None;
+            return;
+        }
+        let again = crate::binds::pressed(Action::Inventory) && self.now > self.inventory_opened;
+        if is_key_pressed(KeyCode::Escape) || again {
+            self.overlay = Overlay::None;
+            return;
+        }
+        let inv = br.inv;
+        let (w, h) = (screen_width(), screen_height());
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        let pw = 820.0f32.min(w - 20.0);
+        let ph = 560.0f32.min(h - 20.0);
+        let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
+        ui.panel(x, y, pw, ph);
+        ui.bold(t("Інвентар", "Inventory"), x + 24.0, y + 42.0, 26, ACCENT);
+        ui.text(
+            &tr!(
+                "{} / Esc — закрити. Викинуте падає перед тобою.",
+                "{} / Esc — close. What you throw away lands in front of you.",
+                key(Action::Inventory)
+            ),
+            x + 190.0,
+            y + 38.0,
+            14,
+            MUTED,
+        );
+        let mut act: Option<ItemAction> = None;
+        let small = |ui: &mut Ui, label: &str, bx: f32, by: f32, bw: f32| -> bool {
+            ui.button2(label, bx, by, bw, 28.0)
+        };
+        let drop_txt = t("Викинути", "Drop");
+
+        // ---- left: guns and sights
+        let lx = x + 24.0;
+        let cw = pw / 2.0 - 36.0;
+        let mut ly = y + 80.0;
+        ui.bold(t("Зброя", "Guns"), lx, ly, 18, TEXT);
+        ly += 12.0;
+        for k in 0..2usize {
+            let (wid, mag, res) = self.weapons[k];
+            let empty = br.empty_slot == Some(k as u8);
+            draw_rectangle(lx, ly, cw, 64.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            if empty {
+                ui.text(
+                    t("— порожньо —", "— empty —"),
+                    lx + 12.0,
+                    ly + 38.0,
+                    16,
+                    MUTED,
+                );
+            } else {
+                ui.bold(
+                    &format!("{}. {}", k + 1, wid.def().name),
+                    lx + 12.0,
+                    ly + 24.0,
+                    18,
+                    if self.slot as usize == k {
+                        ACCENT
+                    } else {
+                        TEXT
+                    },
+                );
+                ui.text(
+                    &format!(
+                        "{mag} / {res} · {}",
+                        if inv.sights[k] > 0 {
+                            sight_name(inv.sights[k])
+                        } else {
+                            t("без прицілу", "no sight")
+                        }
+                    ),
+                    lx + 12.0,
+                    ly + 48.0,
+                    15,
+                    MUTED,
+                );
+                let bw = 104.0;
+                if inv.sights[k] > 0
+                    && small(
+                        ui,
+                        t("Зняти приціл", "Sight off"),
+                        lx + cw - 2.0 * bw - 16.0,
+                        ly + 18.0,
+                        bw,
+                    )
+                {
+                    act = Some(ItemAction::DetachSight(k as u8));
+                }
+                let other_real = br.empty_slot != Some(1 - k as u8);
+                if other_real && small(ui, drop_txt, lx + cw - bw - 8.0, ly + 18.0, bw) {
+                    act = Some(ItemAction::Drop(Item::Weapon(k as u8), 1));
+                }
+            }
+            ly += 72.0;
+        }
+        ly += 16.0;
+        ui.bold(
+            &format!(
+                "{} ({}/{})",
+                t("Приціли в рюкзаку", "Sights in the backpack"),
+                inv.spare_count(),
+                inv.sight_cap()
+            ),
+            lx,
+            ly,
+            18,
+            TEXT,
+        );
+        ly += 12.0;
+        let mut any = false;
+        for level in 1..=MAX_SIGHT {
+            let n = inv.spare_sights[level as usize - 1];
+            if n == 0 {
+                continue;
+            }
+            any = true;
+            draw_rectangle(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            let label = if n > 1 {
+                format!("{} ×{n}", sight_name(level))
+            } else {
+                sight_name(level).to_string()
+            };
+            ui.text(&label, lx + 12.0, ly + 24.0, 16, TEXT);
+            let mut bx = lx + cw - 8.0;
+            bx -= 84.0;
+            if small(ui, drop_txt, bx, ly + 4.0, 84.0) {
+                act = Some(ItemAction::Drop(Item::Sight(level), 1));
+            }
+            for k in (0..2usize).rev() {
+                let ok = br.empty_slot != Some(k as u8) && sight_fits(level, self.weapons[k].0);
+                if ok {
+                    bx -= 58.0;
+                    if small(ui, &tr!("На {}", "On {}", k + 1), bx, ly + 4.0, 54.0) {
+                        act = Some(ItemAction::AttachSight {
+                            level,
+                            slot: k as u8,
+                        });
+                    }
+                }
+            }
+            ly += 42.0;
+        }
+        if !any {
+            ui.text(t("немає", "none"), lx + 12.0, ly + 22.0, 15, MUTED);
+        }
+
+        // ---- right: gear, medkits and rounds
+        let rx = x + pw / 2.0 + 12.0;
+        let mut ry = y + 80.0;
+        ui.bold(t("Спорядження", "Gear"), rx, ry, 18, TEXT);
+        ry += 12.0;
+        let row = |ui: &mut Ui, label: &str, on: bool, ry: f32| {
+            draw_rectangle(rx, ry, cw, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            ui.text(
+                label,
+                rx + 12.0,
+                ry + 23.0,
+                16,
+                if on { TEXT } else { MUTED },
+            );
+        };
+        let gear: [(String, bool, Item); 3] = [
+            (
+                if inv.armor > 0 {
+                    format!(
+                        "{} {} ({:.0}%)",
+                        t("Бронежилет", "Vest"),
+                        level_name(inv.armor),
+                        inv.armor_hp / armor_durability(inv.armor) * 100.0
+                    )
+                } else {
+                    t("Бронежилет: немає", "Vest: none").into()
+                },
+                inv.armor > 0,
+                Item::Armor,
+            ),
+            (
+                if inv.helmet > 0 {
+                    format!(
+                        "{} {} ({:.0}%)",
+                        t("Шолом", "Helmet"),
+                        level_name(inv.helmet),
+                        inv.helmet_hp / helmet_durability(inv.helmet) * 100.0
+                    )
+                } else {
+                    t("Шолом: немає", "Helmet: none").into()
+                },
+                inv.helmet > 0,
+                Item::Helmet,
+            ),
+            (
+                if inv.backpack > 0 {
+                    format!("{} {}", t("Рюкзак", "Backpack"), level_name(inv.backpack))
+                } else {
+                    t("Рюкзак: немає", "Backpack: none").into()
+                },
+                inv.backpack > 0,
+                Item::Backpack,
+            ),
+        ];
+        for (label, on, item) in gear {
+            row(ui, &label, on, ry);
+            if on && small(ui, drop_txt, rx + cw - 92.0, ry + 3.0, 84.0) {
+                act = Some(ItemAction::Drop(item, 1));
+            }
+            ry += 40.0;
+        }
+        row(
+            ui,
+            &format!(
+                "{}: {}/{}",
+                t("Аптечки", "Medkits"),
+                inv.medkits,
+                inv.medkit_cap()
+            ),
+            inv.medkits > 0,
+            ry,
+        );
+        if inv.medkits > 0 && small(ui, "−1", rx + cw - 92.0, ry + 3.0, 84.0) {
+            act = Some(ItemAction::Drop(Item::Medkit, 1));
+        }
+        ry += 52.0;
+        ui.bold(t("Набої", "Rounds"), rx, ry, 18, TEXT);
+        ry += 12.0;
+        let mut shown = false;
+        for a in AmmoType::ALL {
+            let n = inv.ammo(a);
+            if n == 0 {
+                continue;
+            }
+            shown = true;
+            row(
+                ui,
+                &format!("{}: {n}/{}", a.name(), inv.ammo_cap(a)),
+                true,
+                ry,
+            );
+            if small(ui, t("Усе", "All"), rx + cw - 66.0, ry + 3.0, 58.0) {
+                act = Some(ItemAction::Drop(Item::Ammo(a), n));
+            }
+            let part = a.box_size().min(n);
+            if small(ui, &format!("−{part}"), rx + cw - 130.0, ry + 3.0, 58.0) {
+                act = Some(ItemAction::Drop(Item::Ammo(a), part));
+            }
+            ry += 40.0;
+        }
+        if !shown {
+            ui.text(t("немає", "none"), rx + 12.0, ry + 22.0, 15, MUTED);
+        }
+        if let Some(a) = act {
+            self.net.send(toon_shared::protocol::C2S::Item(a));
+        }
+    }
+
     /// Battle royale prompts: leaving the plane, the parachute, being outside the zone.
     fn draw_br_alerts(&self, ui: &Ui) {
         let Some(br) = &self.br else { return };
@@ -2171,6 +2439,10 @@ impl GameClient {
                 if crate::menu::video_page(ui, settings, x, y, pw) {
                     self.overlay = Overlay::Settings;
                 }
+                None
+            }
+            Overlay::Inventory => {
+                self.draw_inventory_screen(ui);
                 None
             }
             Overlay::Skin => {

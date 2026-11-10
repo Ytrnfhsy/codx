@@ -286,11 +286,14 @@ fn inventory_pick_up_heal_and_drop() {
     g.handle(me, C2S::PickUp(kits));
     assert_eq!(g.p(me).unwrap().inv.medkits, 3);
 
-    // sights: a 4× scope does not go on the pistol in hand, but on the rifle in the other
-    // hand; a red dot goes on the pistol
+    // sights: a 4× scope does not go on the pistol, so it waits in the backpack; once
+    // there is a rifle it goes on from there; a red dot goes straight on the pistol
+    use toon_shared::protocol::{Item, ItemAction};
     let scope = put(&mut g, LootKind::Sight(3), 1);
     g.handle(me, C2S::PickUp(scope));
-    assert_eq!(g.p(me).unwrap().inv.sights, [0, 0], "no gun takes it yet");
+    let p = g.p(me).unwrap();
+    assert_eq!(p.inv.sights, [0, 0], "no gun takes it yet");
+    assert_eq!(p.inv.spare_sights, [0, 0, 1, 0], "kept in the backpack");
     {
         let p = g.pm(me).unwrap();
         p.weapons[1] = toon_server::game::WState {
@@ -301,10 +304,41 @@ fn inventory_pick_up_heal_and_drop() {
         p.empty_slot = None;
         p.slot = 0;
     }
-    g.handle(me, C2S::PickUp(scope));
+    g.handle(me, C2S::Item(ItemAction::AttachSight { level: 3, slot: 0 }));
+    assert_eq!(
+        g.p(me).unwrap().inv.sights,
+        [0, 0],
+        "a 4× does not go on a pistol"
+    );
+    g.handle(me, C2S::Item(ItemAction::AttachSight { level: 3, slot: 1 }));
     let dot = put(&mut g, LootKind::Sight(1), 1);
     g.handle(me, C2S::PickUp(dot));
+    let p = g.p(me).unwrap();
+    assert_eq!(p.inv.sights, [1, 3]);
+    assert_eq!(p.inv.spare_sights, [0; 4]);
+    // off and on again
+    g.handle(me, C2S::Item(ItemAction::DetachSight(1)));
+    assert_eq!(g.p(me).unwrap().inv.spare_sights, [0, 0, 1, 0]);
+    g.handle(me, C2S::Item(ItemAction::AttachSight { level: 3, slot: 1 }));
     assert_eq!(g.p(me).unwrap().inv.sights, [1, 3]);
+
+    // throwing rounds away: they land in front as a box
+    let before = g.br.loot.len();
+    g.handle(
+        me,
+        C2S::Item(ItemAction::Drop(Item::Ammo(AmmoType::Sniper), 4)),
+    );
+    assert_eq!(g.p(me).unwrap().inv.ammo(AmmoType::Sniper), 6);
+    assert_eq!(
+        g.br.loot[before..]
+            .iter()
+            .map(|l| (l.kind, l.amount))
+            .collect::<Vec<_>>(),
+        vec![(LootKind::Ammo(AmmoType::Sniper), 4)]
+    );
+    let back = g.br.loot.last().unwrap().id;
+    g.handle(me, C2S::PickUp(back));
+    assert_eq!(g.p(me).unwrap().inv.ammo(AmmoType::Sniper), 10);
 
     // the vest takes its share of a hit
     let hp0 = g.p(me).unwrap().hp;
@@ -339,6 +373,20 @@ fn inventory_pick_up_heal_and_drop() {
         p.hp,
         p.inv.medkits
     );
+
+    // throwing the rifle away: its sight goes in the backpack, the slot is empty again
+    g.handle(me, C2S::Item(ItemAction::Drop(Item::Weapon(1), 1)));
+    let p = g.p(me).unwrap();
+    assert_eq!(p.empty_slot, Some(1));
+    assert_eq!(p.inv.sights, [1, 0]);
+    assert_eq!(p.inv.spare_sights, [0, 0, 1, 0]);
+    assert!(g
+        .pickups
+        .iter()
+        .any(|pk| pk.w.id == toon_shared::weapons::WeaponId::M4));
+    // the pistol cannot go too: one gun stays in the hands
+    g.handle(me, C2S::Item(ItemAction::Drop(Item::Weapon(0), 1)));
+    assert_eq!(g.p(me).unwrap().empty_slot, Some(1));
 
     // knocked out: everything ends up on the ground around the body
     let before = g.br.loot.len();

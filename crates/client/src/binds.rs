@@ -37,10 +37,11 @@ pub enum Action {
     Leave,
     /// Battle royale: use a medkit.
     Heal,
+    Inventory,
 }
 
 impl Action {
-    pub const ALL: [Action; 24] = [
+    pub const ALL: [Action; 25] = [
         Action::Forward,
         Action::Back,
         Action::Left,
@@ -65,6 +66,7 @@ impl Action {
         Action::Class,
         Action::Leave,
         Action::Heal,
+        Action::Inventory,
     ];
 
     pub fn name(self) -> &'static str {
@@ -93,6 +95,7 @@ impl Action {
             Action::Class => t("Змінити клас", "Change class"),
             Action::Leave => t("Вийти з техніки", "Leave vehicle"),
             Action::Heal => t("Аптечка", "Medkit"),
+            Action::Inventory => t("Інвентар", "Inventory"),
         }
     }
 
@@ -125,6 +128,7 @@ impl Action {
             Action::Class => [k(K::M), Bind::None],
             Action::Leave => [k(K::E), Bind::None],
             Action::Heal => [k(K::H), Bind::None],
+            Action::Inventory => [k(K::I), Bind::None],
         }
     }
 }

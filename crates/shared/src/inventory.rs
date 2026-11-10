@@ -184,6 +184,8 @@ pub struct Inventory {
     pub healing: f32,
     /// Sight on the gun in each hand slot (see `sight_zoom`).
     pub sights: [u8; 2],
+    /// Spare sights in the backpack, by level (index 0 = red dot … 3 = 8×).
+    pub spare_sights: [u8; 4],
 }
 
 impl Inventory {
@@ -195,6 +197,32 @@ impl Inventory {
     }
     pub fn medkit_cap(&self) -> u8 {
         2 + self.backpack * 2
+    }
+    /// How many spare sights the backpack holds.
+    pub fn sight_cap(&self) -> u8 {
+        2 + self.backpack
+    }
+    pub fn spare_count(&self) -> u8 {
+        self.spare_sights.iter().sum()
+    }
+    /// Puts a sight in the backpack; false when there is no room.
+    pub fn stash_sight(&mut self, level: u8) -> bool {
+        if level == 0 || level > MAX_SIGHT || self.spare_count() >= self.sight_cap() {
+            return false;
+        }
+        self.spare_sights[level as usize - 1] += 1;
+        true
+    }
+    /// Takes the best spare sight that fits `w` out of the backpack (0 if none does).
+    pub fn take_best_sight(&mut self, w: WeaponId) -> u8 {
+        for level in (1..=MAX_SIGHT).rev() {
+            let k = level as usize - 1;
+            if self.spare_sights[k] > 0 && sight_fits(level, w) {
+                self.spare_sights[k] -= 1;
+                return level;
+            }
+        }
+        0
     }
     pub fn grenade_cap(&self) -> u8 {
         2 + self.backpack
@@ -274,5 +302,11 @@ mod tests {
         assert!(sight_fits(1, WeaponId::M9) && !sight_fits(2, WeaponId::M9));
         assert!(sight_fits(2, WeaponId::W1200) && !sight_fits(3, WeaponId::W1200));
         assert!(sight_zoom(4) > sight_zoom(3) && !sight_magnifies(1));
+        // spares: as many as the backpack holds, the best fitting one comes out first
+        let mut inv = Inventory::default();
+        assert!(inv.stash_sight(4) && inv.stash_sight(1) && !inv.stash_sight(2));
+        assert_eq!(inv.take_best_sight(WeaponId::M9), 1);
+        assert_eq!(inv.take_best_sight(WeaponId::M9), 0);
+        assert_eq!(inv.take_best_sight(WeaponId::M4), 4);
     }
 }
