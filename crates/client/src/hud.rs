@@ -49,6 +49,17 @@ impl GameClient {
         if self.scoped() && self.alive {
             self.draw_scope();
         }
+        // blinded by a flashbang: white, fading
+        if now < self.flashed.0 {
+            let left = ((self.flashed.0 - now) as f32 / 2.0).min(1.0);
+            draw_rectangle(
+                0.0,
+                0.0,
+                w,
+                h,
+                Color::new(1.0, 1.0, 0.97, left * (0.5 + 0.5 * self.flashed.1)),
+            );
+        }
         // a red dot sight: the dot floats in the middle while aiming
         if self.alive && self.sight() == 1 && self.ads_t > 0.8 {
             draw_circle(cx, cy, 2.6, Color::new(1.0, 0.15, 0.1, 0.95));
@@ -1351,10 +1362,63 @@ impl GameClient {
             ui.shadowed(&txt, x, y, 14, TEXT);
             x += ui.width(&txt, 14, true) + 14.0;
         }
+        // bandages, drinks, what G throws
+        {
+            use toon_shared::inventory::{THROW_FLASH, THROW_MOLOTOV};
+            let mut parts: Vec<String> = Vec::new();
+            if inv.bandages > 0 {
+                parts.push(format!(
+                    "{} {} [{}]",
+                    t("Бинти", "Bandages"),
+                    inv.bandages,
+                    key(Action::Bandage)
+                ));
+            }
+            if inv.drinks > 0 {
+                parts.push(format!(
+                    "{} {} [{}]",
+                    t("Енергетик", "Drink"),
+                    inv.drinks,
+                    key(Action::Drink)
+                ));
+            }
+            let throw = match self.throw_kind {
+                THROW_MOLOTOV => format!("{} {}", t("Молотов", "Molotov"), inv.molotovs),
+                THROW_FLASH => format!("{} {}", t("Світлошумова", "Flashbang"), inv.flashes),
+                _ => format!("{} {}", t("Граната", "Grenade"), self.grenades),
+            };
+            if inv.molotovs > 0 || inv.flashes > 0 || self.throw_kind != 0 {
+                parts.push(format!(
+                    "{}: {throw} [{}]",
+                    key(Action::Grenade),
+                    key(Action::NextThrow)
+                ));
+            }
+            if !parts.is_empty() {
+                ui.shadowed(&parts.join("  ·  "), x0, y + 18.0, 13, MUTED);
+            }
+            // the energy drink's boost: a thin yellow bar along the panel
+            if inv.boost > 0.0 {
+                let bw = 4.0 * s + 18.0;
+                draw_rectangle(x0, y0 - 8.0, bw, 4.0, Color::new(0.0, 0.0, 0.0, 0.5));
+                draw_rectangle(
+                    x0,
+                    y0 - 8.0,
+                    bw * inv.boost / 100.0,
+                    4.0,
+                    Color::new(1.0, 0.8, 0.2, 1.0),
+                );
+            }
+        }
         // using a medkit
         if inv.healing > 0.0 {
             let (w, hh) = (screen_width(), h);
-            let k = 1.0 - inv.healing / MEDKIT_TIME;
+            let total = match inv.using {
+                toon_shared::inventory::USE_BANDAGE => toon_shared::inventory::BANDAGE_TIME,
+                toon_shared::inventory::USE_DRINK => toon_shared::inventory::DRINK_TIME,
+                _ => MEDKIT_TIME,
+            };
+            let k = 1.0 - inv.healing / total;
             let bw = 220.0;
             draw_rectangle(
                 (w - bw) / 2.0,
@@ -1364,7 +1428,12 @@ impl GameClient {
                 Color::new(0.0, 0.0, 0.0, 0.6),
             );
             draw_rectangle((w - bw) / 2.0, hh * 0.66, bw * k, 10.0, GOOD);
-            ui.centered(t("Аптечка…", "Medkit…"), w / 2.0, hh * 0.66 - 8.0, 16, TEXT);
+            let what = match inv.using {
+                toon_shared::inventory::USE_BANDAGE => t("Бинт…", "Bandage…"),
+                toon_shared::inventory::USE_DRINK => t("Енергетик…", "Energy drink…"),
+                _ => t("Аптечка…", "Medkit…"),
+            };
+            ui.centered(what, w / 2.0, hh * 0.66 - 8.0, 16, TEXT);
         }
     }
 
@@ -1652,6 +1721,25 @@ impl GameClient {
         );
         if inv.medkits > 0 && small(ui, "−1", rx + cw - 92.0, ry + 3.0, 84.0) {
             act = Some(ItemAction::Drop(Item::Medkit, 1));
+        }
+        for (label, n, item) in [
+            (t("Бинти", "Bandages"), inv.bandages, Item::Bandages),
+            (t("Енергетики", "Energy drinks"), inv.drinks, Item::Drinks),
+            (
+                t("Коктейлі Молотова", "Molotovs"),
+                inv.molotovs,
+                Item::Molotovs,
+            ),
+            (t("Світлошумові", "Flashbangs"), inv.flashes, Item::Flashes),
+        ] {
+            if n == 0 {
+                continue;
+            }
+            ry += 40.0;
+            row(ui, &format!("{label}: {n}"), true, ry);
+            if small(ui, "−1", rx + cw - 92.0, ry + 3.0, 84.0) {
+                act = Some(ItemAction::Drop(item, 1));
+            }
         }
         ry += 52.0;
         ui.bold(t("Набої", "Rounds"), rx, ry, 18, TEXT);
@@ -3293,6 +3381,20 @@ fn draw_cause_icon(c: Cause, x: f32, cy: f32, h: f32, a: f32) -> f32 {
                 fg,
             );
             draw_rectangle(x + w * 0.12, cy - h * 0.22, w * 0.06, h * 0.44, bg);
+            w
+        }
+        Cause::Fire => {
+            // a flame
+            let w = h * 0.7;
+            let c = vec2(x + w * 0.5, cy + h * 0.15);
+            draw_circle(c.x, c.y, w * 0.42 + 1.0, bg);
+            draw_triangle(
+                vec2(c.x - w * 0.42, c.y),
+                vec2(c.x + w * 0.42, c.y),
+                vec2(c.x + w * 0.05, cy - h * 0.5),
+                fg,
+            );
+            draw_circle(c.x, c.y, w * 0.42, fg);
             w
         }
         Cause::Fpv => {

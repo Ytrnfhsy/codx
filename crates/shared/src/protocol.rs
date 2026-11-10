@@ -99,6 +99,15 @@ pub enum C2S {
     SetSkin(u8),
     /// Battle royale: use a medkit.
     UseMedkit,
+    /// Battle royale: a bandage, an energy drink.
+    UseBandage,
+    UseDrink,
+    /// Battle royale: a molotov or a flashbang (`inventory::THROW_*`).
+    Throw {
+        origin: V3,
+        dir: V3,
+        kind: u8,
+    },
     /// Battle royale: something done with an item in the inventory screen.
     Item(ItemAction),
     /// Ready (or not yet) for the match to start.
@@ -145,6 +154,10 @@ pub enum Item {
     Sight(u8),
     /// A spare attachment of this kind, from the backpack.
     Mod(u8),
+    Bandages,
+    Drinks,
+    Molotovs,
+    Flashes,
     /// The gun in this hand slot.
     Weapon(u8),
 }
@@ -256,6 +269,14 @@ pub enum EntSnap {
         id: u16,
         pos: V3,
         smoke: bool,
+        /// 0 frag or smoke, `inventory::THROW_*` otherwise.
+        kind: u8,
+    },
+    /// A patch of fire from a molotov.
+    Fire {
+        id: u16,
+        pos: V3,
+        radius: f32,
     },
     /// A smoke cloud; `age` in seconds (its size follows `consts::smoke_radius`).
     Smoke {
@@ -349,6 +370,11 @@ pub enum LootKind {
     Sight(u8),
     /// Another attachment (`inventory::MOD_*`).
     Mod(u8),
+    /// `amount` bandages.
+    Bandages,
+    Drink,
+    Molotov,
+    Flash,
 }
 
 impl LootKind {
@@ -364,6 +390,10 @@ impl LootKind {
             LootKind::Grenades => t("Гранати", "Grenades").into(),
             LootKind::Sight(l) => crate::inventory::sight_name(l).into(),
             LootKind::Mod(k) => crate::inventory::mod_name(k).into(),
+            LootKind::Bandages => t("Бинти", "Bandages").into(),
+            LootKind::Drink => t("Енергетик", "Energy drink").into(),
+            LootKind::Molotov => t("Коктейль Молотова", "Molotov").into(),
+            LootKind::Flash => t("Світлошумова граната", "Flashbang").into(),
         }
     }
 }
@@ -536,6 +566,8 @@ pub enum S2C {
         from: V3,
         amount: f32,
     },
+    /// A flashbang went off in front of us: how hard (0..1).
+    Flashed(f32),
     Explosion {
         pos: V3,
         radius: f32,

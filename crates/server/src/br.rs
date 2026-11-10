@@ -8,7 +8,8 @@ use glam::{vec2, vec3, Vec2, Vec3};
 use toon_shared::consts::MAX_HEALTH;
 use toon_shared::inventory::{
     armor_durability, helmet_durability, mag_size, mod_fits, mod_place, sight_fits, AmmoType,
-    MAX_SIGHT, MEDKIT_HEAL, MEDKIT_TIME, MODS, MOD_EXTMAG, MOD_SUPPRESSOR,
+    BANDAGE_HEAL, BANDAGE_MAX, BANDAGE_TIME, DRINK_BOOST, DRINK_TIME, MAX_SIGHT, MEDKIT_HEAL,
+    MEDKIT_TIME, MODS, MOD_EXTMAG, MOD_SUPPRESSOR, USE_BANDAGE, USE_DRINK, USE_MEDKIT,
 };
 use toon_shared::lang::t;
 use toon_shared::physics::{Body, Chute, Stance};
@@ -722,18 +723,20 @@ impl Game {
                     _ => 3,
                 };
                 let (kind, amount) = match self.rng.f32() {
-                    k if k < 0.33 => {
+                    k if k < 0.30 => {
                         let t = AmmoType::ALL[self.rng.below(AmmoType::ALL.len())];
                         (LootKind::Ammo(t), t.box_size())
                     }
-                    k if k < 0.51 => (LootKind::Medkit, 1 + self.rng.chance(0.25) as u16),
-                    k if k < 0.64 => (LootKind::Armor(level(&mut self.rng)), 100),
-                    k if k < 0.75 => (LootKind::Helmet(level(&mut self.rng)), 100),
-                    k if k < 0.84 => (LootKind::Backpack(level(&mut self.rng)), 1),
+                    k if k < 0.40 => (LootKind::Medkit, 1 + self.rng.chance(0.25) as u16),
+                    k if k < 0.47 => (LootKind::Bandages, 3 + self.rng.below(3) as u16),
+                    k if k < 0.51 => (LootKind::Drink, 1),
+                    k if k < 0.62 => (LootKind::Armor(level(&mut self.rng)), 100),
+                    k if k < 0.72 => (LootKind::Helmet(level(&mut self.rng)), 100),
+                    k if k < 0.79 => (LootKind::Backpack(level(&mut self.rng)), 1),
                     // other attachments
-                    k if k < 0.89 => (LootKind::Mod(MODS[self.rng.below(MODS.len())]), 1),
+                    k if k < 0.85 => (LootKind::Mod(MODS[self.rng.below(MODS.len())]), 1),
                     // sights: red dots and 2× common, 8× rare
-                    k if k < 0.95 => {
+                    k if k < 0.91 => {
                         let l = match self.rng.f32() {
                             r if r < 0.35 => 1,
                             r if r < 0.65 => 2,
@@ -742,6 +745,8 @@ impl Game {
                         };
                         (LootKind::Sight(l), 1)
                     }
+                    k if k < 0.94 => (LootKind::Molotov, 1),
+                    k if k < 0.96 => (LootKind::Flash, 1),
                     _ => (LootKind::Grenades, 1),
                 };
                 let id = self.new_ent_id();
@@ -938,11 +943,32 @@ impl Game {
                 p.inv.healing -= dt;
                 if p.inv.healing <= 0.0 {
                     p.inv.healing = 0.0;
-                    if p.inv.medkits > 0 {
-                        p.inv.medkits -= 1;
-                        p.hp = (p.hp + MEDKIT_HEAL).min(MAX_HEALTH);
+                    match p.inv.using {
+                        USE_BANDAGE if p.inv.bandages > 0 => {
+                            p.inv.bandages -= 1;
+                            p.hp = (p.hp + BANDAGE_HEAL).min(BANDAGE_MAX.max(p.hp));
+                        }
+                        USE_DRINK if p.inv.drinks > 0 => {
+                            p.inv.drinks -= 1;
+                            p.inv.boost = (p.inv.boost + DRINK_BOOST).min(100.0);
+                        }
+                        _ if p.inv.medkits > 0
+                            && p.inv.using != USE_BANDAGE
+                            && p.inv.using != USE_DRINK =>
+                        {
+                            p.inv.medkits -= 1;
+                            p.hp = (p.hp + MEDKIT_HEAL).min(MAX_HEALTH);
+                        }
+                        _ => {}
                     }
+                    p.inv.using = 0;
                 }
+            }
+            // energy drinks: the boost heals slowly
+            if p.inv.boost > 0.0 && !p.downed {
+                let k = dt.min(p.inv.boost);
+                p.inv.boost -= k;
+                p.hp = (p.hp + k).min(MAX_HEALTH);
             }
             p.br_sync_ammo();
         }
@@ -1100,6 +1126,17 @@ impl Game {
                     left = 0;
                 }
             }
+            LootKind::Bandages | LootKind::Drink | LootKind::Molotov | LootKind::Flash => {
+                let (have, cap) = match l.kind {
+                    LootKind::Bandages => (&mut p.inv.bandages, 5 + p.inv.backpack * 3),
+                    LootKind::Drink => (&mut p.inv.drinks, 2 + p.inv.backpack),
+                    LootKind::Molotov => (&mut p.inv.molotovs, 1 + p.inv.backpack),
+                    _ => (&mut p.inv.flashes, 1 + p.inv.backpack),
+                };
+                let take = (cap.saturating_sub(*have) as u16).min(l.amount);
+                *have += take as u8;
+                left -= take;
+            }
             LootKind::Grenades => {
                 let cap = p.inv.grenade_cap();
                 if p.grenades < cap || p.smokes < 2 {
@@ -1163,12 +1200,27 @@ impl Game {
 
     /// Starts using a medkit (it takes a few seconds; shooting puts it away).
     pub fn br_use_medkit(&mut self, id: u8) {
-        if self.mode != Mode::Br {
+        self.br_use(id, USE_MEDKIT);
+    }
+
+    /// Starts using a medkit, a bandage or an energy drink.
+    pub fn br_use(&mut self, id: u8, what: u8) {
+        if self.mode != Mode::Br || self.seat_of(id).is_some_and(|s| s.1 == 0) {
             return;
         }
         let Some(p) = self.pm(id) else { return };
-        if p.alive && !p.downed && p.inv.medkits > 0 && p.inv.healing <= 0.0 && p.hp < MAX_HEALTH {
-            p.inv.healing = MEDKIT_TIME;
+        if !p.alive || p.downed || p.inv.healing > 0.0 {
+            return;
+        }
+        let (ok, time) = match what {
+            USE_MEDKIT => (p.inv.medkits > 0 && p.hp < MAX_HEALTH, MEDKIT_TIME),
+            USE_BANDAGE => (p.inv.bandages > 0 && p.hp < BANDAGE_MAX, BANDAGE_TIME),
+            USE_DRINK => (p.inv.drinks > 0 && p.inv.boost < 100.0, DRINK_TIME),
+            _ => (false, 0.0),
+        };
+        if ok {
+            p.inv.healing = time;
+            p.inv.using = what;
         }
     }
 
@@ -1212,6 +1264,16 @@ impl Game {
         for (k, n) in inv.spare_sights.iter().enumerate() {
             for _ in 0..*n {
                 items.push((LootKind::Sight(k as u8 + 1), 1));
+            }
+        }
+        for (n, kind) in [
+            (inv.bandages, LootKind::Bandages),
+            (inv.drinks, LootKind::Drink),
+            (inv.molotovs, LootKind::Molotov),
+            (inv.flashes, LootKind::Flash),
+        ] {
+            if n > 0 {
+                items.push((kind, n as u16));
             }
         }
         for m in inv.mods.iter().flatten() {
@@ -1306,12 +1368,37 @@ impl Game {
                         }
                     }
                     p.grenades = p.grenades.min(p.inv.grenade_cap());
+                    for (have, cap, kind) in [
+                        (&mut p.inv.bandages, 5u8, LootKind::Bandages),
+                        (&mut p.inv.drinks, 2, LootKind::Drink),
+                        (&mut p.inv.molotovs, 1, LootKind::Molotov),
+                        (&mut p.inv.flashes, 1, LootKind::Flash),
+                    ] {
+                        if *have > cap {
+                            out.push((kind, (*have - cap) as u16));
+                            *have = cap;
+                        }
+                    }
                 }
                 Item::Sight(l) if (1..=MAX_SIGHT).contains(&l) => {
                     let k = l as usize - 1;
                     if p.inv.spare_sights[k] > 0 {
                         p.inv.spare_sights[k] -= 1;
                         out.push((LootKind::Sight(l), 1));
+                    }
+                }
+                Item::Bandages | Item::Drinks | Item::Molotovs | Item::Flashes => {
+                    let (have, kind) = match item {
+                        Item::Bandages => (&mut p.inv.bandages, LootKind::Bandages),
+                        Item::Drinks => (&mut p.inv.drinks, LootKind::Drink),
+                        Item::Molotovs => (&mut p.inv.molotovs, LootKind::Molotov),
+                        _ => (&mut p.inv.flashes, LootKind::Flash),
+                    };
+                    let n = (n as u8).min(*have);
+                    if n > 0 {
+                        *have -= n;
+                        p.inv.healing = 0.0;
+                        out.push((kind, n as u16));
                     }
                 }
                 Item::Mod(m) if MODS.contains(&m) => {
@@ -1707,9 +1794,15 @@ impl Game {
             }
         }
         if !skydiving {
-            // a medkit when hurt (and not using one already)
-            if hp < 70.0 && inv.medkits > 0 && inv.healing <= 0.0 {
-                self.br_use_medkit(id);
+            // a medkit when hurt (and not using one already), else a bandage or a drink
+            if hp < 70.0 && inv.healing <= 0.0 {
+                if inv.medkits > 0 {
+                    self.br_use_medkit(id);
+                } else if inv.bandages > 0 {
+                    self.br_use(id, USE_BANDAGE);
+                } else if inv.drinks > 0 {
+                    self.br_use(id, USE_DRINK);
+                }
             }
             let want = |k: LootKind| match k {
                 LootKind::Medkit => inv.medkits < inv.medkit_cap(),
@@ -1720,7 +1813,9 @@ impl Game {
                     carried.contains(&t) && inv.ammo(t) < inv.ammo_cap(t) / 2 && low_ammo
                         || carried.contains(&t) && inv.ammo(t) < t.box_size() * 2
                 }
-                LootKind::Grenades => false,
+                LootKind::Grenades | LootKind::Molotov | LootKind::Flash => false,
+                LootKind::Bandages => inv.bandages < 5,
+                LootKind::Drink => inv.drinks < inv.drink_cap(),
                 LootKind::Mod(m) => (0..2).any(|k| {
                     have_ids.get(k).is_some_and(|w| {
                         w.def().class != toon_shared::weapons::WeaponClass::Pistol

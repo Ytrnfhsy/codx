@@ -1,6 +1,6 @@
 //! Shooting, damage, deaths, grenades, melee and killstreaks.
 
-use crate::game::{Dest, Game, Grenade, Heli, PendingBlast, WState};
+use crate::game::{Dest, Fire, Game, Grenade, Heli, PendingBlast, WState};
 use glam::{vec3, Vec3};
 use toon_shared::ballistics::{trace_path, Ballistics, Path};
 use toon_shared::consts::*;
@@ -601,6 +601,7 @@ impl Game {
                 vel: vec3(0.0, 1.0, 0.0),
                 explode_at: time + 2.5,
                 smoke: false,
+                kind: 0,
             });
         }
 
@@ -786,6 +787,110 @@ impl Game {
             vel,
             explode_at: time + (fuse - cook) as f64,
             smoke,
+            kind: 0,
+        });
+    }
+
+    /// Battle royale: a molotov (bursts into fire where it lands) or a flashbang (blinds
+    /// those looking its way after a second and a half).
+    pub fn throw_special(&mut self, id: u8, origin: Vec3, dir: Vec3, kind: u8) {
+        use toon_shared::inventory::{THROW_FLASH, THROW_MOLOTOV};
+        if !self.combat_allowed() || !dir.is_finite() || dir.length_squared() < 0.1 {
+            return;
+        }
+        let time = self.time;
+        let Some(p) = self.players[id as usize].as_mut() else {
+            return;
+        };
+        if !p.alive || p.downed || time < p.protected_until {
+            return;
+        }
+        let left = match kind {
+            THROW_MOLOTOV => &mut p.inv.molotovs,
+            THROW_FLASH => &mut p.inv.flashes,
+            _ => return,
+        };
+        if *left == 0 {
+            return;
+        }
+        *left -= 1;
+        p.inv.healing = 0.0;
+        let eye = p.eye();
+        let origin = if origin.is_finite() && origin.distance(eye) < 1.2 {
+            origin
+        } else {
+            eye
+        };
+        let gt = &self.tuning.grenade;
+        let vel = dir.normalize() * gt.throw_speed + p.body.vel * gt.inherit_velocity;
+        let gid = self.new_ent_id();
+        self.grenades.push(Grenade {
+            id: gid,
+            owner: id,
+            pos: origin,
+            vel,
+            // a molotov bursts on impact (or after a while in the air)
+            explode_at: time + if kind == THROW_MOLOTOV { 5.0 } else { 1.5 },
+            smoke: false,
+            kind,
+        });
+    }
+
+    /// Fires burn whoever stands in them (twice a second) and die down.
+    pub fn update_fires(&mut self) {
+        let now = self.time;
+        self.fires.retain(|f| f.until > now);
+        if self.fires.is_empty() || now < self.next_burn_fire {
+            return;
+        }
+        self.next_burn_fire = now + 0.5;
+        let mut burn: Vec<(u8, u8, Vec3)> = Vec::new();
+        for f in &self.fires {
+            for p in self.players.iter().flatten() {
+                let d = p.body.pos - f.pos;
+                if p.alive && vec3(d.x, 0.0, d.z).length() < f.radius && d.y.abs() < 1.8 {
+                    burn.push((p.id, f.owner, f.pos));
+                }
+            }
+        }
+        for (v, owner, at) in burn {
+            self.damage(v, Some(owner), 7.0, Cause::Fire, false, at);
+        }
+    }
+
+    /// A flashbang goes off: blinds those who can see it, the more the nearer and the
+    /// more they look its way.
+    fn flashbang(&mut self, pos: Vec3) {
+        let time = self.time;
+        let mut hit: Vec<(u8, f32, bool)> = Vec::new();
+        for p in self.players.iter().flatten() {
+            if !p.alive {
+                continue;
+            }
+            let eye = p.eye();
+            let d = pos.distance(eye);
+            if d > 22.0 || !self.world.line_of_sight(eye, pos + vec3(0.0, 0.3, 0.0)) {
+                continue;
+            }
+            let facing = look_dir(p.yaw, p.pitch).dot((pos - eye).normalize_or_zero());
+            let k = (1.0 - d / 22.0) * (0.35 + 0.65 * ((facing + 1.0) * 0.5).powi(2));
+            if k > 0.08 {
+                hit.push((p.id, k.min(1.0), p.is_bot()));
+            }
+        }
+        for (id, k, bot) in hit {
+            if bot {
+                if let Some(b) = self.pm(id).and_then(|p| p.bot.as_mut()) {
+                    b.blind_until = time + 4.0 * k as f64;
+                }
+            } else {
+                self.send(id, S2C::Flashed(k));
+            }
+        }
+        self.broadcast(S2C::Explosion {
+            pos: pos.to_array(),
+            radius: 1.0,
+            big: false,
         });
     }
 
@@ -800,6 +905,10 @@ impl Game {
                 let d = step / len;
                 if let Some((t, n)) = self.world.raycast(g.pos, d, len + 0.08) {
                     g.pos += d * (t - 0.08).max(0.0);
+                    // a molotov's bottle breaks on whatever it hits
+                    if g.kind == toon_shared::inventory::THROW_MOLOTOV {
+                        g.explode_at = self.time;
+                    }
                     g.vel = g.vel - 2.0 * g.vel.dot(n) * n;
                     g.vel *= bounce;
                     if n.y > 0.5 && g.vel.y.abs() < 1.0 {
@@ -811,12 +920,31 @@ impl Game {
                 }
             }
             if self.time >= g.explode_at {
-                boom.push((g.pos, g.owner, g.smoke, g.id));
+                boom.push((g.pos, g.owner, g.smoke, g.id, g.kind));
             }
         }
         let now = self.time;
         self.grenades.retain(|g| now < g.explode_at);
-        for (pos, owner, smoke, gid) in boom {
+        for (pos, owner, smoke, gid, kind) in boom {
+            if kind == toon_shared::inventory::THROW_MOLOTOV {
+                // fire spreads over the ground where it broke
+                let floor = self
+                    .world
+                    .floor_below(pos + vec3(0.0, 0.5, 0.0), 6.0)
+                    .unwrap_or(pos.y);
+                self.fires.push(Fire {
+                    id: gid,
+                    owner,
+                    pos: vec3(pos.x, floor, pos.z),
+                    radius: 3.5,
+                    until: now + 8.0,
+                });
+                continue;
+            }
+            if kind == toon_shared::inventory::THROW_FLASH {
+                self.flashbang(pos);
+                continue;
+            }
             if smoke {
                 self.smokes
                     .push((gid, pos + vec3(0.0, SMOKE_LIFT, 0.0), now));

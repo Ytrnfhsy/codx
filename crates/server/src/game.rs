@@ -307,6 +307,17 @@ pub struct Grenade {
     pub explode_at: f64,
     /// Pops a smoke cloud instead of exploding.
     pub smoke: bool,
+    /// A molotov or a flashbang (`inventory::THROW_*`; 0 for frag and smoke).
+    pub kind: u8,
+}
+
+/// A patch of fire from a molotov.
+pub struct Fire {
+    pub id: u16,
+    pub owner: u8,
+    pub pos: Vec3,
+    pub radius: f32,
+    pub until: f64,
 }
 
 pub struct Heli {
@@ -367,6 +378,8 @@ pub struct Game {
     pub rng: Rng,
     pub grenades: Vec<Grenade>,
     pub vehicles: Vec<crate::vehicles::Vehicle>,
+    pub fires: Vec<Fire>,
+    pub next_burn_fire: f64,
     /// Battle royale jeeps and boats.
     pub cars: Vec<crate::cars::Car>,
     pub drops: Vec<crate::vehicles::BombDrop>,
@@ -456,6 +469,8 @@ impl Game {
             rng: Rng::from_time(),
             grenades: Vec::new(),
             vehicles: Vec::new(),
+            fires: Vec::new(),
+            next_burn_fire: 0.0,
             cars: Vec::new(),
             drops: Vec::new(),
             recent_deaths: Vec::new(),
@@ -1227,6 +1242,11 @@ impl Game {
             C2S::PickUp(ent) => self.pick_up(id, ent),
             C2S::BrJump => self.br_jump(id),
             C2S::UseMedkit => self.br_use_medkit(id),
+            C2S::UseBandage => self.br_use(id, toon_shared::inventory::USE_BANDAGE),
+            C2S::UseDrink => self.br_use(id, toon_shared::inventory::USE_DRINK),
+            C2S::Throw { origin, dir, kind } => {
+                self.throw_special(id, Vec3::from_array(origin), Vec3::from_array(dir), kind)
+            }
             C2S::Item(a) => self.br_item(id, a),
             C2S::Box(cmd) => match cmd {
                 toon_shared::protocol::BoxCmd::Open(b) => {
@@ -1547,6 +1567,7 @@ impl Game {
         self.state_end = self.time + pre;
         self.overtime = false;
         self.grenades.clear();
+        self.fires.clear();
         self.bullets.clear();
         self.lobby_spots = None;
         self.smokes.clear();
@@ -1899,6 +1920,7 @@ impl Game {
         }
 
         self.update_grenades(dt);
+        self.update_fires();
         let now = self.time;
         self.smokes
             .retain(|s| ((now - s.2) as f32) < toon_shared::consts::SMOKE_TIME);
@@ -2060,6 +2082,14 @@ impl Game {
                 id: g.id,
                 pos: g.pos.to_array(),
                 smoke: g.smoke,
+                kind: g.kind,
+            });
+        }
+        for f in &self.fires {
+            ents.push(EntSnap::Fire {
+                id: f.id,
+                pos: f.pos.to_array(),
+                radius: f.radius,
             });
         }
         for v in &self.vehicles {
@@ -2125,7 +2155,8 @@ impl Game {
                 | EntSnap::Vehicle { pos, .. }
                 | EntSnap::Drop { pos, .. }
                 | EntSnap::Car { pos, .. }
-                | EntSnap::AirDrop { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
+                | EntSnap::AirDrop { pos, .. }
+                | EntSnap::Fire { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
                 EntSnap::DeathBox { pos, .. } => near(Vec3::from_array(*pos), LOOT_RANGE),
                 // small things on the ground: a few pixels at most from further away
                 EntSnap::Weapon { pos, .. } | EntSnap::Loot { pos, .. } => {

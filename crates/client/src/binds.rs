@@ -39,10 +39,13 @@ pub enum Action {
     Heal,
     Inventory,
     Ready,
+    Bandage,
+    Drink,
+    NextThrow,
 }
 
 impl Action {
-    pub const ALL: [Action; 26] = [
+    pub const ALL: [Action; 29] = [
         Action::Forward,
         Action::Back,
         Action::Left,
@@ -69,6 +72,9 @@ impl Action {
         Action::Heal,
         Action::Inventory,
         Action::Ready,
+        Action::Bandage,
+        Action::Drink,
+        Action::NextThrow,
     ];
 
     pub fn name(self) -> &'static str {
@@ -99,6 +105,12 @@ impl Action {
             Action::Heal => t("Аптечка", "Medkit"),
             Action::Inventory => t("Інвентар", "Inventory"),
             Action::Ready => t("Готовий до матчу", "Ready for the match"),
+            Action::Bandage => t("Бинт", "Bandage"),
+            Action::Drink => t("Енергетик", "Energy drink"),
+            Action::NextThrow => t(
+                "Що кидати (граната / молотов / світлошумова)",
+                "What to throw (grenade / molotov / flashbang)",
+            ),
         }
     }
 
@@ -133,6 +145,9 @@ impl Action {
             Action::Heal => [k(K::H), Bind::None],
             Action::Inventory => [k(K::I), Bind::None],
             Action::Ready => [k(K::F1), Bind::None],
+            Action::Bandage => [k(K::B), Bind::None],
+            Action::Drink => [k(K::N), Bind::None],
+            Action::NextThrow => [k(K::X), Bind::None],
         }
     }
 }

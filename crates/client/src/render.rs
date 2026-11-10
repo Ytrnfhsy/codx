@@ -352,7 +352,11 @@ pub fn render_world(
     for e in ents {
         match e {
             EntSnap::Weapon { pos, .. } | EntSnap::Loot { pos, .. } if far(pos) => {}
-            EntSnap::Grenade { id, pos, smoke } => {
+            EntSnap::Fire { .. } => {}
+            EntSnap::Grenade {
+                id, pos, kind: 1, ..
+            } => models::add_molotov(&mut m, Vec3::from_array(*pos), now as f32 + *id as f32),
+            EntSnap::Grenade { id, pos, smoke, .. } => {
                 let t = now as f32 + *id as f32;
                 if *smoke {
                     models::add_smoke_grenade(&mut m, Vec3::from_array(*pos), t)

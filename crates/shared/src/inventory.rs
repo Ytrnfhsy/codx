@@ -215,6 +215,22 @@ pub fn mag_size(base: u16, extended: bool) -> u16 {
 /// Seconds a medkit takes to use, and what it heals.
 pub const MEDKIT_TIME: f32 = 3.0;
 pub const MEDKIT_HEAL: f32 = 60.0;
+/// Bandages: quick, a little, and only up to `BANDAGE_MAX`.
+pub const BANDAGE_TIME: f32 = 4.0;
+pub const BANDAGE_HEAL: f32 = 15.0;
+pub const BANDAGE_MAX: f32 = 75.0;
+/// An energy drink: a few seconds to drink, then the boost heals one point a second.
+pub const DRINK_TIME: f32 = 3.0;
+pub const DRINK_BOOST: f32 = 40.0;
+
+/// What is being used (`Inventory::using`).
+pub const USE_MEDKIT: u8 = 1;
+pub const USE_BANDAGE: u8 = 2;
+pub const USE_DRINK: u8 = 3;
+
+/// Thrown things besides frag and smoke grenades (`kind` of a thrown grenade).
+pub const THROW_MOLOTOV: u8 = 1;
+pub const THROW_FLASH: u8 = 2;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Inventory {
@@ -227,8 +243,15 @@ pub struct Inventory {
     pub backpack: u8,
     /// Rounds of each `AmmoType`.
     pub ammo: [u16; 6],
-    /// Seconds left of using a medkit (0 = not healing).
+    /// Seconds left of using a medkit, bandage or drink (0 = not healing), and which.
     pub healing: f32,
+    pub using: u8,
+    pub bandages: u8,
+    pub drinks: u8,
+    /// Boost from energy drinks still to heal.
+    pub boost: f32,
+    pub molotovs: u8,
+    pub flashes: u8,
     /// Sight on the gun in each hand slot (see `sight_zoom`).
     pub sights: [u8; 2],
     /// Spare sights in the backpack, by level (index 0 = red dot … 3 = 8×).
@@ -246,6 +269,16 @@ impl Inventory {
     }
     pub fn ammo_cap(&self, t: AmmoType) -> u16 {
         (t.base_cap() as f32 * self.bag()) as u16
+    }
+    pub fn bandage_cap(&self) -> u8 {
+        5 + self.backpack * 3
+    }
+    pub fn drink_cap(&self) -> u8 {
+        2 + self.backpack
+    }
+    /// Molotovs and flashbangs, each.
+    pub fn throwable_cap(&self) -> u8 {
+        1 + self.backpack
     }
     pub fn medkit_cap(&self) -> u8 {
         2 + self.backpack * 2

@@ -220,6 +220,28 @@ impl Effects {
         }
     }
 
+    /// Flames licking up from a patch of fire.
+    pub fn flames(&mut self, c: Vec3, r: f32) {
+        for _ in 0..3 {
+            let a = self.rng.range(0.0, std::f32::consts::TAU);
+            let d = self.rng.range(0.0, r);
+            let pos = c + vec3(a.cos() * d, 0.1, a.sin() * d);
+            let hot = self.rng.range(0.0, 1.0);
+            let up = self.rng.range(1.5, 3.0);
+            self.push(Particle {
+                pos,
+                vel: vec3(0.0, up, 0.0),
+                life: 0.0,
+                max: 0.5,
+                size: 0.35,
+                grow: -0.4,
+                color: [255, (120.0 + hot * 110.0) as u8, 30],
+                kind: Kind::Spark,
+                grav: -1.0,
+            });
+        }
+    }
+
     /// Red signal smoke rising from a landed supply crate.
     pub fn flare_smoke(&mut self, pos: Vec3) {
         let v = self.rv(0.4) + vec3(0.0, 2.6, 0.0);

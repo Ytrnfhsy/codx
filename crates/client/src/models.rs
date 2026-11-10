@@ -1009,6 +1009,29 @@ pub fn add_loot(m: &mut ToonMesh, pos: Vec3, kind: toon_shared::protocol::LootKi
                 0.015,
             );
         }
+        LootKind::Bandages => {
+            m.boxed(&base, vec3(0.16, 0.08, 0.12), [246, 240, 230], 0.02);
+            m.boxed(&base, vec3(0.17, 0.03, 0.13), [210, 60, 60], 0.0);
+        }
+        LootKind::Drink => {
+            m.boxed(&base, vec3(0.07, 0.16, 0.07), [60, 200, 120], 0.02);
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, 0.17, 0.0))),
+                vec3(0.05, 0.02, 0.05),
+                [200, 200, 205],
+                0.0,
+            );
+        }
+        LootKind::Molotov => add_molotov(m, pos + vec3(0.0, 0.1, 0.0), t),
+        LootKind::Flash => {
+            m.boxed(&base, vec3(0.07, 0.13, 0.07), [90, 96, 110], 0.02);
+            m.boxed(
+                &(base * Mat4::from_translation(vec3(0.0, 0.15, 0.0))),
+                vec3(0.05, 0.03, 0.05),
+                [210, 200, 80],
+                0.0,
+            );
+        }
         LootKind::Grenades => {
             m.boxed(&base, vec3(0.3, 0.14, 0.24), [130, 100, 60], 0.02);
             for dx in [-0.12f32, 0.12] {
@@ -1266,4 +1289,22 @@ pub fn add_deathbox(m: &mut ToonMesh, pos: Vec3) {
             0.0,
         );
     }
+}
+
+/// A molotov: a bottle with a burning rag.
+pub fn add_molotov(m: &mut ToonMesh, pos: Vec3, t: f32) {
+    let base = trs(pos + vec3(0.0, 0.15, 0.0), t * 3.0, 0.0, 0.0);
+    m.boxed(&base, vec3(0.07, 0.13, 0.07), [90, 150, 70], 0.02);
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 0.18, 0.0))),
+        vec3(0.03, 0.06, 0.03),
+        [90, 150, 70],
+        0.0,
+    );
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 0.27, 0.0))),
+        vec3(0.035, 0.04, 0.035),
+        [250, 150, 40],
+        0.0,
+    );
 }

@@ -1130,3 +1130,148 @@ fn attachments_change_the_gun() {
     assert_eq!(p.weapons[0].mag, 30);
     assert_eq!(p.inv.ammo(AmmoType::Rifle), before + 14);
 }
+
+/// Consumables: a bandage heals a little and not past 75, an energy drink heals slowly
+/// over time, a molotov sets the ground on fire for a while, a flashbang blinds a bot
+/// looking at it.
+#[test]
+fn bandages_drinks_molotovs_and_flashbangs() {
+    use toon_shared::inventory::{THROW_FLASH, THROW_MOLOTOV};
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir()
+            .join("tw-br11")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 2;
+    cfg.br.max_players = 3;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Island, Mode::Br);
+    let me = g
+        .connect(
+            "127.0.0.1:5015".parse().unwrap(),
+            "Гравець",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    let sky = glam::vec3(0.0, 400.0, 0.0);
+    let tick = |g: &mut Game, secs: f32| {
+        for _ in 0..(secs / TICK_DT).max(1.0) as usize {
+            if let Some(p) = g.pm(me) {
+                if p.alive {
+                    p.body.pos = sky;
+                    p.body.chute = Chute::None;
+                    p.protected_until = 0.0;
+                }
+            }
+            g.tick(TICK_DT);
+            g.outbox.clear();
+            g.shots.clear();
+        }
+    };
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        tick(&mut g, TICK_DT);
+        if g.br.running {
+            break;
+        }
+    }
+    g.handle(me, C2S::BrJump);
+    tick(&mut g, 0.2);
+    {
+        let p = g.pm(me).unwrap();
+        p.inv.bandages = 2;
+        p.inv.drinks = 1;
+        p.inv.molotovs = 1;
+        p.inv.flashes = 1;
+        p.hp = 70.0;
+    }
+    // a bandage: 70 -> 75 (no further)
+    g.handle(me, C2S::UseBandage);
+    tick(&mut g, 4.3);
+    let p = g.p(me).unwrap();
+    assert!((p.hp - 75.0).abs() < 0.5, "hp {}", p.hp);
+    assert_eq!(p.inv.bandages, 1);
+    g.handle(me, C2S::UseBandage);
+    tick(&mut g, 0.2);
+    assert_eq!(g.p(me).unwrap().inv.healing, 0.0, "a bandage above 75");
+    // a drink: the boost heals about a point a second
+    g.handle(me, C2S::UseDrink);
+    tick(&mut g, 3.2);
+    let hp0 = g.p(me).unwrap().hp;
+    assert!(g.p(me).unwrap().inv.boost > 35.0);
+    tick(&mut g, 10.0);
+    let gained = g.p(me).unwrap().hp - hp0;
+    assert!((8.0..12.0).contains(&gained), "gained {gained}");
+
+    // a molotov at a bot's feet: fire, and it burns
+    let bot = g
+        .players
+        .iter()
+        .flatten()
+        .find(|p| p.is_bot())
+        .map(|p| p.id)
+        .unwrap();
+    let ground = g.world.ground(0.0, 30.0).unwrap();
+    let spot = glam::vec3(0.0, ground, 30.0);
+    {
+        let b = g.pm(bot).unwrap();
+        b.alive = true;
+        b.in_plane = false;
+        b.body.chute = Chute::None;
+        b.body.pos = spot;
+        b.hp = 100.0;
+        b.protected_until = 0.0;
+    }
+    g.handle(
+        me,
+        C2S::Throw {
+            origin: (spot + glam::vec3(0.0, 1.0, 0.0)).to_array(),
+            dir: [0.0, -1.0, 0.0],
+            kind: THROW_MOLOTOV,
+        },
+    );
+    // (thrown from up here the bottle falls a while)
+    g.grenades.last_mut().unwrap().pos = spot + glam::vec3(0.0, 0.6, 0.0);
+    for _ in 0..60 {
+        if let Some(b) = g.pm(bot) {
+            b.body.pos = spot;
+            b.body.vel = glam::Vec3::ZERO;
+        }
+        tick(&mut g, TICK_DT);
+    }
+    assert!(!g.fires.is_empty(), "no fire");
+    let b = g.p(bot).unwrap();
+    assert!(b.hp < 100.0 || !b.alive, "the fire did not burn");
+
+    // a flashbang right in front of a bot looking at it
+    let b = g.pm(bot).unwrap();
+    b.alive = true;
+    b.hp = 100.0;
+    b.yaw = toon_shared::yaw_of(glam::vec3(0.0, 0.0, 1.0));
+    b.pitch = 0.0;
+    let eye = g.p(bot).unwrap().eye();
+    g.fires.clear();
+    g.handle(
+        me,
+        C2S::Throw {
+            origin: sky.to_array(),
+            dir: [0.0, 0.0, 1.0],
+            kind: THROW_FLASH,
+        },
+    );
+    let gr = g.grenades.last_mut().unwrap();
+    gr.pos = eye + glam::vec3(0.0, 0.0, 4.0);
+    gr.vel = glam::Vec3::ZERO;
+    for _ in 0..60 {
+        if let Some(b) = g.pm(bot) {
+            b.body.pos = spot;
+        }
+        tick(&mut g, TICK_DT);
+    }
+    let blind = g.p(bot).unwrap().bot.as_ref().unwrap().blind_until;
+    assert!(blind > g.time - 1.0 && blind > 0.0, "not blinded ({blind})");
+}

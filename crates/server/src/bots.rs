@@ -141,6 +141,8 @@ pub struct Bot {
     pub br_land: Option<Vec3>,
     /// No changing guns again before this.
     next_switch: f64,
+    /// Blinded by a flashbang until then.
+    pub blind_until: f64,
     /// Battle royale: the thing being fetched and since when the bot has stood by it
     /// without getting it (an item a floor up or down), and things given up on (until).
     pub fetch: Option<(u16, f64)>,
@@ -247,6 +249,7 @@ impl Bot {
             br_jump_at: 0.0,
             br_land: None,
             next_switch: 0.0,
+            blind_until: 0.0,
             fetch: None,
             skip: Vec::new(),
             target: None,
@@ -374,6 +377,10 @@ impl Game {
             let mut best: Option<(u8, f32)> = None;
             let mut heard: Option<(Vec3, f32)> = None;
             let my_squad = self.p(id).map_or(0, |p| p.squad);
+            let blind = bot.blind_until;
+            if time < blind {
+                bot.target = None;
+            }
             let solo = self.mode.solo();
             for o in self.players.iter().flatten() {
                 let friend = if solo {
@@ -394,7 +401,7 @@ impl Game {
                     .attacked_by
                     .map(|a| a.0 == o.id && time - a.2 < 2.0)
                     .unwrap_or(false);
-                let in_view = d < sight && (facing > sk.fov_cos || d < 2.5);
+                let in_view = d < sight && (facing > sk.fov_cos || d < 2.5) && time >= blind;
                 let los = in_view
                     && ((self.world.line_of_sight(eye, o.eye())
                         && !smoke_blocks(eye, o.eye(), &clouds))

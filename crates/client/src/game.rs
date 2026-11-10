@@ -170,6 +170,12 @@ pub struct GameClient {
     next_drive: f64,
     /// When the crates' signal smoke puffs next.
     next_flare: f64,
+    /// What G throws in the battle royale: 0 a grenade, else `inventory::THROW_*`.
+    pub throw_kind: u8,
+    /// Blinded by a flashbang: until when, and how hard.
+    pub flashed: (f64, f32),
+    /// When the fires' flames flicker next.
+    next_flame: f64,
     pub ents: Vec<EntSnap>,
     pub scoreboard: Vec<ScoreRow>,
     latest_tick: u32,
@@ -410,6 +416,9 @@ impl GameClient {
             cars: HashMap::new(),
             next_drive: 0.0,
             next_flare: 0.0,
+            throw_kind: 0,
+            flashed: (0.0, 0.0),
+            next_flame: 0.0,
             ents: Vec::new(),
             scoreboard: Vec::new(),
             latest_tick: 0,
@@ -846,6 +855,13 @@ impl GameClient {
                     if headshot {
                         a.play(Sfx::HitHead, 0.55);
                     }
+                }
+            }
+            S2C::Flashed(k) => {
+                let k = k.clamp(0.0, 1.0);
+                self.flashed = (now + 0.6 + 3.5 * k as f64, k);
+                if let Some(a) = audio {
+                    a.play(Sfx::Explosion, 0.6 * k);
                 }
             }
             S2C::Damaged { from, amount } => {
@@ -1907,6 +1923,21 @@ impl GameClient {
         }
 
         self.update_cars(dt);
+        // flames over molotov fires
+        if now >= self.next_flame {
+            self.next_flame = now + 0.05;
+            let fires: Vec<(Vec3, f32)> = self
+                .ents
+                .iter()
+                .filter_map(|e| match e {
+                    EntSnap::Fire { pos, radius, .. } => Some((Vec3::from_array(*pos), *radius)),
+                    _ => None,
+                })
+                .collect();
+            for (p, r) in fires {
+                self.fx.flames(p, r);
+            }
+        }
         // red smoke over landed supply crates
         if now >= self.next_flare {
             self.next_flare = now + 0.15;
@@ -2211,8 +2242,42 @@ impl GameClient {
             {
                 self.start_reload();
             }
+            // a molotov or a flashbang instead (battle royale): thrown at once
+            let special = if self.mode == Mode::Br {
+                self.throw_kind
+            } else {
+                0
+            };
+            if special != 0 && !shielded && pressed(Action::Grenade) && now >= self.throw_until {
+                let inv = self.br.as_ref().map(|b| b.inv).unwrap_or_default();
+                let left = if special == toon_shared::inventory::THROW_MOLOTOV {
+                    inv.molotovs
+                } else {
+                    inv.flashes
+                };
+                if left > 0 {
+                    let aim = self.aim_dir();
+                    let pitch =
+                        aim.y.clamp(-1.0, 1.0).asin() + self.tuning.grenade.throw_arc.to_radians();
+                    let flat = vec3(aim.x, 0.0, aim.z).normalize_or_zero();
+                    let d = (flat * pitch.cos() + vec3(0.0, pitch.sin(), 0.0)).normalize();
+                    self.net.send(C2S::Throw {
+                        origin: (self.eye() + d * 0.3).to_array(),
+                        dir: d.to_array(),
+                        kind: special,
+                    });
+                    self.last_throw = now;
+                    self.throw_until = now + 0.6;
+                    if let Some(a) = audio {
+                        a.play(Sfx::Knife, 0.4);
+                    }
+                } else {
+                    self.throw_kind = 0;
+                }
+            }
             // grenade (hold G to cook)
             if !shielded
+                && special == 0
                 && pressed(Action::Grenade)
                 && self.grenades > 0
                 && self.cooking.is_none()
@@ -2324,6 +2389,29 @@ impl GameClient {
             }
             if self.mode == Mode::Br && pressed(Action::Heal) {
                 self.net.send(C2S::UseMedkit);
+            }
+            if self.mode == Mode::Br && pressed(Action::Bandage) {
+                self.net.send(C2S::UseBandage);
+            }
+            if self.mode == Mode::Br && pressed(Action::Drink) {
+                self.net.send(C2S::UseDrink);
+            }
+            if self.mode == Mode::Br && pressed(Action::NextThrow) {
+                // the next kind we have any of (a grenade at least to fall back to)
+                let inv = self.br.as_ref().map(|b| b.inv).unwrap_or_default();
+                let have = |k: u8| match k {
+                    toon_shared::inventory::THROW_MOLOTOV => inv.molotovs > 0,
+                    toon_shared::inventory::THROW_FLASH => inv.flashes > 0,
+                    _ => true,
+                };
+                let mut k = self.throw_kind;
+                for _ in 0..3 {
+                    k = (k + 1) % 3;
+                    if have(k) {
+                        break;
+                    }
+                }
+                self.throw_kind = k;
             }
             if self.mode == Mode::Br
                 && self.br.as_ref().is_some_and(|b| !b.in_plane)
