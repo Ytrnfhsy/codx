@@ -1302,7 +1302,7 @@ fn red_zone_is_marked_then_shelled() {
         .unwrap();
     g.handle(me, C2S::JoinTeam(None));
     let mut booms = 0;
-    let mut tick = |g: &mut Game, secs: f32, booms: &mut usize| {
+    let tick = |g: &mut Game, secs: f32, booms: &mut usize| {
         for _ in 0..(secs / TICK_DT).max(1.0) as usize {
             if let Some(p) = g.pm(me) {
                 if p.alive {
@@ -1339,4 +1339,58 @@ fn red_zone_is_marked_then_shelled() {
     tick(&mut g, 21.5, &mut booms);
     assert!(booms > 25, "only {booms} shells");
     assert!(g.br.red.is_none(), "still shelling");
+}
+
+/// Out of the round: you watch someone still in (and see what is around them), get a
+/// summary of how it went, and the server remembers it for next time.
+#[test]
+fn spectating_summary_and_records() {
+    let dir = std::env::temp_dir().join("tw-br-stats");
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: dir.to_string_lossy().into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 10;
+    cfg.br.max_players = 10;
+    let mut g = Game::new(cfg);
+    g.rng = toon_shared::rng::Rng::new(9);
+    g.change_map(MapId::Island, Mode::Br);
+    let v = toon_shared::consts::PROTOCOL_VERSION;
+    let a = g.connect("127.0.0.1:5101".parse().unwrap(), "Перший", "", v).unwrap();
+    let b = g.connect("127.0.0.1:5102".parse().unwrap(), "Другий", "", v).unwrap();
+    g.handle(a, C2S::JoinTeam(None));
+    g.handle(b, C2S::JoinTeam(None));
+    for _ in 0..(40.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+        for id in [a, b] {
+            if g.br.running && g.p(id).is_some_and(|p| p.in_plane) {
+                g.handle(id, C2S::BrJump);
+            }
+        }
+    }
+    assert!(g.br.running);
+    // (put them far apart, so what A sees can only come from watching B)
+    let far = g.p(b).unwrap().body.pos + glam::vec3(700.0, 0.0, 0.0);
+    g.pm(a).unwrap().body.pos = far;
+    g.kill(a, None, Cause::Zone, false);
+    g.tick(TICK_DT);
+    assert_eq!(g.state, MatchState::Playing, "B is still in");
+    let snap = g.snapshot_for(a);
+    let s = snap.br.as_ref().and_then(|b| b.summary.clone()).expect("a summary");
+    assert!(s.place > 1 && s.of >= 10, "place {} of {}", s.place, s.of);
+    assert_eq!((s.matches, s.wins), (1, 0));
+    assert!(!snap.players.iter().any(|p| p.id == b), "B is far away");
+    g.handle(a, C2S::Spectate(b));
+    assert_eq!(g.p(a).unwrap().spectating, Some(b));
+    let snap = g.snapshot_for(a);
+    assert!(snap.players.iter().any(|p| p.id == b), "watching B shows B");
+    // saved, and read back by a new server
+    let again = toon_server::stats::BrStats::load(&dir.to_string_lossy());
+    assert_eq!(again.get("Перший").matches, 1);
+    assert_eq!(again.get("Перший").best, s.place as u32);
+    assert_eq!(again.get("Другий").matches, 0, "B's round is not over");
 }

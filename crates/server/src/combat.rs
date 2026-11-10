@@ -440,6 +440,7 @@ impl Game {
             amount = v.inv.soak(amount, headshot);
             v.inv.healing = 0.0;
         }
+        let dealt = amount.min(v.hp.max(0.0));
         v.hp -= amount;
         // knocked down: on the ground with a fresh pool of "bleeding" health
         if v.hp <= 0.0 && can_knock && cause != Cause::World {
@@ -461,6 +462,9 @@ impl Game {
                 secs: 3.0,
             });
             if let Some(a) = attacker.filter(|a| *a != victim) {
+                if let Some(ap) = self.pm(a) {
+                    ap.br_dmg += dealt;
+                }
                 self.send(
                     a,
                     S2C::HitConfirm {
@@ -497,6 +501,11 @@ impl Game {
         );
         if let Some(a) = attacker {
             if a != victim {
+                if solo && !friends {
+                    if let Some(ap) = self.pm(a) {
+                        ap.br_dmg += dealt;
+                    }
+                }
                 self.send(
                     a,
                     S2C::HitConfirm {
@@ -527,6 +536,7 @@ impl Game {
         v.downed = false;
         v.downed_by = None;
         v.revive = 0.0;
+        let vpos_now = v.body.pos;
         v.alive = false;
         v.hp = 0.0;
         v.deaths += 1;
@@ -537,6 +547,13 @@ impl Game {
         let vpos = v.body.pos;
         let vteam = v.team;
         let vsquad = v.squad;
+        if let Some(a) = attacker.filter(|a| *a != victim) {
+            let far = self.p(a).map_or(0.0, |k| k.body.pos.distance(vpos_now));
+            if let Some(k) = self.pm(a) {
+                k.br_longest = k.br_longest.max(far);
+            }
+        }
+        let Some(v) = self.pm(victim) else { return };
         let vname = v.name.clone();
         let martyr = v.has_perk3(Perk3::Martyrdom);
         let assist_list: Vec<u8> = v

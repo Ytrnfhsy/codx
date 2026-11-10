@@ -14,6 +14,7 @@ pub mod nav;
 pub mod netserver;
 pub mod pickups;
 pub mod sab;
+pub mod stats;
 pub mod update;
 pub mod vehicles;
 

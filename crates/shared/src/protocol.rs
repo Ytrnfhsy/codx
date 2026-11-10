@@ -118,6 +118,8 @@ pub enum C2S {
     Car(CarCmd),
     /// Death boxes.
     Box(BoxCmd),
+    /// Out of the battle royale: whose eyes to watch through (255 = a free camera).
+    Spectate(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -426,8 +428,27 @@ pub struct BrSnap {
     pub drops: Vec<V3>,
     /// The red zone: centre x, z, radius, seconds before the shelling starts.
     pub red: Option<[f32; 4]>,
+    /// Our round once we are out (or it is over).
+    pub summary: Option<BrSummary>,
     /// The death box we are looking into.
     pub open_box: Option<BoxView>,
+}
+
+/// How our battle royale round went, and our records on this server.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct BrSummary {
+    pub place: u16,
+    pub of: u16,
+    pub kills: u16,
+    pub damage: f32,
+    /// Longest kill this round, metres.
+    pub longest: f32,
+    /// Seconds from the plane taking off to being out.
+    pub survived: f32,
+    pub matches: u32,
+    pub wins: u32,
+    pub total_kills: u32,
+    pub best: u32,
 }
 
 /// What is in a death box: supplies, then guns (with the rounds in their magazines).

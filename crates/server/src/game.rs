@@ -97,6 +97,13 @@ pub struct Player {
     pub marker: Option<[f32; 2]>,
     /// The death box they look into.
     pub open_box: Option<u16>,
+    /// Out of the battle royale: whom they watch.
+    pub spectating: Option<u8>,
+    /// This battle royale round: damage dealt, longest kill, place once out, when out.
+    pub br_dmg: f32,
+    pub br_longest: f32,
+    pub br_place: u16,
+    pub br_out_at: f64,
     pub last_seq: u32,
     pub move_budget: f32,
     pub history: VecDeque<HistEntry>,
@@ -227,6 +234,11 @@ impl Player {
             revive: 0.0,
             marker: None,
             open_box: None,
+            spectating: None,
+            br_dmg: 0.0,
+            br_longest: 0.0,
+            br_place: 0,
+            br_out_at: 0.0,
             last_seq: 0,
             move_budget: 2.0,
             history: VecDeque::new(),
@@ -407,6 +419,8 @@ pub struct Game {
     pub shot_serial: u32,
     pub log: VecDeque<String>,
     pub bans: crate::admin::Bans,
+    /// Battle royale records between matches.
+    pub br_stats: crate::stats::BrStats,
     /// Players to disconnect (id, reason) — handled by the network layer.
     pub kicked: Vec<(u8, String)>,
     pub next_housekeeping: f64,
@@ -437,6 +451,7 @@ impl Game {
         let world = World::from_map(&map);
         let nav = Nav::build(&map, &world);
         let bans = crate::admin::Bans::load(&cfg.data_dir);
+        let br_stats = crate::stats::BrStats::load(&cfg.data_dir);
         let sab = Sab {
             pos: map.bomb,
             carrier: None,
@@ -492,6 +507,7 @@ impl Game {
             shot_serial: 0,
             log: VecDeque::new(),
             bans,
+            br_stats,
             kicked: Vec::new(),
             next_housekeeping: 0.0,
             match_started: false,
@@ -1248,6 +1264,11 @@ impl Game {
                 self.throw_special(id, Vec3::from_array(origin), Vec3::from_array(dir), kind)
             }
             C2S::Item(a) => self.br_item(id, a),
+            C2S::Spectate(t) => {
+                if let Some(p) = self.pm(id) {
+                    p.spectating = (t != 255).then_some(t);
+                }
+            }
             C2S::Box(cmd) => match cmd {
                 toon_shared::protocol::BoxCmd::Open(b) => {
                     if let Some(p) = self.pm(id) {
@@ -1970,6 +1991,12 @@ impl Game {
         let p = self.p(id)?;
         if !p.team.is_playing() {
             return None;
+        }
+        // out of the battle royale and watching somebody: what is around them
+        if !p.alive && self.mode == Mode::Br {
+            if let Some(t) = p.spectating.and_then(|t| self.p(t)).filter(|t| t.alive) {
+                return Some(vec![t.body.pos, p.body.pos]);
+            }
         }
         let mut pts = vec![p.body.pos];
         pts.extend(

@@ -238,6 +238,11 @@ impl Game {
             p.revive = 0.0;
             p.marker = None;
             p.squad = 0;
+            p.br_dmg = 0.0;
+            p.br_longest = 0.0;
+            p.br_place = 0;
+            p.br_out_at = 0.0;
+            p.spectating = None;
             if p.is_bot() {
                 jumps.push(p.id);
             }
@@ -390,6 +395,26 @@ impl Game {
                 p.squad = (k / size) as u8 + 1;
             }
         }
+    }
+
+    /// A player's place in the round is settled: kept for the summary, and for a real
+    /// player added to their records.
+    fn br_set_place(&mut self, id: u8, place: u16) {
+        let now = self.time;
+        let Some(p) = self.pm(id) else { return };
+        if p.br_place != 0 {
+            return;
+        }
+        p.br_place = place;
+        if p.br_out_at <= 0.0 || p.alive {
+            p.br_out_at = now;
+        }
+        if p.is_bot() {
+            return;
+        }
+        let (name, kills, dmg, longest) = (p.name.clone(), p.kills as u32, p.br_dmg, p.br_longest);
+        self.br_stats
+            .record(&name, place as u32, kills, dmg, longest);
     }
 
     /// Sides still in the round: squads, and players on their own.
@@ -1086,6 +1111,7 @@ impl Game {
                 .flatten()
                 .find(|p| p.team.is_playing() && (p.alive || p.in_plane))
                 .map(|p| (p.name.clone(), p.squad));
+            let last_squad = last.as_ref().map_or(0, |l| l.1);
             let winner = last.map(|(name, squad)| {
                 if squad == 0 {
                     return name;
@@ -1099,6 +1125,19 @@ impl Game {
                     .collect::<Vec<_>>()
                     .join(", ")
             });
+            let winners: Vec<u8> = self
+                .players
+                .iter()
+                .flatten()
+                .filter(|p| {
+                    p.team.is_playing() && (p.alive || p.in_plane) && p.br_place == 0
+                        || last_squad != 0 && p.squad == last_squad
+                })
+                .map(|p| p.id)
+                .collect();
+            for id in winners {
+                self.br_set_place(id, 1);
+            }
             self.br.running = false;
             let text = || match &winner {
                 Some(n) => tr!("{n} — переможці!", "{n} win!"),
@@ -1616,6 +1655,10 @@ impl Game {
             return;
         }
         self.br_drop_inventory(victim);
+        let now = self.time;
+        if let Some(v) = self.pm(victim) {
+            v.br_out_at = now;
+        }
         let squad = self.p(victim).map_or(0, |p| p.squad);
         let mates_in = squad != 0
             && self
@@ -1635,6 +1678,17 @@ impl Game {
             return;
         }
         let place = self.br_sides() + 1;
+        // the whole side is out: its place (squadmates out earlier share it)
+        let side: Vec<u8> = self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| p.id == victim || squad != 0 && p.squad == squad)
+            .map(|p| p.id)
+            .collect();
+        for id in side {
+            self.br_set_place(id, place as u16);
+        }
         self.say(Dest::One(victim), || S2C::Center {
             text: tr!("Ти вибув! Місце #{place}", "You are out! Place #{place}"),
             secs: 5.0,
@@ -1704,6 +1758,21 @@ impl Game {
                 .red
                 .map(|z| [z.c.x, z.c.y, z.r, (z.start - self.time).max(0.0) as f32]),
             open_box: self.box_view(id),
+            summary: me.filter(|m| m.br_place != 0).map(|m| {
+                let rec = self.br_stats.get(&m.name);
+                toon_shared::protocol::BrSummary {
+                    place: m.br_place,
+                    of: self.br.entrants as u16,
+                    kills: m.kills,
+                    damage: m.br_dmg,
+                    longest: m.br_longest,
+                    survived: (m.br_out_at - self.br.plane_t0).max(0.0) as f32,
+                    matches: rec.matches,
+                    wins: rec.wins,
+                    total_kills: rec.kills,
+                    best: rec.best,
+                }
+            }),
         })
     }
 

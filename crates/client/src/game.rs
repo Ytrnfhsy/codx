@@ -176,6 +176,9 @@ pub struct GameClient {
     pub flashed: (f64, f32),
     /// When the fires' flames flicker next.
     next_flame: f64,
+    /// Out of the battle royale: whose eyes we watch through (None with a free camera).
+    pub spectate: Option<u8>,
+    pub spec_free: bool,
     pub ents: Vec<EntSnap>,
     pub scoreboard: Vec<ScoreRow>,
     latest_tick: u32,
@@ -419,6 +422,8 @@ impl GameClient {
             throw_kind: 0,
             flashed: (0.0, 0.0),
             next_flame: 0.0,
+            spectate: None,
+            spec_free: false,
             ents: Vec::new(),
             scoreboard: Vec::new(),
             latest_tick: 0,
@@ -1449,6 +1454,12 @@ impl GameClient {
     pub fn live_actors(&self) -> Vec<Actor> {
         let now = self.now;
         let mut out: Vec<Actor> = self.live_actors_raw();
+        // (watching through somebody's eyes: their own head is not in the way)
+        if self.br_out() {
+            if let Some(t) = self.spectate {
+                out.retain(|a| a.id != t);
+            }
+        }
         for a in out.iter_mut() {
             if let Some((pos, yaw)) = self.seated_at(a.id) {
                 a.pos = pos;
@@ -1906,9 +1917,15 @@ impl GameClient {
         }
         self.yaw = wrap_angle(self.yaw);
 
+        if self.br_out() {
+            self.update_br_spectate(playing_input);
+        } else if self.spectate.is_some() || self.spec_free {
+            self.spectate = None;
+            self.spec_free = false;
+        }
         if !self.team.is_playing()
             || (!self.alive && self.state != MatchState::PostMatch && self.team == Team::Spectator)
-            || self.br_out()
+            || self.br_out() && self.spectate.is_none()
         {
             self.update_spectator(dt, playing_input);
         }
@@ -2559,6 +2576,68 @@ impl GameClient {
         }
     }
 
+    /// Out of the battle royale: watch the one who got us, a squadmate, or anybody still
+    /// in (LMB / RMB: next / previous, Space: a free camera).
+    fn update_br_spectate(&mut self, input: bool) {
+        let mut alive: Vec<u8> = self
+            .remotes
+            .iter()
+            .filter(|(_, r)| r.alive)
+            .map(|(id, _)| *id)
+            .collect();
+        alive.sort_unstable();
+        let was = self.spectate;
+        if input && binds::pressed(Action::Jump) {
+            self.spec_free = !self.spec_free;
+            if self.spec_free {
+                // the free camera starts where we were watching from
+                let (p, y, pi) = self.camera();
+                self.spec_pos = p;
+                self.yaw = y;
+                self.pitch = pi;
+                self.spectate = None;
+            }
+        }
+        if !self.spec_free {
+            let step = if input && binds::pressed(Action::Fire) {
+                1
+            } else if input && binds::pressed(Action::Aim) {
+                -1
+            } else {
+                0
+            };
+            let current_ok = self.spectate.is_some_and(|t| alive.contains(&t));
+            if step != 0 && !alive.is_empty() {
+                let i = self
+                    .spectate
+                    .and_then(|t| alive.iter().position(|a| *a == t))
+                    .unwrap_or(0) as i32;
+                self.spectate = Some(alive[(i + step).rem_euclid(alive.len() as i32) as usize]);
+            } else if !current_ok {
+                // the one who got us, a squadmate, or whoever is nearest
+                let killer = self.death_info.as_ref().and_then(|d| d.2);
+                let mate = self
+                    .br
+                    .as_ref()
+                    .and_then(|b| b.squad.iter().find(|m| m.id != self.my_id && m.alive))
+                    .map(|m| m.id);
+                let here = self.death_pos;
+                let nearest = alive.iter().copied().min_by(|a, b| {
+                    let da = self.remotes[a].pos.distance(here);
+                    let db = self.remotes[b].pos.distance(here);
+                    da.total_cmp(&db)
+                });
+                self.spectate = killer
+                    .filter(|k| alive.contains(k))
+                    .or(mate.filter(|m| alive.contains(m)))
+                    .or(nearest);
+            }
+        }
+        if self.spectate != was {
+            self.net.send(C2S::Spectate(self.spectate.unwrap_or(255)));
+        }
+    }
+
     fn update_spectator(&mut self, dt: f32, input: bool) {
         if !input {
             return;
@@ -2893,6 +2972,15 @@ impl GameClient {
                 self.yaw + s.x + shake.x,
                 self.pitch + s.y + shake.y,
             );
+        }
+        if self.br_out() {
+            if let Some(r) = self.spectate.and_then(|t| self.remotes.get(&t)) {
+                let pos = self
+                    .seated_at(self.spectate.unwrap_or(0))
+                    .map(|s| s.0)
+                    .unwrap_or(r.pos);
+                return (pos + vec3(0.0, r.stance.eye(), 0.0), r.yaw, r.pitch);
+            }
         }
         if !self.team.is_playing() || self.br_out() {
             return (self.spec_pos, self.yaw, self.pitch);

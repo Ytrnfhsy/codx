@@ -129,6 +129,7 @@ impl GameClient {
             self.draw_squad_world(ui, view);
         }
         self.draw_squad_panel(ui);
+        self.draw_br_out(ui);
 
         // crosshair
         if self.alive
@@ -603,6 +604,73 @@ impl GameClient {
             })
             .unwrap_or(0);
         C[1 + others % 3]
+    }
+
+    /// Out of the battle royale: whom we watch, and how the round went.
+    fn draw_br_out(&self, ui: &Ui) {
+        let (w, h) = (screen_width(), screen_height());
+        if self.br_out() {
+            let name = self
+                .spectate
+                .and_then(|t| self.name_of(t))
+                .map(|n| n.to_string());
+            let line = match name {
+                Some(n) => tr!(
+                    "Спостерігаєш: {n}  ·  ЛКМ / ПКМ — наступний / попередній  ·  Пробіл — вільна камера",
+                    "Watching: {n}  ·  LMB / RMB — next / previous  ·  Space — free camera"
+                ),
+                None => t(
+                    "Вільна камера  ·  Пробіл — дивитися очима гравців",
+                    "Free camera  ·  Space — watch through players' eyes",
+                )
+                .into(),
+            };
+            draw_rectangle(0.0, h - 40.0, w, 40.0, Color::new(0.0, 0.0, 0.0, 0.45));
+            ui.centered(&line, w / 2.0, h - 14.0, 16, TEXT);
+        }
+        // the round in numbers (once out, or when it is over)
+        let Some(s) = self.br.as_ref().and_then(|b| b.summary.clone()) else {
+            return;
+        };
+        if !(self.br_out() || self.match_end.is_some()) || self.killcam.is_some() {
+            return;
+        }
+        let pw = 520.0f32.min(w - 20.0);
+        let (x, y) = ((w - pw) / 2.0, 150.0);
+        draw_rectangle(x, y, pw, 96.0, Color::new(0.0, 0.0, 0.0, 0.55));
+        let title = if s.place == 1 {
+            t("ПЕРЕМОГА!", "WINNER!").to_string()
+        } else {
+            tr!("Місце #{} з {}", "Place #{} of {}", s.place, s.of)
+        };
+        ui.centered(
+            &title,
+            w / 2.0,
+            y + 30.0,
+            26,
+            if s.place == 1 { ACCENT } else { TEXT },
+        );
+        let mins = (s.survived / 60.0) as u32;
+        let secs = (s.survived % 60.0) as u32;
+        let line = tr!(
+            "Вбивства {} · Урон {:.0} · Найдальше {:.0} м · Протримався {}:{:02}",
+            "Kills {} · Damage {:.0} · Longest {:.0} m · Survived {}:{:02}",
+            s.kills,
+            s.damage,
+            s.longest,
+            mins,
+            secs
+        );
+        ui.centered(&line, w / 2.0, y + 58.0, 16, TEXT);
+        let total = tr!(
+            "Усього на сервері: матчів {} · перемог {} · вбивств {} · найкраще місце #{}",
+            "On this server: matches {} · wins {} · kills {} · best place #{}",
+            s.matches,
+            s.wins,
+            s.total_kills,
+            s.best.max(1)
+        );
+        ui.centered(&total, w / 2.0, y + 82.0, 14, MUTED);
     }
 
     /// The squad on the left: names, health, who is down.
