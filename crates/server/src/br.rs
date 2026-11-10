@@ -118,6 +118,8 @@ pub struct BrState {
     pub next_drop: f64,
     /// Crates sent this round.
     pub launched: usize,
+    /// What knocked-out players left.
+    pub boxes: Vec<crate::boxes::DeathBox>,
 }
 
 /// A supply crate: it comes down under a parachute inside the next circle and spills rare
@@ -186,6 +188,7 @@ impl Game {
             drops: Vec::new(),
             next_drop: time + FIRST_DROP,
             launched: 0,
+            boxes: Vec::new(),
         };
         self.br_next_phase(time);
         // everyone boards
@@ -1221,24 +1224,13 @@ impl Game {
                 items.push((LootKind::Mod(k as u8 + 1), 1));
             }
         }
-        let n = items.len().max(1) as f32;
-        for (k, (kind, amount)) in items.into_iter().enumerate() {
-            // in a small ring round the body
-            let a = k as f32 / n * std::f32::consts::TAU;
-            let at = pos + vec3(a.cos() * 0.9, 0.3, a.sin() * 0.9);
-            let floor = self
-                .world
-                .floor_below(at, 3.0)
-                .or_else(|| self.world.ground(at.x, at.z))
-                .unwrap_or(pos.y);
-            let id = self.new_ent_id();
-            self.br.loot.push(Loot {
-                id,
-                kind,
-                amount,
-                pos: vec3(at.x, floor, at.z),
-            });
-        }
+        // all of it in one box where they fell
+        let _ = pos;
+        let b = self.br_box_of(victim);
+        self.br.boxes[b].items.extend(items);
+        self.br
+            .boxes
+            .retain(|b| !b.items.is_empty() || !b.guns.is_empty());
     }
 
     /// The inventory screen: throwing things away and moving sights between the guns
@@ -1532,6 +1524,7 @@ impl Game {
                 })
                 .unwrap_or_default(),
             drops: self.br.drops.iter().map(|d| d.pos.to_array()).collect(),
+            open_box: self.box_view(id),
         })
     }
 
@@ -1681,6 +1674,28 @@ impl Game {
                     return (Some(at), false, false);
                 }
             }
+            // a death box with a real gun in it
+            if !skydiving {
+                let found = self.br.boxes.iter().find_map(|b| {
+                    let k = b.guns.iter().position(|g| {
+                        g.id.def().class != toon_shared::weapons::WeaponClass::Pistol
+                            && !have.contains(&g.id)
+                    })?;
+                    (near(b.pos) < 60.0 && !skipped.contains(&b.id)).then_some((
+                        b.id,
+                        b.pos,
+                        b.items.len() + k,
+                    ))
+                });
+                if let Some((bid, at, k)) = found {
+                    if near(at) < crate::boxes::BOX_RADIUS {
+                        self.box_take(id, bid, k);
+                    }
+                    if !Self::br_bot_gave_up(bot, bid, at, pos, time) {
+                        return (Some(at), false, false);
+                    }
+                }
+            }
         }
         // a landed supply crate not too far away (inside the zone): the best gear there is
         if !skydiving && armed {
@@ -1735,6 +1750,28 @@ impl Game {
                     self.br_pick(id, ent);
                 }
                 if !Self::br_bot_gave_up(bot, ent, at, pos, time) {
+                    return (Some(at), false, false);
+                }
+            }
+            // death boxes with something we want
+            let found = self.br.boxes.iter().find_map(|b| {
+                let wanted: Vec<usize> = b
+                    .items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, i)| want(i.0))
+                    .map(|(k, _)| k)
+                    .collect();
+                (!wanted.is_empty() && near(b.pos) < 45.0 && !skipped.contains(&b.id))
+                    .then_some((b.id, b.pos, wanted))
+            });
+            if let Some((bid, at, wanted)) = found {
+                if near(at) < crate::boxes::BOX_RADIUS {
+                    for k in wanted.into_iter().rev() {
+                        self.box_take(id, bid, k);
+                    }
+                }
+                if !Self::br_bot_gave_up(bot, bid, at, pos, time) {
                     return (Some(at), false, false);
                 }
             }

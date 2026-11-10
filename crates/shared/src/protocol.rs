@@ -107,6 +107,18 @@ pub enum C2S {
     Marker(Option<[f32; 2]>),
     /// Jeeps and boats.
     Car(CarCmd),
+    /// Death boxes.
+    Box(BoxCmd),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BoxCmd {
+    Open(u16),
+    /// Take thing `idx` (supplies first, then guns).
+    Take(u16, u8),
+    /// Take all the supplies.
+    TakeAll(u16),
+    Close,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -293,6 +305,11 @@ pub enum EntSnap {
         amount: u16,
         pos: V3,
     },
+    /// Everything a knocked-out player carried.
+    DeathBox {
+        id: u16,
+        pos: V3,
+    },
     /// A supply crate, coming down under its parachute or landed.
     AirDrop {
         id: u16,
@@ -377,6 +394,17 @@ pub struct BrSnap {
     pub squad: Vec<SquadMate>,
     /// Supply crates (for the map, wherever they are).
     pub drops: Vec<V3>,
+    /// The death box we are looking into.
+    pub open_box: Option<BoxView>,
+}
+
+/// What is in a death box: supplies, then guns (with the rounds in their magazines).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BoxView {
+    pub id: u16,
+    pub name: String,
+    pub items: Vec<(LootKind, u16)>,
+    pub guns: Vec<(WeaponId, u16)>,
 }
 
 /// A member of our battle royale squad.

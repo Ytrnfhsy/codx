@@ -67,6 +67,8 @@ pub enum Pick {
     Loot(LootKind, u16),
     /// A jeep or a boat to get into.
     Car(toon_shared::cars::CarKind),
+    /// A death box to look into.
+    DeathBox,
 }
 
 /// A jeep or a boat as we draw it: smoothed towards where the server says it is.
@@ -122,6 +124,8 @@ pub enum Overlay {
     Skin,
     /// Battle royale: what you carry, to throw away or move sights around.
     Inventory,
+    /// Battle royale: looking into a death box.
+    DeathBox,
 }
 
 pub struct Welcome {
@@ -1362,6 +1366,7 @@ impl GameClient {
                     amount,
                     pos,
                 } => near(pos, 1.5).map(|d| (d, *id, Pick::Loot(*kind, *amount))),
+                EntSnap::DeathBox { id, pos } => near(pos, 2.4).map(|d| (d, *id, Pick::DeathBox)),
                 // a car with a free seat (a little further: it is big)
                 EntSnap::Car {
                     id,
@@ -2301,6 +2306,12 @@ impl GameClient {
                         Pick::Car(_) => self
                             .net
                             .send(C2S::Car(toon_shared::protocol::CarCmd::Enter(ent))),
+                        Pick::DeathBox => {
+                            self.net
+                                .send(C2S::Box(toon_shared::protocol::BoxCmd::Open(ent)));
+                            self.overlay = Overlay::DeathBox;
+                            self.inventory_opened = now;
+                        }
                         _ => self.net.send(C2S::PickUp(ent)),
                     }
                     self.next_pickup = now + 0.6;

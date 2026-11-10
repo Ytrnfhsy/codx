@@ -420,6 +420,10 @@ pub fn render_world(
             }
             // (drawn from the smoothed cars below)
             EntSnap::Car { .. } => {}
+            EntSnap::DeathBox { pos, .. } if !far(pos) => {
+                models::add_deathbox(&mut m, Vec3::from_array(*pos))
+            }
+            EntSnap::DeathBox { .. } => {}
             EntSnap::AirDrop { pos, landed, .. } => {
                 models::add_airdrop(&mut m, Vec3::from_array(*pos), *landed, now as f32)
             }

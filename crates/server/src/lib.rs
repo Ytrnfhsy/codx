@@ -3,6 +3,7 @@
 
 pub mod admin;
 pub mod bots;
+pub mod boxes;
 pub mod br;
 pub mod cars;
 pub mod combat;

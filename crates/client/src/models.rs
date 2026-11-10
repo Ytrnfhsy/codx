@@ -1247,3 +1247,23 @@ pub fn add_airdrop(m: &mut ToonMesh, pos: Vec3, landed: bool, t: f32) {
         add_parachute(m, pos - vec3(0.0, 1.0, 0.0), t * 0.2, t);
     }
 }
+
+/// A death box: a wooden crate with what somebody carried.
+pub fn add_deathbox(m: &mut ToonMesh, pos: Vec3) {
+    let base = Mat4::from_translation(pos + vec3(0.0, 0.35, 0.0));
+    m.boxed(&base, vec3(0.55, 0.35, 0.4), [120, 84, 52], 0.03);
+    m.boxed(
+        &(base * Mat4::from_translation(vec3(0.0, 0.37, 0.0))),
+        vec3(0.58, 0.05, 0.43),
+        [92, 62, 38],
+        0.0,
+    );
+    for x in [-0.4f32, 0.4] {
+        m.boxed(
+            &(base * Mat4::from_translation(vec3(x, 0.0, 0.0))),
+            vec3(0.04, 0.36, 0.41),
+            [80, 54, 34],
+            0.0,
+        );
+    }
+}

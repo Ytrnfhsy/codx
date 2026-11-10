@@ -213,6 +213,12 @@ impl GameClient {
                         "{} — step off the bomb to pick it up",
                         what
                     )
+                } else if let Pick::DeathBox = pick {
+                    tr!(
+                        "{} — обшукати ящик",
+                        "{} — search the box",
+                        key(Action::Use)
+                    )
                 } else if let Pick::Car(_) = pick {
                     tr!("{} — сісти: {}", "{} — get in: {}", key(Action::Use), what)
                 } else {
@@ -1680,6 +1686,90 @@ impl GameClient {
         }
     }
 
+    /// A death box: what is in it, a click takes a thing, a button takes all the supplies.
+    fn draw_box_screen(&mut self, ui: &mut Ui) {
+        use toon_shared::protocol::BoxCmd;
+        let close = |g: &mut Self| {
+            g.overlay = Overlay::None;
+            g.net.send(toon_shared::protocol::C2S::Box(BoxCmd::Close));
+        };
+        let again = crate::binds::pressed(Action::Use) && self.now > self.inventory_opened;
+        if is_key_pressed(KeyCode::Escape) || again || !self.alive {
+            close(self);
+            return;
+        }
+        let view = self.br.as_ref().and_then(|b| b.open_box.clone());
+        let Some(v) = view else {
+            // (the server has not answered yet, or we walked away)
+            if self.now - self.inventory_opened > 0.6 {
+                close(self);
+            }
+            return;
+        };
+        let (w, h) = (screen_width(), screen_height());
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+        let rows = v.items.len() + v.guns.len();
+        let pw = 460.0f32.min(w - 20.0);
+        let ph = (130.0 + rows as f32 * 38.0).min(h - 20.0);
+        let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
+        ui.panel(x, y, pw, ph);
+        ui.bold(
+            &tr!("Речі: {}", "Belongings: {}", v.name),
+            x + 24.0,
+            y + 40.0,
+            22,
+            ACCENT,
+        );
+        ui.text(
+            t("Клацни, щоб узяти", "Click to take"),
+            x + 24.0,
+            y + 62.0,
+            14,
+            MUTED,
+        );
+        let mut act = None;
+        let mut ry = y + 76.0;
+        for (k, (kind, n)) in v.items.iter().enumerate() {
+            let label = match kind {
+                LootKind::Ammo(_) | LootKind::Medkit => format!("{} ×{n}", kind.name()),
+                LootKind::Armor(_) | LootKind::Helmet(_) => format!("{} ({n}%)", kind.name()),
+                _ => kind.name(),
+            };
+            if ui.button2(&label, x + 24.0, ry, pw - 48.0, 32.0) {
+                act = Some(BoxCmd::Take(v.id, k as u8));
+            }
+            ry += 38.0;
+        }
+        for (k, (gun, mag)) in v.guns.iter().enumerate() {
+            let label = format!("{} · {mag}", gun.def().name);
+            if ui.button2(&label, x + 24.0, ry, pw - 48.0, 32.0) {
+                act = Some(BoxCmd::Take(v.id, (v.items.len() + k) as u8));
+            }
+            ry += 38.0;
+        }
+        if !v.items.is_empty()
+            && ui.button(
+                t("Взяти все", "Take all"),
+                x + pw - 184.0,
+                y + ph - 46.0,
+                160.0,
+                36.0,
+            )
+        {
+            act = Some(BoxCmd::TakeAll(v.id));
+        }
+        ui.text(
+            &tr!("{} / Esc — закрити", "{} / Esc — close", key(Action::Use)),
+            x + 24.0,
+            y + ph - 22.0,
+            14,
+            MUTED,
+        );
+        if let Some(a) = act {
+            self.net.send(toon_shared::protocol::C2S::Box(a));
+        }
+    }
+
     /// Battle royale prompts: leaving the plane, the parachute, being outside the zone.
     fn draw_br_alerts(&self, ui: &Ui) {
         let Some(br) = &self.br else { return };
@@ -2886,6 +2976,10 @@ impl GameClient {
                 self.draw_inventory_screen(ui);
                 None
             }
+            Overlay::DeathBox => {
+                self.draw_box_screen(ui);
+                None
+            }
             Overlay::Skin => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 440.0f32.min(w - 20.0);
@@ -3321,6 +3415,7 @@ fn pick_label(p: Pick) -> String {
     match p {
         Pick::Weapon(w) => w.def().name.into(),
         Pick::Car(k) => k.name().into(),
+        Pick::DeathBox => t("ящик", "box").into(),
         Pick::Loot(k, n) => match k {
             LootKind::Ammo(_) | LootKind::Medkit if n > 1 => format!("{} ×{n}", k.name()),
             LootKind::Armor(_) | LootKind::Helmet(_) if n < 100 => format!("{} ({n}%)", k.name()),

@@ -398,22 +398,76 @@ fn inventory_pick_up_heal_and_drop() {
     g.handle(me, C2S::Item(ItemAction::Drop(Item::Weapon(0), 1)));
     assert_eq!(g.p(me).unwrap().empty_slot, Some(1));
 
-    // knocked out: everything ends up on the ground around the body
-    let before = g.br.loot.len();
+    // knocked out: everything ends up in one box where they fell, guns too
+    let loot_before = g.br.loot.len();
     g.kill(me, None, Cause::Zone, false);
-    let dropped: Vec<_> = g.br.loot[before..]
-        .iter()
-        .map(|l| (l.kind, l.amount))
-        .collect();
+    assert_eq!(g.br.loot.len(), loot_before, "nothing on the ground");
+    assert_eq!(g.br.boxes.len(), 1, "one box");
+    let b = g.br.boxes[0].clone();
+    let dropped = b.items.clone();
     assert!(
         dropped.contains(&(LootKind::Ammo(AmmoType::Sniper), 10)),
         "{dropped:?}"
     );
     assert!(dropped.contains(&(LootKind::Medkit, 2)));
     assert!(dropped.iter().any(|(k, _)| *k == LootKind::Armor(2)));
-    assert!(dropped.contains(&(LootKind::Backpack(1), 1)));
-    assert!(dropped.contains(&(LootKind::Sight(3), 1)));
     assert!(dropped.contains(&(LootKind::Sight(1), 1)));
+    assert!(dropped.contains(&(LootKind::Sight(3), 1)));
+    assert!(b
+        .guns
+        .iter()
+        .any(|g| g.id == toon_shared::weapons::WeaponId::M9));
+
+    // a passer-by: takes the sniper rounds, then everything else; the box goes once empty
+    let other = g
+        .players
+        .iter()
+        .flatten()
+        .find(|p| p.is_bot())
+        .map(|p| p.id)
+        .expect("a bot to loot the box");
+    {
+        let p = g.pm(other).unwrap();
+        p.alive = true;
+        p.in_plane = false;
+        p.body.chute = Chute::None;
+        p.body.pos = b.pos + glam::vec3(1.0, 0.0, 0.0);
+        p.inv = Default::default();
+        p.inv.backpack = 3;
+        // (not the pistol in the box: the same gun twice is not taken)
+        p.weapons[1] = toon_server::game::WState {
+            id: toon_shared::weapons::WeaponId::Deagle,
+            mag: 7,
+            reserve: 0,
+        };
+    }
+    let k = b
+        .items
+        .iter()
+        .position(|i| i.0 == LootKind::Ammo(AmmoType::Sniper))
+        .unwrap();
+    g.box_take(other, b.id, k);
+    assert_eq!(g.p(other).unwrap().inv.ammo(AmmoType::Sniper), 10);
+    assert_eq!(g.br.boxes[0].items.len(), b.items.len() - 1);
+    g.box_take_all(other, b.id);
+    // (only what is no better than what the bot has stays: its backpack is level III)
+    let left: Vec<_> =
+        g.br.boxes
+            .first()
+            .map(|b| b.items.clone())
+            .unwrap_or_default();
+    assert!(
+        left.iter().all(|i| i.0 == LootKind::Backpack(1)),
+        "left in the box: {left:?}"
+    );
+    // the pistol: swapped for the gun in hand, which goes in the box
+    if let Some(bx) = g.br.boxes.first().cloned() {
+        let before = g.p(other).unwrap().weapon().id;
+        // (guns come after the supplies)
+        g.box_take(other, bx.id, bx.items.len());
+        let now = g.p(other).unwrap().weapon().id;
+        assert_ne!(before, now, "the gun was not taken");
+    }
 }
 
 /// Nobody waits for the round inside someone else, and the bots come down spread out

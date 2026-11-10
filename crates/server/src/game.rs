@@ -95,6 +95,8 @@ pub struct Player {
     pub revive: f32,
     /// The map marker this player shares with the squad.
     pub marker: Option<[f32; 2]>,
+    /// The death box they look into.
+    pub open_box: Option<u16>,
     pub last_seq: u32,
     pub move_budget: f32,
     pub history: VecDeque<HistEntry>,
@@ -224,6 +226,7 @@ impl Player {
             downed_by: None,
             revive: 0.0,
             marker: None,
+            open_box: None,
             last_seq: 0,
             move_budget: 2.0,
             history: VecDeque::new(),
@@ -1225,6 +1228,20 @@ impl Game {
             C2S::BrJump => self.br_jump(id),
             C2S::UseMedkit => self.br_use_medkit(id),
             C2S::Item(a) => self.br_item(id, a),
+            C2S::Box(cmd) => match cmd {
+                toon_shared::protocol::BoxCmd::Open(b) => {
+                    if let Some(p) = self.pm(id) {
+                        p.open_box = Some(b);
+                    }
+                }
+                toon_shared::protocol::BoxCmd::Take(b, k) => self.box_take(id, b, k as usize),
+                toon_shared::protocol::BoxCmd::TakeAll(b) => self.box_take_all(id, b),
+                toon_shared::protocol::BoxCmd::Close => {
+                    if let Some(p) = self.pm(id) {
+                        p.open_box = None;
+                    }
+                }
+            },
             C2S::Car(cmd) => match cmd {
                 toon_shared::protocol::CarCmd::Enter(c) => {
                     self.car_enter(id, c);
@@ -2075,6 +2092,7 @@ impl Game {
         }
         ents.extend(self.br_loot_snaps());
         ents.extend(self.car_snaps());
+        ents.extend(self.box_snaps());
         for h in &self.helis {
             ents.push(EntSnap::Heli {
                 id: h.id,
@@ -2108,6 +2126,7 @@ impl Game {
                 | EntSnap::Drop { pos, .. }
                 | EntSnap::Car { pos, .. }
                 | EntSnap::AirDrop { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
+                EntSnap::DeathBox { pos, .. } => near(Vec3::from_array(*pos), LOOT_RANGE),
                 // small things on the ground: a few pixels at most from further away
                 EntSnap::Weapon { pos, .. } | EntSnap::Loot { pos, .. } => {
                     near(Vec3::from_array(*pos), LOOT_RANGE)

@@ -557,7 +557,24 @@ impl Game {
         } else {
             dropped
         };
-        if self.state != MatchState::PostMatch {
+        if self.state != MatchState::PostMatch && self.mode == Mode::Br && self.br.running {
+            // battle royale: the guns go in the death box with the rest
+            let guns: Vec<WState> = self
+                .p(victim)
+                .map(|v| {
+                    v.weapons
+                        .iter()
+                        .enumerate()
+                        .filter(|(k, _)| v.empty_slot != Some(*k as u8))
+                        .map(|(_, w)| WState { reserve: 0, ..*w })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !guns.is_empty() {
+                let b = self.br_box_of(victim);
+                self.br.boxes[b].guns.extend(guns);
+            }
+        } else if self.state != MatchState::PostMatch {
             self.drop_weapon(dropped, vpos);
             // battle royale: everything they carried is up for grabs
             if self.mode.solo() {
