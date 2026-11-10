@@ -299,10 +299,10 @@ fn island_upper_floors_are_walkable() {
         .copied()
         .filter(|p| {
             p.y > t.height(p.x, p.z) + 3.0
-                && p.x < 10.0
-                && p.x > -130.0
-                && p.z < 20.0
-                && p.z > -100.0
+                && p.x < -50.0
+                && p.x > -190.0
+                && p.z < -20.0
+                && p.z > -140.0
         })
         .collect();
     assert!(
@@ -311,7 +311,7 @@ fn island_upper_floors_are_walkable() {
         upstairs.len()
     );
     // start outside the town, on the road to the west
-    let start = nav.snap(glam::vec3(-150.0, 20.0, -25.0)).unwrap();
+    let start = nav.snap(glam::vec3(-210.0, 20.0, -70.0)).unwrap();
     let mut reached = 0;
     for (k, &goal) in upstairs.iter().enumerate().take(10) {
         let Some(g) = nav.snap(goal) else { continue };

@@ -317,6 +317,8 @@ pub struct Game {
     pub map: Map,
     pub world: World,
     pub nav: Nav,
+    /// The map played before (with its world and routes), in case the rotation returns.
+    spare_map: Option<(Map, World, Nav)>,
     pub mode: Mode,
     pub players: Vec<Option<Player>>,
     pub state: MatchState,
@@ -349,6 +351,8 @@ pub struct Game {
     pub rotation_idx: usize,
     pub outbox: Vec<(Dest, S2C, bool)>,
     pub shots: Vec<ShotFx>,
+    /// Battle royale lobby: spots around the spawn points (worked out on first use).
+    lobby_spots: Option<Vec<Spawn>>,
     pub bullets: Vec<crate::combat::Bullet>,
     pub shot_serial: u32,
     pub log: VecDeque<String>,
@@ -401,6 +405,7 @@ impl Game {
             map,
             world,
             nav,
+            spare_map: None,
             mode,
             players: (0..MAX_PLAYERS).map(|_| None).collect(),
             state: MatchState::Warmup,
@@ -429,6 +434,7 @@ impl Game {
             rotation_idx: 0,
             outbox: Vec::new(),
             shots: Vec::new(),
+            lobby_spots: None,
             bullets: Vec::new(),
             shot_serial: 0,
             log: VecDeque::new(),
@@ -903,6 +909,36 @@ impl Game {
         }
     }
 
+    /// Free spots on rings around the given spawn points (worked out once a map).
+    fn ring_spots(&self, spawns: &[Spawn]) -> Vec<Spawn> {
+        let mut out = Vec::new();
+        for s in spawns {
+            for ring in 1..=3 {
+                let r = ring as f32 * 2.2;
+                let n = 6 * ring;
+                for k in 0..n {
+                    let a = k as f32 / n as f32 * std::f32::consts::TAU + ring as f32;
+                    let at = s.pos + vec3(a.cos() * r, 0.0, a.sin() * r);
+                    let Some(y) = self.world.floor_below(at + vec3(0.0, 1.0, 0.0), 2.5) else {
+                        continue;
+                    };
+                    let at = vec3(at.x, y, at.z);
+                    if toon_shared::physics::fits(
+                        &self.world,
+                        at + vec3(0.0, 0.05, 0.0),
+                        Stance::Stand,
+                    ) {
+                        out.push(Spawn {
+                            pos: at,
+                            yaw: s.yaw,
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Picks a spawn point. Rounds and matches start at the team bases; during play anyone
     /// may appear anywhere on the ground floor: away from enemies and out of their sight,
     /// not where someone just died, and (in team deathmatch) not far from teammates.
@@ -920,31 +956,10 @@ impl Game {
         // battle royale lobby: dozens of players wait on a handful of spawn points, so
         // each one gets rings of spots around it (nobody ends up inside someone else)
         if self.mode == Mode::Br && base {
-            let spots: Vec<Spawn> = cands.clone();
-            for s in spots {
-                for ring in 1..=3 {
-                    let r = ring as f32 * 2.2;
-                    let n = 6 * ring;
-                    for k in 0..n {
-                        let a = k as f32 / n as f32 * std::f32::consts::TAU + ring as f32;
-                        let at = s.pos + vec3(a.cos() * r, 0.0, a.sin() * r);
-                        let Some(y) = self.world.floor_below(at + vec3(0.0, 1.0, 0.0), 2.5) else {
-                            continue;
-                        };
-                        let at = vec3(at.x, y, at.z);
-                        if toon_shared::physics::fits(
-                            &self.world,
-                            at + vec3(0.0, 0.05, 0.0),
-                            Stance::Stand,
-                        ) {
-                            cands.push(Spawn {
-                                pos: at,
-                                yaw: s.yaw,
-                            });
-                        }
-                    }
-                }
+            if self.lobby_spots.is_none() {
+                self.lobby_spots = Some(self.ring_spots(&cands));
             }
+            cands.extend(self.lobby_spots.iter().flatten().copied());
         }
         if !base {
             let centre = self.map.center();
@@ -993,7 +1008,10 @@ impl Game {
                     if d < 12.0 {
                         score -= 100.0;
                     }
+                    // (the battle royale lobby: nobody is fighting yet, and hundreds of
+                    // spots would each need a look over the hills)
                     if d < 55.0
+                        && !(self.mode == Mode::Br && base)
                         && self
                             .world
                             .line_of_sight(p.eye(), s.pos + vec3(0.0, 1.5, 0.0))
@@ -1423,6 +1441,7 @@ impl Game {
         self.overtime = false;
         self.grenades.clear();
         self.bullets.clear();
+        self.lobby_spots = None;
         self.smokes.clear();
         self.vehicles.clear();
         self.drops.clear();
@@ -1533,9 +1552,23 @@ impl Game {
 
     /// Switches map/mode immediately (admin or rotation).
     pub fn change_map(&mut self, map: MapId, mode: Mode) {
-        self.map = maps::build(map);
-        self.world = World::from_map(&self.map);
-        self.nav = Nav::build(&self.map, &self.world);
+        // building a big map (and its routes) takes seconds: the same map again keeps what
+        // is built, and the one before is kept aside for a rotation that goes back to it
+        if self.map.id != map || self.map.boxes.is_empty() {
+            let built = match self.spare_map.take() {
+                Some(b) if b.0.id == map => b,
+                _ => {
+                    let m = maps::build(map);
+                    let w = World::from_map(&m);
+                    let n = Nav::build(&m, &w);
+                    (m, w, n)
+                }
+            };
+            let old_map = std::mem::replace(&mut self.map, built.0);
+            let old_world = std::mem::replace(&mut self.world, built.1);
+            let old_nav = std::mem::replace(&mut self.nav, built.2);
+            self.spare_map = Some((old_map, old_world, old_nav));
+        }
         self.mode = mode;
         self.state = MatchState::Warmup;
         self.match_started = false;

@@ -1,6 +1,6 @@
-//! «Острів» — a 1 × 1 km test map for the battle royale: mountains in the north-east, a
+//! «Острів» — a 2 × 2 km map for the battle royale: mountains in the north-east, a
 //! river running from their foot to the southern sea, a lake in the north-west, forests,
-//! fields, two towns and a handful of villages joined by dirt roads and bridges.
+//! fields, four towns, a dozen villages and two army camps joined by dirt roads and bridges.
 //!
 //! Everything is generated from fixed seeds, so the client and the server build exactly
 //! the same island.
@@ -14,7 +14,7 @@ use std::f32::consts::PI;
 use std::sync::Arc;
 
 /// Half the playable size (m).
-pub const HALF: f32 = 500.0;
+pub const HALF: f32 = 1000.0;
 const SEED: u32 = 1977;
 /// Height map spacing (m).
 const CELL: f32 = 2.0;
@@ -25,23 +25,25 @@ const DECK: f32 = 1.6;
 
 /// The river from the foot of the mountains to the southern sea.
 const RIVER: [(f32, f32); 9] = [
-    (170.0, -150.0),
-    (120.0, -70.0),
-    (60.0, 0.0),
-    (10.0, 60.0),
-    (-60.0, 110.0),
-    (-110.0, 190.0),
-    (-130.0, 300.0),
-    (-150.0, 420.0),
-    (-170.0, 580.0),
+    (340.0, -300.0),
+    (240.0, -140.0),
+    (120.0, 0.0),
+    (20.0, 120.0),
+    (-120.0, 220.0),
+    (-220.0, 380.0),
+    (-260.0, 600.0),
+    (-300.0, 840.0),
+    (-340.0, 1160.0),
 ];
-const LAKE: (f32, f32, f32) = (-270.0, -220.0, 62.0);
-const PEAK: (f32, f32) = (310.0, -310.0);
+const LAKE: (f32, f32, f32) = (-540.0, -440.0, 110.0);
+const PEAK: (f32, f32) = (620.0, -620.0);
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Town,
     Village,
+    /// A fenced army camp: barracks, containers, watchtowers.
+    Base,
 }
 
 /// A settlement: a levelled pad with houses on it.
@@ -69,89 +71,76 @@ impl Place {
     }
 }
 
-const PLACES: [Place; 8] = [
+const fn place(x: f32, z: f32, w: f32, d: f32, kind: Kind) -> Place {
+    Place { x, z, w, d, kind }
+}
+
+const PLACES: [Place; 17] = [
     // the town in the middle, by the river
-    Place {
-        x: -60.0,
-        z: -40.0,
-        w: 128.0,
-        d: 104.0,
-        kind: Kind::Town,
-    },
+    place(-120.0, -80.0, 128.0, 104.0, Kind::Town),
     // the port town on the south-east coast
-    Place {
-        x: 150.0,
-        z: 330.0,
-        w: 108.0,
-        d: 88.0,
-        kind: Kind::Town,
-    },
-    Place {
-        x: -330.0,
-        z: 40.0,
-        w: 60.0,
-        d: 52.0,
-        kind: Kind::Village,
-    },
-    Place {
-        x: -150.0,
-        z: -330.0,
-        w: 60.0,
-        d: 52.0,
-        kind: Kind::Village,
-    },
-    Place {
-        x: 110.0,
-        z: -380.0,
-        w: 52.0,
-        d: 52.0,
-        kind: Kind::Village,
-    },
-    Place {
-        x: 340.0,
-        z: 40.0,
-        w: 60.0,
-        d: 52.0,
-        kind: Kind::Village,
-    },
-    Place {
-        x: -330.0,
-        z: 330.0,
-        w: 60.0,
-        d: 52.0,
-        kind: Kind::Village,
-    },
-    Place {
-        x: 0.0,
-        z: 250.0,
-        w: 52.0,
-        d: 52.0,
-        kind: Kind::Village,
-    },
+    place(300.0, 660.0, 108.0, 88.0, Kind::Town),
+    place(-660.0, 80.0, 60.0, 52.0, Kind::Village),
+    place(-300.0, -660.0, 60.0, 52.0, Kind::Village),
+    place(220.0, -760.0, 52.0, 52.0, Kind::Village),
+    place(680.0, 80.0, 60.0, 52.0, Kind::Village),
+    place(-660.0, 660.0, 60.0, 52.0, Kind::Village),
+    place(0.0, 500.0, 52.0, 52.0, Kind::Village),
+    // the western market town and the south-western one
+    place(-640.0, -180.0, 116.0, 96.0, Kind::Town),
+    place(-430.0, 420.0, 108.0, 92.0, Kind::Town),
+    place(440.0, -60.0, 60.0, 52.0, Kind::Village),
+    place(-340.0, -390.0, 56.0, 52.0, Kind::Village),
+    place(-740.0, 340.0, 56.0, 52.0, Kind::Village),
+    place(300.0, 240.0, 60.0, 52.0, Kind::Village),
+    place(-60.0, 790.0, 56.0, 52.0, Kind::Village),
+    // army camps: the best guns are there
+    place(-40.0, -540.0, 96.0, 76.0, Kind::Base),
+    place(640.0, 420.0, 96.0, 76.0, Kind::Base),
 ];
 
 /// Dirt roads between the settlements.
-const ROADS: [&[(f32, f32)]; 7] = [
-    &[(-330.0, 40.0), (-200.0, 10.0), (-124.0, -20.0)],
-    &[(4.0, -40.0), (200.0, -22.0), (340.0, 40.0)],
-    &[(-50.0, 12.0), (-40.0, 140.0), (0.0, 250.0), (150.0, 330.0)],
-    &[(-80.0, -92.0), (-120.0, -220.0), (-150.0, -330.0)],
-    &[(110.0, -380.0), (50.0, -220.0), (-10.0, -92.0)],
-    &[(150.0, 330.0), (280.0, 200.0), (340.0, 40.0)],
-    &[(-330.0, 330.0), (-180.0, 290.0), (0.0, 250.0)],
+const ROADS: [&[(f32, f32)]; 18] = [
+    &[(-660.0, 80.0), (-400.0, 20.0), (-248.0, -40.0)],
+    &[(8.0, -80.0), (400.0, -44.0), (680.0, 80.0)],
+    &[(-100.0, 24.0), (-80.0, 280.0), (0.0, 500.0), (300.0, 660.0)],
+    &[(-160.0, -184.0), (-240.0, -440.0), (-300.0, -660.0)],
+    &[(220.0, -760.0), (100.0, -440.0), (-20.0, -184.0)],
+    &[(300.0, 660.0), (560.0, 400.0), (680.0, 80.0)],
+    &[(-660.0, 660.0), (-360.0, 580.0), (0.0, 500.0)],
+    // new towns, villages and camps
+    &[(-660.0, 80.0), (-640.0, -132.0)],
+    &[(-582.0, -180.0), (-400.0, -150.0), (-248.0, -80.0)],
+    &[(-430.0, 374.0), (-300.0, 200.0), (-100.0, 24.0)],
+    &[(-484.0, 420.0), (-600.0, 400.0), (-712.0, 340.0)],
+    &[(-430.0, 466.0), (-560.0, 600.0), (-660.0, 660.0)],
+    &[(440.0, -60.0), (400.0, -44.0)],
+    &[(-340.0, -416.0), (-300.0, -634.0)],
+    &[(300.0, 266.0), (300.0, 400.0), (300.0, 614.0)],
+    &[(270.0, 240.0), (-60.0, 200.0), (-80.0, 280.0)],
+    &[(-60.0, 764.0), (0.0, 526.0)],
+    &[(-40.0, -578.0), (100.0, -440.0)],
 ];
 
 /// Farm fields: (min x, min z, max x, max z, stripes along x).
-const FIELDS: [(f32, f32, f32, f32, bool); 9] = [
-    (-420.0, 0.0, -370.0, 70.0, false),
-    (-300.0, 80.0, -240.0, 120.0, true),
-    (-220.0, -300.0, -186.0, -250.0, false),
-    (60.0, -350.0, 80.0, -300.0, true),
-    (370.0, 80.0, 420.0, 130.0, true),
-    (380.0, -30.0, 430.0, 10.0, false),
-    (-400.0, 250.0, -350.0, 290.0, true),
-    (-280.0, 360.0, -230.0, 410.0, false),
-    (40.0, 180.0, 90.0, 220.0, true),
+const FIELDS: [(f32, f32, f32, f32, bool); 16] = [
+    (-840.0, 0.0, -740.0, 140.0, false),
+    (-600.0, 160.0, -480.0, 240.0, true),
+    (-440.0, -600.0, -372.0, -500.0, false),
+    (120.0, -700.0, 160.0, -600.0, true),
+    (740.0, 160.0, 840.0, 260.0, true),
+    (760.0, -60.0, 860.0, 20.0, false),
+    (-800.0, 500.0, -700.0, 580.0, true),
+    (-560.0, 720.0, -460.0, 820.0, false),
+    (80.0, 360.0, 180.0, 440.0, true),
+    // around the new villages
+    (-820.0, -320.0, -740.0, -240.0, true),
+    (-520.0, 500.0, -460.0, 580.0, false),
+    (480.0, 20.0, 560.0, 90.0, true),
+    (380.0, 180.0, 460.0, 260.0, false),
+    (-200.0, 760.0, -120.0, 840.0, true),
+    (-480.0, -330.0, -400.0, -280.0, false),
+    (-880.0, 380.0, -820.0, 460.0, true),
 ];
 
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
@@ -174,7 +163,7 @@ fn line_dist(p: Vec2, pts: &[(f32, f32)]) -> f32 {
 
 /// River half width at a point along it (narrow at the spring, wide at the mouth).
 fn river_half_width(z: f32) -> f32 {
-    5.0 + smoothstep(-150.0, 450.0, z) * 6.0
+    5.0 + smoothstep(-300.0, 900.0, z) * 7.0
 }
 
 /// Ridged noise for mountain crests.
@@ -186,16 +175,19 @@ fn ridged(x: f32, z: f32) -> f32 {
 /// The untouched land: island shape, rolling hills and the mountains.
 fn natural(x: f32, z: f32) -> f32 {
     // a wobbly coastline
-    let r = vec2(x, z).length() * 1.0 + 70.0 * (fbm(SEED, x / 160.0, z / 160.0, 3) - 0.5);
+    let r = vec2(x, z).length() * 1.0 + 140.0 * (fbm(SEED, x / 320.0, z / 320.0, 3) - 0.5);
     let r = r.max(vec2(x, z).abs().max_element() * 0.92);
-    let land = smoothstep(500.0, 420.0, r);
-    let hills = 3.0 + 10.0 * fbm(SEED + 1, x / 210.0, z / 210.0, 4);
+    let land = smoothstep(1000.0, 880.0, r);
+    let hills = 3.0 + 12.0 * fbm(SEED + 1, x / 260.0, z / 260.0, 4);
     let peak = vec2(x - PEAK.0, z - PEAK.1).length();
-    let m = smoothstep(340.0, 90.0, peak);
-    let mountains = m * m * (18.0 + 52.0 * ridged(x / 110.0, z / 110.0));
-    let sw = vec2(x + 260.0, z - 250.0).length();
-    let downs = smoothstep(160.0, 40.0, sw) * 12.0 * ridged(x / 70.0 + 3.0, z / 70.0);
-    let h = hills + mountains + downs;
+    let m = smoothstep(560.0, 140.0, peak);
+    let mountains = m * m * (22.0 + 64.0 * ridged(x / 150.0, z / 150.0));
+    let sw = vec2(x + 520.0, z - 500.0).length();
+    let downs = smoothstep(260.0, 60.0, sw) * 14.0 * ridged(x / 90.0 + 3.0, z / 90.0);
+    // a second range of low hills in the north-west
+    let nw = vec2(x + 700.0, z + 700.0).length();
+    let ridge = smoothstep(320.0, 80.0, nw) * 18.0 * ridged(x / 110.0 + 7.0, z / 110.0);
+    let h = hills + mountains + downs + ridge;
     // the beach: from the land down to the shallow sea floor
     -1.1 + (h + 1.1) * land
 }
@@ -226,10 +218,18 @@ fn bridges() -> Vec<Bridge> {
                 let u = (c - a).perp_dot(r) / den;
                 if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
                     let p = a + r * t;
+                    let along_x = r.x.abs() > r.y.abs();
+                    // a slanting river is wider along the deck
+                    let axis = if along_x {
+                        vec2(1.0, 0.0)
+                    } else {
+                        vec2(0.0, 1.0)
+                    };
+                    let sin = axis.perp_dot(s.normalize()).abs().max(0.45);
                     out.push(Bridge {
                         c: p,
-                        along_x: r.x.abs() > r.y.abs(),
-                        half: river_half_width(p.y) + 10.0,
+                        along_x,
+                        half: (river_half_width(p.y) + 10.0) / sin,
                     });
                 }
             }
@@ -316,10 +316,13 @@ fn heightmap() -> Heightmap {
                 let k = smoothstep(12.0, 4.0, across);
                 let idx = j * m.w + i;
                 let h = m.heights[idx];
-                if s < br.half {
+                if s < br.half - 3.0 {
                     // under the deck: never higher than its underside
                     // (room to walk under it along the river: nobody gets stuck there)
                     m.heights[idx] = h + ((DECK - 2.6) - h).min(0.0) * k;
+                } else if s < br.half {
+                    // the abutment: the deck's ends rest on the bank
+                    m.heights[idx] = h + ((DECK - 0.3) - h) * k;
                 } else {
                     let target = DECK + (s - br.half) * 0.3;
                     let ks = smoothstep(reach, reach - 12.0, s);
@@ -369,7 +372,12 @@ fn heightmap() -> Heightmap {
     }
     // streets inside the settlements
     for pl in PLACES {
-        let street = if pl.kind == Kind::Town { 4.0 } else { 3.0 };
+        let street = match pl.kind {
+            Kind::Town => 4.0,
+            Kind::Village => 3.0,
+            // camps: concrete all over
+            Kind::Base => 1000.0,
+        };
         let (a, b) = (pl.min(), pl.max());
         for j in 0..m.h {
             for i in 0..m.w {
@@ -379,7 +387,7 @@ fn heightmap() -> Heightmap {
                 }
                 let on = (p.x - pl.x).abs() < street || (p.z - pl.z).abs() < street;
                 if on {
-                    m.paint[j * m.w + i] = if pl.kind == Kind::Town {
+                    m.paint[j * m.w + i] = if pl.kind != Kind::Village {
                         paint::PAVED
                     } else {
                         paint::ROAD
@@ -582,8 +590,138 @@ const WALLS: [[u8; 3]; 7] = [
 ];
 const ROOFS: [[u8; 3]; 4] = [pal::ROOF_RED, pal::ROOF_GREY, [150, 84, 60], [90, 110, 140]];
 
+/// A watchtower: four legs, a railed platform and a ladder up the south side.
+fn watchtower(b: &mut MapBuilder, x: f32, z: f32) {
+    let top = 5.2;
+    let leg = [96, 84, 66];
+    for (dx, dz) in [(-1.3, -1.3), (1.3, -1.3), (-1.3, 1.3), (1.3, 1.3)] {
+        b.cbox(x + dx, z + dz, 0.3, 0.3, 0.0, top, leg);
+    }
+    b.block(
+        x - 1.6,
+        top,
+        z - 1.6,
+        x + 1.6,
+        top + 0.25,
+        z + 1.6,
+        [120, 100, 74],
+    );
+    // planks bullets go through, low enough to shoot over
+    let rail = [140, 112, 80];
+    let (y0, y1) = (top + 0.25, top + 1.2);
+    b.wood(x - 1.6, y0, z - 1.6, x + 1.6, y1, z - 1.45, rail);
+    b.wood(x - 1.6, y0, z - 1.6, x - 1.45, y1, z + 1.6, rail);
+    b.wood(x + 1.45, y0, z - 1.6, x + 1.6, y1, z + 1.6, rail);
+    // the ladder side is open
+    b.wood(x - 1.6, y0, z + 1.45, x - 0.5, y1, z + 1.6, rail);
+    b.wood(x + 0.5, y0, z + 1.45, x + 1.6, y1, z + 1.6, rail);
+    b.block(
+        x - 1.7,
+        top + 2.4,
+        z - 1.7,
+        x + 1.7,
+        top + 2.6,
+        z + 1.7,
+        pal::ROOF_GREY,
+    );
+    for (dx, dz) in [(-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5), (1.5, 1.5)] {
+        b.cbox(x + dx, z + dz, 0.12, 0.12, top + 1.2, 1.2, leg);
+    }
+    b.ladder(vec3(x, 0.0, z + 1.6), vec3(0.0, 0.0, 1.0), top + 0.25);
+    b.loot.push(vec3(x, top + 0.6, z));
+}
+
+/// An army camp: a fence with four gates, barracks, rows of containers, sandbags and a
+/// watchtower in every corner.
+fn camp(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
+    let y = m.height(pl.x, pl.z);
+    let (a, bb) = (pl.min() + vec2(2.0, 2.0), pl.max() - vec2(2.0, 2.0));
+    let fence = [150, 150, 140];
+    let gate = 5.0;
+    b.lift(y, |b| {
+        // the fence, broken by a gate in the middle of each side
+        let (h, t) = (2.4, 0.3);
+        b.block(a.x, 0.0, a.y, pl.x - gate, h, a.y + t, fence);
+        b.block(pl.x + gate, 0.0, a.y, bb.x, h, a.y + t, fence);
+        b.block(a.x, 0.0, bb.y - t, pl.x - gate, h, bb.y, fence);
+        b.block(pl.x + gate, 0.0, bb.y - t, bb.x, h, bb.y, fence);
+        b.block(a.x, 0.0, a.y, a.x + t, h, pl.z - gate, fence);
+        b.block(a.x, 0.0, pl.z + gate, a.x + t, h, bb.y, fence);
+        b.block(bb.x - t, 0.0, a.y, bb.x, h, pl.z - gate, fence);
+        b.block(bb.x - t, 0.0, pl.z + gate, bb.x, h, bb.y, fence);
+        // watchtowers in the corners
+        for (x, z) in [
+            (a.x + 4.0, a.y + 4.0),
+            (bb.x - 4.0, a.y + 4.0),
+            (a.x + 4.0, bb.y - 6.0),
+            (bb.x - 4.0, bb.y - 6.0),
+        ] {
+            watchtower(b, x, z);
+        }
+        // two barracks on the north side, with roofs to hold
+        let wall = [176, 168, 128];
+        house(
+            b,
+            pl.x - 30.0,
+            a.y + 9.0,
+            pl.x - 12.0,
+            a.y + 20.0,
+            2,
+            wall,
+            pal::ROOF_GREY,
+            true,
+        );
+        house(
+            b,
+            pl.x + 12.0,
+            a.y + 9.0,
+            pl.x + 30.0,
+            a.y + 20.0,
+            2,
+            wall,
+            pal::ROOF_GREY,
+            true,
+        );
+        // containers in rows, some stacked
+        let colors = [[176, 72, 56], [60, 110, 150], [92, 120, 60], [210, 160, 60]];
+        for row in 0..2 {
+            let z = pl.z + 10.0 + row as f32 * 8.0;
+            for k in 0..4 {
+                let x = pl.x - 30.0 + k as f32 * 9.0 + if row == 1 { 22.0 } else { 0.0 };
+                if (x - pl.x).abs() < 5.0 {
+                    continue; // the way from the south gate stays open
+                }
+                let c = colors[rng.below(colors.len())];
+                b.container(x, z, true, 0.0, c);
+                if rng.chance(0.35) {
+                    b.container(x, z, true, 2.6, colors[rng.below(colors.len())]);
+                }
+                b.loot.push(vec3(x + 3.6, 0.3, z));
+            }
+        }
+        // sandbag nests by the gates and a fuel tank
+        b.sandbags(pl.x - 9.0, a.y + 3.0, pl.x - 6.0, a.y + 3.6);
+        b.sandbags(pl.x + 6.0, bb.y - 3.6, pl.x + 9.0, bb.y - 3.0);
+        b.sandbags(a.x + 3.0, pl.z + 6.0, a.x + 3.6, pl.z + 9.0);
+        b.sandbags(bb.x - 3.6, pl.z - 9.0, bb.x - 3.0, pl.z - 6.0);
+        b.tank(bb.x - 10.0, pl.z - 2.0);
+        for k in 0..6 {
+            let x = pl.x + rng.range(-0.4, 0.4) * pl.w;
+            let z = pl.z + rng.range(-0.15, 0.1) * pl.d;
+            b.crate_(x, z, 1.1, 0.0);
+            if k % 2 == 0 {
+                b.loot.push(vec3(x + 1.2, 0.3, z));
+            }
+        }
+    });
+}
+
 /// Fills a settlement: houses around the crossing streets.
 fn settle(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
+    if pl.kind == Kind::Base {
+        camp(b, m, pl, rng);
+        return;
+    }
     let y = m.height(pl.x, pl.z);
     let street = if pl.kind == Kind::Town { 4.0 } else { 3.0 };
     let (a, bb) = (pl.min(), pl.max());
@@ -762,7 +900,7 @@ pub fn island() -> Map {
                 .all(|f| x < f.0 - 2.0 || x > f.2 + 2.0 || z < f.1 - 2.0 || z > f.3 + 2.0)
             && brs.iter().all(|br| (br.c - q).length() > br.half + 6.0)
     };
-    let step = 6.5;
+    let step = 7.0;
     let n = (2.0 * HALF / step) as i32;
     for jz in 0..n {
         for ix in 0..n {
@@ -776,9 +914,9 @@ pub fn island() -> Map {
                 continue;
             }
             let forest = fbm(SEED + 7, x / 130.0, z / 130.0, 3);
-            let p = if forest > 0.56 { 0.72 } else { 0.012 };
+            let p = if forest > 0.56 { 0.6 } else { 0.01 };
             if !rng.chance(p) {
-                if h > 26.0 && m.slope(x, z) > 0.45 && rng.chance(0.05) {
+                if h > 30.0 && m.slope(x, z) > 0.45 && rng.chance(0.05) {
                     let s = rng.range(1.0, 2.6);
                     b.cbox(
                         x,
@@ -795,7 +933,7 @@ pub fn island() -> Map {
             let s = rng.range(0.8, 1.3);
             let y = base(&m, x, z, 0.3);
             b.lift(y, |b| {
-                if h > 22.0 || rng.chance(0.25) {
+                if h > 26.0 || rng.chance(0.25) {
                     pine(b, x, z, s);
                 } else {
                     let g = rng.range(0.85, 1.12);
@@ -847,7 +985,7 @@ pub fn island() -> Map {
         ladders: b.ladders,
         spawns: [allies, axis],
         bomb: at(centre.x + 10.0, centre.z + 10.0),
-        sites: [at(-200.0, 12.0), at(200.0, -20.0)],
+        sites: [at(-400.0, 24.0), at(400.0, -40.0)],
         sky: [150, 196, 238],
         fog: [196, 214, 226],
         tint: [1.0, 1.0, 1.0],
@@ -891,14 +1029,14 @@ mod tests {
             assert!((m.height(pl.min().x + 1.0, pl.min().y + 1.0) - y).abs() < 0.01);
         }
         // the river really is water, and the mountains are high
-        assert!(m.height(60.0, 0.0) < WATER);
+        assert!(m.height(120.0, 0.0) < WATER);
         assert!(
             m.height(PEAK.0, PEAK.1) > 30.0,
             "{}",
             m.height(PEAK.0, PEAK.1)
         );
         assert!(!bridges().is_empty());
-        assert!(map.boxes.len() < 30_000);
+        assert!(map.boxes.len() < 70_000, "{}", map.boxes.len());
     }
 
     #[test]

@@ -145,8 +145,12 @@ fn run(map: MapId, mode: Mode, seed: u64) {
             }
         }
         let t0 = std::time::Instant::now();
+        let before = g.map.id;
         g.tick(TICK_DT);
-        worst = worst.max(t0.elapsed());
+        // (a map rotation builds a whole new map: slow on purpose, and not a message)
+        if g.map.id == before {
+            worst = worst.max(t0.elapsed());
+        }
         for &id in &ids {
             let _ = g.snapshot_for(id);
         }

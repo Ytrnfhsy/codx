@@ -141,6 +141,10 @@ pub struct Bot {
     pub br_land: Option<Vec3>,
     /// No changing guns again before this.
     next_switch: f64,
+    /// Battle royale: the thing being fetched and since when the bot has stood by it
+    /// without getting it (an item a floor up or down), and things given up on (until).
+    pub fetch: Option<(u16, f64)>,
+    pub skip: Vec<(u16, f64)>,
     /// How close (0..1) the bot is to noticing each enemy.
     awareness: Vec<(u8, f32)>,
     last_percept: f64,
@@ -243,6 +247,8 @@ impl Bot {
             br_jump_at: 0.0,
             br_land: None,
             next_switch: 0.0,
+            fetch: None,
+            skip: Vec::new(),
             target: None,
             seen_at: 0.0,
             last_seen: None,
@@ -955,6 +961,21 @@ impl Game {
         let time = self.time;
         if self.mode == Mode::Br && self.state == MatchState::Playing && self.br.running {
             return self.br_bot_goal(id, bot, pos);
+        }
+        // waiting for the battle royale to start: stroll about nearby (a route across a
+        // big island for nothing would only cost time)
+        if self.mode == Mode::Br {
+            let time = self.time;
+            if bot.roam_goal.is_none() || time > bot.roam_until {
+                bot.roam_until = time + self.rng.range(5.0, 10.0) as f64;
+                bot.roam_goal = self
+                    .nav
+                    .sample_near(pos, 12.0, 1, &mut self.rng)
+                    .first()
+                    .copied()
+                    .or(Some(pos));
+            }
+            return (bot.roam_goal, false, false);
         }
         if self.mode == Mode::Sab && self.state == MatchState::Playing {
             let s = &self.sab;

@@ -214,14 +214,15 @@ fn ground_mesh(m: &Heightmap, colors: &[[u8; 3]], i0: usize, j0: usize, s: usize
 
 /// Paints the minimap: ground colours with hill shading, water, buildings and woods.
 fn map_image(map: &Map, m: &Heightmap, colors: &[[u8; 3]]) -> MapImage {
-    const N: usize = 512;
     let (lo, hi) = m.bounds();
     let size = (hi - lo).max_element();
-    let px = size / N as f32;
-    let mut img = vec![0u8; N * N * 4];
+    // about 2 m a pixel, up to 1024 pixels
+    let n = ((size / 2.0) as usize).next_power_of_two().clamp(512, 1024);
+    let px = size / n as f32;
+    let mut img = vec![0u8; n * n * 4];
     let light = vec3(-0.5, 0.75, -0.45).normalize();
-    for y in 0..N {
-        for x in 0..N {
+    for y in 0..n {
+        for x in 0..n {
             let wx = lo.x + (x as f32 + 0.5) * px;
             let wz = lo.y + (y as f32 + 0.5) * px;
             let (i, j) = m.index_of(wx, wz).unwrap_or((0, 0));
@@ -238,7 +239,7 @@ fn map_image(map: &Map, m: &Heightmap, colors: &[[u8; 3]]) -> MapImage {
                 let k = 0.8 + 0.35 * m.normal(wx, wz).dot(light);
                 c = c.map(|v| v * k);
             }
-            let o = (y * N + x) * 4;
+            let o = (y * n + x) * 4;
             img[o] = c[0].min(255.0) as u8;
             img[o + 1] = c[1].min(255.0) as u8;
             img[o + 2] = c[2].min(255.0) as u8;
@@ -247,12 +248,12 @@ fn map_image(map: &Map, m: &Heightmap, colors: &[[u8; 3]]) -> MapImage {
     }
     let mut fill = |b: &MapBox, col: [u8; 3]| {
         let x0 = ((b.min.x - lo.x) / px).floor().max(0.0) as usize;
-        let x1 = ((b.max.x - lo.x) / px).ceil().min(N as f32) as usize;
+        let x1 = ((b.max.x - lo.x) / px).ceil().min(n as f32) as usize;
         let y0 = ((b.min.z - lo.y) / px).floor().max(0.0) as usize;
-        let y1 = ((b.max.z - lo.y) / px).ceil().min(N as f32) as usize;
+        let y1 = ((b.max.z - lo.y) / px).ceil().min(n as f32) as usize;
         for y in y0..y1 {
             for x in x0..x1 {
-                let o = (y * N + x) * 4;
+                let o = (y * n + x) * 4;
                 img[o..o + 3].copy_from_slice(&col);
             }
         }
@@ -271,7 +272,7 @@ fn map_image(map: &Map, m: &Heightmap, colors: &[[u8; 3]]) -> MapImage {
             fill(b, toon_shared::map::shade([180, 178, 172], k));
         }
     }
-    let tex = Texture2D::from_rgba8(N as u16, N as u16, &img);
+    let tex = Texture2D::from_rgba8(n as u16, n as u16, &img);
     tex.set_filter(FilterMode::Linear);
     MapImage {
         tex,

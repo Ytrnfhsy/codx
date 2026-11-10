@@ -292,6 +292,10 @@ impl Game {
             };
             return;
         };
+        // the circles were made for a 1 km island: bigger maps get bigger ones, and a
+        // little more time to cross them
+        let k = (self.map.size().max_element() / 1000.0).max(1.0);
+        let (wait, shrink, radius) = (wait * k.sqrt(), shrink * k.sqrt(), radius * k);
         // the next circle lies inside this one, preferably centred on dry land
         let mut to = c;
         for k in 0..24 {
@@ -1108,6 +1112,8 @@ impl Game {
             .iter()
             .any(|w| w.mag + w.reserve > 0 && w.reserve < self.tuning.weapon(w.id).mag * 2);
         let near = |q: Vec3| vec2(q.x, q.z).distance(flat);
+        bot.skip.retain(|s| s.1 > time);
+        let skipped: Vec<u16> = bot.skip.iter().map(|s| s.0).collect();
         if !armed {
             let range = if skydiving { 220.0 } else { 90.0 };
             let mut cands: Vec<(u16, Vec3)> = self
@@ -1119,6 +1125,7 @@ impl Game {
                         && zone.contains(time, pk.pos)
                         && pk.w.id.def().class != toon_shared::weapons::WeaponClass::Pistol
                         && !have.contains(&pk.w.id)
+                        && !skipped.contains(&pk.id)
                 })
                 .map(|pk| (pk.id, pk.pos))
                 .collect();
@@ -1136,7 +1143,9 @@ impl Game {
                 {
                     self.pick_up(id, ent);
                 }
-                return (Some(at), false, false);
+                if skydiving || !Self::br_bot_gave_up(bot, ent, at, pos, time) {
+                    return (Some(at), false, false);
+                }
             }
         }
         if !skydiving {
@@ -1166,7 +1175,7 @@ impl Game {
                 .br
                 .loot
                 .iter()
-                .filter(|l| want(l.kind) && near(l.pos) < 45.0)
+                .filter(|l| want(l.kind) && near(l.pos) < 45.0 && !skipped.contains(&l.id))
                 .map(|l| (l.id, l.pos))
                 .collect();
             cands.sort_by(|a, b| near(a.1).total_cmp(&near(b.1)));
@@ -1175,7 +1184,9 @@ impl Game {
                 if near(at) < LOOT_RADIUS && (at.y - pos.y).abs() < 1.8 {
                     self.br_pick(id, ent);
                 }
-                return (Some(at), false, false);
+                if !Self::br_bot_gave_up(bot, ent, at, pos, time) {
+                    return (Some(at), false, false);
+                }
             }
         }
         // roam somewhere inside the zone
@@ -1196,6 +1207,31 @@ impl Game {
             bot.roam_goal = Some(g.unwrap_or(vec3(c.x, pos.y, c.y)));
         }
         (bot.roam_goal, false, false)
+    }
+
+    /// A bot heading for item `ent` at `at`: true once it has stood next to it for a few
+    /// seconds without getting it (on another floor, behind something); it is then left
+    /// alone for a while.
+    fn br_bot_gave_up(
+        bot: &mut crate::bots::Bot,
+        ent: u16,
+        at: Vec3,
+        pos: Vec3,
+        time: f64,
+    ) -> bool {
+        let close = vec2(at.x - pos.x, at.z - pos.z).length() < 2.5;
+        match bot.fetch {
+            Some((e, since)) if e == ent && close => {
+                if time - since > 4.0 {
+                    bot.skip.push((ent, time + 90.0));
+                    bot.fetch = None;
+                    return true;
+                }
+            }
+            _ if close => bot.fetch = Some((ent, time)),
+            _ => {}
+        }
+        false
     }
 
     /// A bot can walk to this point (the navigation map has ground right there).
