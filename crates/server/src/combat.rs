@@ -182,7 +182,12 @@ impl Game {
         };
         let max_angle =
             (def.hip_spread.max(def.ads_spread) * 2.0 + def.move_spread + 12.0).to_radians();
-        let rewind = (p.ping * 0.5 + INTERP_DELAY).clamp(0.0, MAX_REWIND) as f64;
+        // (a bot sees the world as it is now: nothing to rewind)
+        let rewind = if p.is_bot() {
+            0.0
+        } else {
+            (p.ping * 0.5 + INTERP_DELAY).clamp(0.0, MAX_REWIND) as f64
+        };
         let stopping = p.has_perk2(Perk2::StoppingPower);
         let team = p.team;
         let t = time - rewind;

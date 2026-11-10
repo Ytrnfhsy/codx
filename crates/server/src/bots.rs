@@ -95,8 +95,8 @@ impl SkillProfile {
             footsteps: lerp(3.0, 9.0, s),
             aim_initial: glerp(0.4, 0.05, a),
             aim_settle: lerp(0.7, 4.5, a),
-            aim_wobble: glerp(0.22, 0.006, a),
-            track_lag: glerp(0.2, 0.03, a),
+            aim_wobble: glerp(0.27, 0.006, a),
+            track_lag: lerp(0.2, 0.12, a),
             fire_tolerance: lerp(0.22, 0.035, a),
             turn_speed: lerp(2.0, 9.0, s),
             ads_distance: lerp(30.0, 8.0, s),
@@ -489,7 +489,9 @@ impl Game {
         if let Some((_, chest, head, _, tvel)) = target {
             // where it will be when the bullet arrives (better bots lead better), held
             // higher by the drop over the distance
-            let seen = chest.lerp(head, sk.head_bias) - tvel * sk.track_lag;
+            // (a far target crosses the view slowly: it is followed without lagging behind)
+            let lag = sk.track_lag * (40.0 / chest.distance(eye).max(1.0)).clamp(0.15, 1.0);
+            let seen = chest.lerp(head, sk.head_bias) - tvel * lag;
             let (aim, _) = lead(eye, seen, tvel * lerp(0.4, 1.0, skill), ballistic.velocity);
             let d = aim - eye;
             dist_to_target = d.length();
@@ -541,8 +543,14 @@ impl Game {
             ads = dist_to_target > sk.ads_distance && class != WeaponClass::Shotgun;
             bot.was_ads = ads;
             // (far away a body is a small mark: wait until the sights settle on it)
-            let tol = sk.fire_tolerance.min(0.9 / dist_to_target.max(1.0))
-                + 0.5 / dist_to_target.max(1.0);
+            let d = dist_to_target.max(1.0);
+            let tol = if d > 60.0 {
+                // a long shot: the sights must sit on the body (about 0.4 m), give or take
+                // what a sloppier shooter accepts
+                0.35 / d + sk.fire_tolerance * 0.02
+            } else {
+                sk.fire_tolerance.min(0.9 / d) + 0.5 / d
+            };
             let in_range = dist_to_target < ballistic.engage * 1.15
                 && (class != WeaponClass::Shotgun || dist_to_target < 20.0);
             let reacted = time - bot.seen_at > sk.reaction as f64;
@@ -556,7 +564,7 @@ impl Game {
             // a long shot waits for the moment the sights are still on the mark (better
             // shooters are pickier about it)
             let steady_shot = dist_to_target < 60.0
-                || bot.aim_err.length() * dist_to_target < lerp(4.0, 1.0, skill);
+                || bot.aim_err.length() * dist_to_target < lerp(3.0, 0.5, skill);
             if reacted
                 && !protected_me
                 && aim_err_angle < tol

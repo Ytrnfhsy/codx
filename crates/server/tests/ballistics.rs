@@ -150,6 +150,8 @@ fn a_bot_leads_a_far_runner() {
         ..Default::default()
     };
     let mut g = Game::new(cfg);
+    // (the same aim errors every run; seeds 1..8 all give 5..11 hits of 12..14 shots)
+    g.rng = toon_shared::rng::Rng::new(1);
     g.change_map(MapId::Island, Mode::Tdm);
     let me = g
         .connect(
@@ -191,8 +193,11 @@ fn a_bot_leads_a_far_runner() {
         p.yaw = yaw_of(target - from);
         p.protected_until = 0.0;
     }
+    // (the runner soaks every hit, so that the bot keeps shooting at it)
+    const TOUGH: f32 = 100_000.0;
+    g.pm(me).unwrap().hp = TOUGH;
     let mut hits = 0;
-    let mut first_hit = None;
+    let mut shots = 0;
     for k in 0..(25.0 / TICK_DT) as usize {
         // the runner goes back and forth along a line; the bot hangs in the air
         if (k / 300) % 2 == 1 {
@@ -219,14 +224,21 @@ fn a_bot_leads_a_far_runner() {
         }
         g.tick(TICK_DT);
         g.outbox.clear();
+        shots += g.shots.iter().filter(|s| s.id == bot).count();
         g.shots.clear();
         let p = g.pm(me).unwrap();
-        if p.hp < 100.0 {
+        if p.hp < TOUGH {
             hits += 1;
-            first_hit.get_or_insert(k as f32 * TICK_DT);
-            p.hp = 100.0;
+            p.hp = TOUGH;
         }
     }
-    eprintln!("hits {hits}, first after {first_hit:?} s");
-    assert!(hits >= 2, "the bot hit a far runner only {hits} times");
+    eprintln!("{hits} hits of {shots} shots");
+    assert!(
+        shots >= 6,
+        "the bot fired only {shots} shots at a far runner"
+    );
+    assert!(
+        hits * 3 >= shots,
+        "the bot hit a far runner only {hits} times of {shots}"
+    );
 }
