@@ -626,6 +626,8 @@ async fn amain(args: Args) {
                         g.chat_input = Some((String::new(), false));
                     } else if binds::pressed(Action::ChatTeam) {
                         g.chat_input = Some((String::new(), true));
+                    } else if is_key_pressed(KeyCode::Escape) && g.big_map {
+                        g.big_map = false;
                     } else if is_key_pressed(KeyCode::Escape) {
                         // Esc first skips a killcam (like a click), then opens the pause menu
                         if !g.skip_killcam() {
@@ -664,7 +666,8 @@ async fn amain(args: Args) {
                 }
 
                 // ---- cursor grab
-                let want_grab = g.overlay == Overlay::None && g.chat_input.is_none();
+                // (the big map wants the cursor too: a click puts a marker on it)
+                let want_grab = g.overlay == Overlay::None && g.chat_input.is_none() && !g.big_map;
                 if want_grab != grabbed {
                     set_cursor_grab(want_grab);
                     show_mouse(!want_grab);
@@ -701,6 +704,8 @@ async fn amain(args: Args) {
                     g.net.send(C2S::SetLoadout(classes[c].1));
                     g.has_class = true;
                     g.overlay = Overlay::None;
+                    // (screenshots and smoke tests do not wait for a click on «Ready»)
+                    g.net.send(C2S::Ready(true));
                     auto_done = true;
                 }
 

@@ -109,6 +109,8 @@ fn random_msg(rng: &mut Rng, life: u16, seq: &mut u32) -> C2S {
 
 fn run(map: MapId, mode: Mode, seed: u64) {
     let cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         bots: 6,
         data_dir: std::env::temp_dir()
             .join("tw-fuzz")

@@ -284,13 +284,13 @@ pub fn sight_parts(level: u8, y: f32) -> Vec<GunPart> {
     match level {
         0 => {}
         1 => {
+            // a mount and an open frame: you look through it (the dot is drawn on the HUD)
+            let (cy, half, bar) = (y + 0.042, 0.022, 0.0035);
             g.b([0.0, y + 0.01, -0.06], [0.016, 0.01, 0.035], BLACK)
-                .b([0.0, y + 0.038, -0.07], [0.02, 0.02, 0.006], BLACK)
-                .b(
-                    [0.0, y + 0.038, -0.064],
-                    [0.005, 0.005, 0.002],
-                    [255, 40, 40],
-                );
+                .b([-half, cy, -0.07], [bar, half, 0.006], BLACK)
+                .b([half, cy, -0.07], [bar, half, 0.006], BLACK)
+                .b([0.0, cy + half, -0.07], [half + bar, bar, 0.006], BLACK)
+                .b([0.0, cy - half, -0.07], [half + bar, bar, 0.006], BLACK);
         }
         l => {
             // longer and thicker the stronger it is

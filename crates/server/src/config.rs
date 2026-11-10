@@ -125,6 +125,8 @@ pub struct ServerConfig {
     pub spawn_protection: f32,
     /// Players required to start a match (otherwise warmup).
     pub min_players: usize,
+    /// The match waits until every player has pressed «Ready».
+    pub ready_check: bool,
     pub http_enabled: bool,
     /// Only let in clients of exactly the server's game version (a server updated to a
     /// new release then asks every player to update too).
@@ -186,6 +188,7 @@ impl Default for ServerConfig {
             bot_skill: 0.4,
             spawn_protection: 3.0,
             min_players: 2,
+            ready_check: true,
             http_enabled: true,
             require_same_version: true,
             data_dir: "data".into(),

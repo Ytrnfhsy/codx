@@ -84,6 +84,8 @@ pub struct Player {
     pub respawn_at: f64,
     pub life: u16,
     pub ping: f32,
+    /// Pressed «Ready» (the match waits for everybody).
+    pub ready: bool,
     pub last_seq: u32,
     pub move_budget: f32,
     pub history: VecDeque<HistEntry>,
@@ -192,6 +194,7 @@ impl Player {
             respawn_at: 0.0,
             life: 0,
             ping: 0.05,
+            ready: false,
             last_seq: 0,
             move_budget: 2.0,
             history: VecDeque::new(),
@@ -1190,6 +1193,11 @@ impl Game {
             C2S::BrJump => self.br_jump(id),
             C2S::UseMedkit => self.br_use_medkit(id),
             C2S::Item(a) => self.br_item(id, a),
+            C2S::Ready(r) => {
+                if let Some(p) = self.pm(id) {
+                    p.ready = r;
+                }
+            }
             C2S::SetSkin(s) => {
                 if let Some(p) = self.pm(id) {
                     p.skin = s.min(toon_shared::skins::count() - 1);
@@ -1417,6 +1425,16 @@ impl Game {
             && (self.mode.solo()
                 || self.team_count(Team::Allies) > 0 && self.team_count(Team::Axis) > 0)
             && self.players.iter().flatten().any(|p| !p.is_bot())
+            && (!self.cfg.ready_check || self.unready() == 0)
+    }
+
+    /// Real players in the game who have not pressed «Ready» yet.
+    pub fn unready(&self) -> usize {
+        self.players
+            .iter()
+            .flatten()
+            .filter(|p| !p.is_bot() && p.team.is_playing() && !p.ready)
+            .count()
     }
 
     pub fn start_match(&mut self) {
@@ -2032,6 +2050,16 @@ impl Game {
             bomb,
             shots,
             br: self.br_snap(id),
+            ready: (self.cfg.ready_check && self.state == MatchState::Warmup).then(|| {
+                let humans = self
+                    .players
+                    .iter()
+                    .flatten()
+                    .filter(|p| !p.is_bot() && p.team.is_playing())
+                    .count();
+                let me = self.p(id).is_some_and(|p| p.ready);
+                ((humans - self.unready()) as u8, humans as u8, me)
+            }),
         }
     }
 }

@@ -12,6 +12,8 @@ use toon_shared::{Mode, Team};
 
 fn game(skill: f32, bots: usize, seed: u64, protection: f32) -> (Game, u8) {
     let cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         bots,
         bot_skill: skill,
         spawn_protection: protection,

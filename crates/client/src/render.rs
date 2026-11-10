@@ -187,7 +187,10 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         viewport: None,
         // a near plane this far keeps the depth buffer precise at range (no shimmering)
         z_near,
-        z_far: 420.0,
+        z_far: fog_range(g.level.terrain, settings, altitude(g, pos))
+            .1
+            .max(380.0)
+            + 40.0,
     };
     let matrix = cam.matrix();
     View {
@@ -206,7 +209,7 @@ pub fn render_world(
     view: &View,
 ) -> Vec<NameTag> {
     let fog = fog_color(g);
-    let (fog_near, fog_far) = fog_range(g.level.terrain, settings);
+    let (fog_near, fog_far) = fog_range(g.level.terrain, settings, altitude(g, view.pos));
     if settings.shadows {
         // big maps: the shadow map covers the area around the camera and follows it
         let (lo, hi) = if g.level.terrain {
@@ -641,14 +644,22 @@ fn shadow_res(settings: &Settings) -> u32 {
 }
 
 /// Where the fog starts and where it hides everything, by the view distance setting.
-pub fn fog_range(terrain: bool, settings: &Settings) -> (f32, f32) {
+pub fn fog_range(terrain: bool, settings: &Settings, altitude: f32) -> (f32, f32) {
     let (near, far) = if terrain {
         crate::level::TERRAIN_FOG
     } else {
         crate::level::ARENA_FOG
     };
     let k = settings.view_distance.clamp(0.5, 1.0);
-    (near * k, far * k)
+    // high up (the plane, a parachute) the ground is far below: the haze thins out so
+    // that you can pick where to land
+    let up = (altitude - 15.0).max(0.0);
+    (near * k + up, far * k + up * 1.6)
+}
+
+/// How high the camera is above the ground under it.
+pub fn altitude(g: &GameClient, pos: Vec3) -> f32 {
+    pos.y - g.world.ground(pos.x, pos.z).unwrap_or(0.0)
 }
 
 fn blob_shadow(m: &mut crate::mesh::MeshBuilder, c: Vec3, r: f32) {
@@ -734,7 +745,7 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     let top = parts.iter().map(|p| p.c.y + p.h.y).fold(0.1, f32::max);
     // (a red dot: look through the middle of its window)
     let top = if vm.sight == 1 && !def.scoped {
-        top - 0.02
+        top - 0.022 - 0.0035
     } else {
         top
     };

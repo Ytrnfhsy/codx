@@ -13,6 +13,8 @@ use toon_shared::{yaw_of, Mode, Team};
 
 fn setup() -> (Game, u8, u8) {
     let cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         bots: 0,
         data_dir: std::env::temp_dir()
             .join("tw-ballistics")
@@ -140,6 +142,8 @@ fn a_far_shot_needs_holdover_and_arrives_late() {
 #[test]
 fn a_bot_leads_a_far_runner() {
     let cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         // (bots fill up to this many players, us included)
         bots: 2,
         bot_skill: 1.0,

@@ -113,6 +113,9 @@ impl GameClient {
         if self.mode == Mode::Sab {
             self.draw_sab_markers(ui, view);
         }
+        if !self.big_map {
+            self.draw_world_marker(ui, view);
+        }
 
         // crosshair
         if self.alive
@@ -208,16 +211,40 @@ impl GameClient {
 
         // state banners
         match self.state {
-            MatchState::Warmup => ui.centered(
-                t(
-                    "Розминка — очікування гравців",
-                    "Warmup — waiting for players",
-                ),
-                cx,
-                110.0,
-                22,
-                MUTED,
-            ),
+            MatchState::Warmup => {
+                ui.centered(
+                    t(
+                        "Розминка — очікування гравців",
+                        "Warmup — waiting for players",
+                    ),
+                    cx,
+                    110.0,
+                    22,
+                    MUTED,
+                );
+                if let Some((n, of, me)) = self.ready {
+                    let (text, c) = if me {
+                        (
+                            tr!(
+                                "Ти готовий ({n}/{of}) · {} — ще ні",
+                                "You are ready ({n}/{of}) · {} — not yet",
+                                key(Action::Ready)
+                            ),
+                            GOOD,
+                        )
+                    } else {
+                        (
+                            tr!(
+                                "{} — ГОТОВИЙ ({n}/{of} готові)",
+                                "{} — READY ({n}/{of} ready)",
+                                key(Action::Ready)
+                            ),
+                            ACCENT,
+                        )
+                    };
+                    ui.centered(&text, cx, 142.0, 26, c);
+                }
+            }
             MatchState::PreRound => {
                 ui.centered(
                     &tr!(
@@ -420,7 +447,10 @@ impl GameClient {
             };
             ui.centered(title, cx, 80.0, 48, c);
             ui.centered(&text, cx, 118.0, 22, TEXT);
-            self.draw_scoreboard(ui, 150.0);
+            // the table comes after the final killcam
+            if !self.final_killcam_waiting() {
+                self.draw_scoreboard(ui, 150.0);
+            }
         } else if tab {
             self.draw_scoreboard(ui, 90.0);
         }
@@ -448,6 +478,44 @@ impl GameClient {
         draw_line(cx + 30.0, cy, cx + r, cy, 5.0, black);
         draw_line(cx, cy + 30.0, cx, cy + r, 5.0, black);
         draw_circle(cx, cy, 2.0, BAD);
+    }
+
+    /// The map marker over the world, with how far it is (on the screen's edge when it
+    /// is behind or to the side).
+    fn draw_world_marker(&self, ui: &Ui, view: &View) {
+        let Some(mk) = self.marker else { return };
+        let (w, h) = (screen_width(), screen_height());
+        let ground = self.world.ground(mk.x, mk.y).unwrap_or(0.0);
+        let at = vec3(mk.x, ground + 2.0, mk.y);
+        let (eye, yaw, _) = self.camera();
+        let dist = vec2(mk.x - eye.x, mk.y - eye.z).length();
+        let label = if dist >= 1000.0 {
+            format!("{:.1} {}", dist / 1000.0, t("км", "km"))
+        } else {
+            format!("{:.0} {}", dist, t("м", "m"))
+        };
+        let on_screen = view
+            .project(at)
+            .filter(|p| p.x > 20.0 && p.x < w - 20.0 && p.y > 30.0 && p.y < h - 20.0);
+        let p = match on_screen {
+            Some(p) => p,
+            None => {
+                // off screen: along the top edge, left or right by where it lies
+                let to = vec3(mk.x - eye.x, 0.0, mk.y - eye.z);
+                let side = toon_shared::wrap_angle(toon_shared::yaw_of(to) - yaw);
+                let x = w / 2.0 - (side / std::f32::consts::PI) * (w / 2.0 - 30.0);
+                vec2(x.clamp(30.0, w - 30.0), 70.0)
+            }
+        };
+        draw_marker_pin(p, 0.9);
+        let tw = ui.width(&label, 15, true);
+        ui.shadowed(
+            &label,
+            p.x - tw / 2.0,
+            p.y + 16.0,
+            15,
+            Color::new(1.0, 0.85, 0.15, 1.0),
+        );
     }
 
     fn draw_sab_markers(&self, ui: &Ui, view: &View) {
@@ -610,7 +678,15 @@ impl GameClient {
             Color::new(0.0, 0.0, 0.0, 0.7),
         );
         draw_rectangle(x0, y0, size, size, Color::new(0.16, 0.22, 0.18, 0.85));
-        let (pos, yaw) = if self.alive || !self.team.is_playing() {
+        let plane = self
+            .br
+            .as_ref()
+            .filter(|b| b.in_plane)
+            .and_then(|b| b.plane);
+        let (pos, yaw) = if let Some((p, _)) = plane {
+            // riding the plane: where it is now
+            (Vec3::from_array(p), self.yaw)
+        } else if self.alive || !self.team.is_playing() {
             let (p, y, _) = self.camera();
             (p, y)
         } else {
@@ -660,6 +736,18 @@ impl GameClient {
             );
             let n = to_map(vec3(br.next[0], 0.0, br.next[1]));
             draw_circle_lines(n.x, n.y, br.next[2] * scale, 2.0, WHITE);
+        }
+        // the marker (kept on the edge when it is further than the minimap shows)
+        if let Some(mk) = self.marker {
+            let p = to_map(vec3(mk.x, 0.0, mk.y));
+            let r = size / 2.0 - 8.0;
+            let d = p - c;
+            let p = if d.length() > r {
+                c + d.normalize() * r
+            } else {
+                p
+            };
+            draw_marker_pin(p, 0.7);
         }
         for b in &self.map.boxes {
             if self.level.terrain {
@@ -1359,8 +1447,7 @@ impl GameClient {
             return;
         };
         let (w, h) = (screen_width(), screen_height());
-        let side = (h * 0.86).min(w * 0.9);
-        let (x0, y0) = ((w - side) / 2.0, (h - side) / 2.0);
+        let (x0, y0, side) = big_map_rect();
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         draw_texture_ex(
             &img.tex,
@@ -1429,13 +1516,17 @@ impl GameClient {
             2.0,
             BLACK,
         );
+        if let Some(mk) = self.marker {
+            let p = to_map(mk.x, mk.y);
+            draw_marker_pin(p, 1.0);
+        }
         let gl = unsafe { get_internal_gl() }.quad_gl;
         gl.scissor(None);
         draw_rectangle_lines(x0, y0, side, side, 3.0, BLACK);
         ui.centered(
             &tr!(
-                "{} — закрити карту",
-                "{} — close the map",
+                "{} — закрити карту · ЛКМ — поставити мітку, ПКМ — прибрати",
+                "{} — close the map · LMB — put a marker, RMB — remove it",
                 key(Action::Class)
             ),
             w / 2.0,
@@ -2343,6 +2434,22 @@ impl GameClient {
                 {
                     self.overlay = Overlay::Settings;
                 }
+                // before the match: ready or taking a break
+                if let Some((_, _, me)) = self.ready {
+                    let label = if me {
+                        t("Не готовий (перерва)", "Not ready (a break)")
+                    } else {
+                        t("Готовий!", "Ready!")
+                    };
+                    let hit = if me {
+                        ui.button2(label, x + 24.0, y + 314.0, bw, 46.0)
+                    } else {
+                        ui.button(label, x + 24.0, y + 314.0, bw, 46.0)
+                    };
+                    if hit {
+                        self.net.send(toon_shared::protocol::C2S::Ready(!me));
+                    }
+                }
                 if ui.button_colored(
                     t("Відключитися", "Disconnect"),
                     x + 24.0,
@@ -2885,4 +2992,21 @@ fn pick_label(p: Pick) -> String {
             _ => k.name(),
         },
     }
+}
+
+/// Where the big map is on the screen: (x, y, side).
+pub fn big_map_rect() -> (f32, f32, f32) {
+    let (w, h) = (screen_width(), screen_height());
+    let side = (h * 0.86).min(w * 0.9);
+    ((w - side) / 2.0, (h - side) / 2.0, side)
+}
+
+/// The map marker: a yellow pin whose point is at `p`.
+fn draw_marker_pin(p: Vec2, k: f32) {
+    let c = Color::new(1.0, 0.85, 0.15, 1.0);
+    let top = p - vec2(0.0, 20.0 * k);
+    draw_triangle(p, top + vec2(-7.0 * k, 0.0), top + vec2(7.0 * k, 0.0), c);
+    draw_circle(top.x, top.y, 8.0 * k, c);
+    draw_circle_lines(top.x, top.y, 8.0 * k, 2.0, BLACK);
+    draw_circle(top.x, top.y, 3.0 * k, BLACK);
 }

@@ -13,6 +13,8 @@ use toon_shared::{Mode, Team};
 #[test]
 fn a_round_of_battle_royale() {
     let mut cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         data_dir: std::env::temp_dir().join("tw-br").to_string_lossy().into(),
         ..Default::default()
     };
@@ -120,6 +122,8 @@ fn a_round_of_battle_royale() {
 #[test]
 fn battle_royale_keeps_its_own_player_count() {
     let mut cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         bots: 6,
         max_players: 12,
         data_dir: std::env::temp_dir().join("tw-br2").to_string_lossy().into(),
@@ -162,6 +166,8 @@ fn battle_royale_keeps_its_own_player_count() {
 #[test]
 fn round_ends_when_the_last_real_player_is_out() {
     let mut cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         data_dir: std::env::temp_dir().join("tw-br3").to_string_lossy().into(),
         ..Default::default()
     };
@@ -205,6 +211,8 @@ fn inventory_pick_up_heal_and_drop() {
     use toon_shared::inventory::AmmoType;
     use toon_shared::protocol::LootKind;
     let mut cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         data_dir: std::env::temp_dir().join("tw-br4").to_string_lossy().into(),
         ..Default::default()
     };
@@ -252,6 +260,7 @@ fn inventory_pick_up_heal_and_drop() {
     let p = g.p(me).unwrap();
     assert!(p.alive);
     assert_eq!(p.inv.ammo(AmmoType::Pistol), 15);
+    assert_eq!(p.inv.medkits, 1, "one medkit to start with");
     let at = p.body.pos;
 
     // put supplies at our feet: walking over them takes nothing, the use key does
@@ -266,7 +275,8 @@ fn inventory_pick_up_heal_and_drop() {
         id
     };
     let sniper = put(&mut g, LootKind::Ammo(AmmoType::Sniper), 10);
-    let kits = put(&mut g, LootKind::Medkit, 3);
+    // (one medkit comes with the jump)
+    let kits = put(&mut g, LootKind::Medkit, 2);
     let vest = put(&mut g, LootKind::Armor(2), 100);
     step(&mut g, 1.0);
     assert_eq!(g.p(me).unwrap().inv.ammo(AmmoType::Sniper), 0);
@@ -411,6 +421,8 @@ fn inventory_pick_up_heal_and_drop() {
 #[test]
 fn lobby_and_landing_are_spread_out() {
     let mut cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         data_dir: std::env::temp_dir().join("tw-br5").to_string_lossy().into(),
         ..Default::default()
     };
@@ -518,4 +530,41 @@ fn lobby_and_landing_are_spread_out() {
         "bots land too close together (median {median:.0} m)"
     );
     assert!(crowded <= 2, "{crowded} bots landed within 15 m of another");
+}
+
+/// The match waits until every real player has pressed «Ready» (and can be told «not yet»
+/// again before it starts).
+#[test]
+fn the_match_waits_for_ready_players() {
+    let mut cfg = ServerConfig {
+        data_dir: std::env::temp_dir().join("tw-br6").to_string_lossy().into(),
+        ..Default::default()
+    };
+    assert!(cfg.ready_check, "on by default");
+    cfg.br.bots = 4;
+    cfg.br.max_players = 8;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Market, Mode::Br);
+    let me = g
+        .connect(
+            "127.0.0.1:5008".parse().unwrap(),
+            "Гравець",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    let run = |g: &mut Game, secs: f32| {
+        for _ in 0..(secs / TICK_DT) as usize {
+            g.tick(TICK_DT);
+            g.outbox.clear();
+            g.shots.clear();
+        }
+    };
+    run(&mut g, 20.0);
+    assert_eq!(g.state, MatchState::Warmup, "started without anyone ready");
+    assert_eq!(g.snapshot_for(me).ready, Some((0, 1, false)));
+    g.handle(me, C2S::Ready(true));
+    run(&mut g, 2.0);
+    assert_ne!(g.state, MatchState::Warmup, "ready, but nothing started");
 }

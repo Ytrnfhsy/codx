@@ -130,6 +130,10 @@ pub struct GameClient {
     pub br: Option<BrSnap>,
     /// Battle royale: the big map is open.
     pub big_map: bool,
+    /// A marker put on the big map (x, z), shown on the minimap and in the world.
+    pub marker: Option<Vec2>,
+    /// Before the match: (players ready, players, am I ready).
+    pub ready: Option<(u8, u8, bool)>,
     pub ents: Vec<EntSnap>,
     pub scoreboard: Vec<ScoreRow>,
     latest_tick: u32,
@@ -364,6 +368,8 @@ impl GameClient {
             bomb: None,
             br: None,
             big_map: false,
+            marker: None,
+            ready: None,
             ents: Vec::new(),
             scoreboard: Vec::new(),
             latest_tick: 0,
@@ -602,6 +608,8 @@ impl GameClient {
                 settings,
             } => {
                 self.load_map(map, mode, settings);
+                self.marker = None;
+                self.big_map = false;
                 let name = self.map.id.name();
                 self.center_msg(format!("{name} — {}", mode.name()), 4.0, crate::ui::ACCENT);
             }
@@ -1081,13 +1089,14 @@ impl GameClient {
         self.bomb = s.bomb;
         if s.br.as_ref().is_some_and(|b| b.in_plane) && self.br.as_ref().is_none_or(|b| !b.in_plane)
         {
-            // boarding: look along the plane's course
+            // boarding: look along the plane's course and down at the island
             if let Some((_, yaw)) = s.br.as_ref().and_then(|b| b.plane) {
                 self.yaw = yaw;
-                self.pitch = -0.25;
+                self.pitch = -0.7;
             }
         }
         self.br = s.br;
+        self.ready = s.ready;
         self.ents = s.ents;
         let mut present = Vec::new();
         for e in &self.ents {
@@ -1653,7 +1662,23 @@ impl GameClient {
             );
         }
 
-        let playing_input = self.overlay == Overlay::None && self.chat_input.is_none();
+        let playing_input =
+            self.overlay == Overlay::None && self.chat_input.is_none() && !self.big_map;
+        // the big map: a click puts a marker there, a right click takes it away
+        if self.big_map && self.overlay == Overlay::None {
+            if let Some(img) = &self.level.image {
+                let (x0, y0, side) = crate::hud::big_map_rect();
+                let (mx, my) = mouse_position();
+                let inside = mx >= x0 && my >= y0 && mx <= x0 + side && my <= y0 + side;
+                if inside && is_mouse_button_pressed(MouseButton::Left) {
+                    let k = img.size / side;
+                    self.marker = Some(img.origin + vec2(mx - x0, my - y0) * k);
+                }
+                if is_mouse_button_pressed(MouseButton::Right) {
+                    self.marker = None;
+                }
+            }
+        }
         // ---- mouse look
         let md = self.mouse_delta;
         if playing_input && self.piloting.is_some() {
@@ -2046,6 +2071,11 @@ impl GameClient {
                     self.next_pickup = now + 0.6;
                 }
             }
+            if let Some((_, _, me)) = self.ready {
+                if pressed(Action::Ready) {
+                    self.net.send(C2S::Ready(!me));
+                }
+            }
             if self.mode == Mode::Br && pressed(Action::Heal) {
                 self.net.send(C2S::UseMedkit);
             }
@@ -2392,6 +2422,11 @@ impl GameClient {
                 crate::ui::MUTED,
             );
         }
+    }
+
+    /// The final killcam (end of a round or match) is about to play.
+    pub fn final_killcam_waiting(&self) -> bool {
+        self.pending_killcam.as_ref().is_some_and(|p| p.2)
     }
 
     /// Skips the killcam that is playing or about to play (the final one cannot be

@@ -31,6 +31,8 @@ struct Report {
 
 fn soak(map: MapId, mode: Mode, bots: usize, secs: f32) -> Report {
     let mut cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         bots,
         max_players: bots.max(2),
         data_dir: std::env::temp_dir()

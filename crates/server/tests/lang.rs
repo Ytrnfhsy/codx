@@ -10,6 +10,8 @@ use toon_shared::Team;
 #[test]
 fn messages_come_in_each_players_language() {
     let mut g = Game::new(ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         bots: 0,
         data_dir: std::env::temp_dir()
             .join("tw-test-lang")

@@ -50,6 +50,8 @@ impl Client {
 fn join_move_and_shoot_over_udp() {
     let port = 27900 + (std::process::id() % 50) as u16;
     let cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         port,
         http_enabled: false,
         bots: 2,

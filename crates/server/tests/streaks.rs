@@ -18,6 +18,8 @@ const FOE_AT: Vec3 = Vec3::new(-10.0, 0.0, 0.0);
 /// A Depot match with two players facing each other on open ground.
 fn duel() -> (Game, u8, u8) {
     let cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         bots: 0,
         data_dir: std::env::temp_dir()
             .join("tw-test-streaks")

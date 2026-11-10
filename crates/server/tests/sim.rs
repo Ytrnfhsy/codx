@@ -10,6 +10,8 @@ use toon_shared::{Mode, Team};
 
 fn setup(map: MapId, mode: Mode) -> (Game, u8) {
     let cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         bots: 8,
         data_dir: std::env::temp_dir()
             .join("tw-test")

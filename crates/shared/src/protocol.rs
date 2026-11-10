@@ -99,6 +99,8 @@ pub enum C2S {
     UseMedkit,
     /// Battle royale: something done with an item in the inventory screen.
     Item(ItemAction),
+    /// Ready (or not yet) for the match to start.
+    Ready(bool),
 }
 
 /// What can be thrown out of the battle royale inventory.
@@ -356,6 +358,8 @@ pub struct Snapshot {
     pub shots: Vec<ShotFx>,
     /// Battle royale only.
     pub br: Option<BrSnap>,
+    /// Before the match starts: (players ready, players in total, am I ready).
+    pub ready: Option<(u8, u8, bool)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

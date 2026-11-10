@@ -469,6 +469,8 @@ impl Game {
         p.hp = MAX_HEALTH;
         p.inv = Default::default();
         p.inv.ammo[AmmoType::Pistol.index()] = 15;
+        // and one medkit to start with
+        p.inv.medkits = 1;
         p.empty_slot = Some(1);
         p.body = Body {
             pos,

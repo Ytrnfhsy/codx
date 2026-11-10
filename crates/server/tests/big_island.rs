@@ -12,6 +12,8 @@ use toon_shared::{Mode, Team};
 #[test]
 fn fifty_players_on_the_island() {
     let cfg = ServerConfig {
+        // (tests start straight away: nobody presses «Ready»)
+        ready_check: false,
         bots: 50,
         max_players: 50,
         data_dir: std::env::temp_dir().join("tw-big").to_string_lossy().into(),
