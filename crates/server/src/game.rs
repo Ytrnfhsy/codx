@@ -86,6 +86,15 @@ pub struct Player {
     pub ping: f32,
     /// Pressed «Ready» (the match waits for everybody).
     pub ready: bool,
+    /// Battle royale squad (0 = on your own).
+    pub squad: u8,
+    /// Battle royale: knocked down (crawling, `hp` bleeds out) and who did it.
+    pub downed: bool,
+    pub downed_by: Option<u8>,
+    /// Revive progress 0..1 (on the one being revived).
+    pub revive: f32,
+    /// The map marker this player shares with the squad.
+    pub marker: Option<[f32; 2]>,
     pub last_seq: u32,
     pub move_budget: f32,
     pub history: VecDeque<HistEntry>,
@@ -195,6 +204,11 @@ impl Player {
             life: 0,
             ping: 0.05,
             ready: false,
+            squad: 0,
+            downed: false,
+            downed_by: None,
+            revive: 0.0,
+            marker: None,
             last_seq: 0,
             move_budget: 2.0,
             history: VecDeque::new(),
@@ -1193,6 +1207,11 @@ impl Game {
             C2S::BrJump => self.br_jump(id),
             C2S::UseMedkit => self.br_use_medkit(id),
             C2S::Item(a) => self.br_item(id, a),
+            C2S::Marker(m) => {
+                if let Some(p) = self.pm(id) {
+                    p.marker = m.filter(|m| m[0].is_finite() && m[1].is_finite());
+                }
+            }
             C2S::Ready(r) => {
                 if let Some(p) = self.pm(id) {
                     p.ready = r;
@@ -1426,6 +1445,23 @@ impl Game {
                 || self.team_count(Team::Allies) > 0 && self.team_count(Team::Axis) > 0)
             && self.players.iter().flatten().any(|p| !p.is_bot())
             && (!self.cfg.ready_check || self.unready() == 0)
+    }
+
+    /// On the same side: the same team, or in the battle royale the same squad.
+    pub fn allied(&self, a: &Player, b: &Player) -> bool {
+        if self.mode.solo() {
+            a.squad != 0 && a.squad == b.squad
+        } else {
+            a.team == b.team
+        }
+    }
+
+    /// `allied` by ids (false for anybody missing).
+    pub fn allied_ids(&self, a: u8, b: u8) -> bool {
+        match (self.p(a), self.p(b)) {
+            (Some(a), Some(b)) => self.allied(a, b),
+            _ => false,
+        }
     }
 
     /// Real players in the game who have not pressed «Ready» yet.
@@ -1871,6 +1907,7 @@ impl Game {
     pub fn snapshot_for(&self, id: u8) -> Snapshot {
         let me = self.p(id);
         let my_team = me.map(|p| p.team).unwrap_or(Team::Spectator);
+        let my_squad = me.map_or(0, |p| p.squad);
         let uav = my_team.is_playing() && self.uav_until[my_team.index()] > self.time;
         // big maps: only what is near enough to matter (the fog hides the rest anyway)
         let focus = self.interest(id);
@@ -1888,6 +1925,7 @@ impl Game {
             .filter(|p| {
                 p.id == id
                     || p.team == my_team && my_team.is_playing() && !self.mode.solo()
+                    || my_squad != 0 && p.squad == my_squad
                     || near(p.body.pos, INTEREST_RANGE)
             })
             .map(|p| {
@@ -1922,6 +1960,7 @@ impl Game {
                         | if p.has_perk3(Perk3::DeadSilence) { stance_bits::SILENT } else { 0 }
                         // only teammates see the shield: it must not give away enemies
                         | if p.alive && p.team == my_team && !self.mode.solo() && p.protected_until > self.time { stance_bits::PROTECTED } else { 0 }
+                        | if p.downed { stance_bits::DOWNED } else { 0 }
                         | match p.body.chute {
                             toon_shared::physics::Chute::None => 0,
                             toon_shared::physics::Chute::FreeFall => stance_bits::FREEFALL,
@@ -1931,6 +1970,7 @@ impl Game {
                     flags: f,
                     // characters are a battle royale thing: elsewhere sides wear uniforms
                     skin: if self.mode.solo() { p.skin } else { 0 },
+                    squad: p.squad,
                 }
             })
             .collect();
@@ -1954,6 +1994,7 @@ impl Game {
                 progress: p.progress,
                 protected: (p.protected_until - self.time).max(0.0) as f32,
                 vehicle: self.vehicle_hud(p.id),
+                downed: p.downed,
             },
             None => MeSnap::default(),
         };

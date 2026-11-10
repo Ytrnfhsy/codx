@@ -373,9 +373,15 @@ impl Game {
             let fwd = look_dir(yaw, 0.0);
             let mut best: Option<(u8, f32)> = None;
             let mut heard: Option<(Vec3, f32)> = None;
+            let my_squad = self.p(id).map_or(0, |p| p.squad);
             let solo = self.mode.solo();
             for o in self.players.iter().flatten() {
-                if !o.alive || o.id == id || o.team == team && !solo || !o.team.is_playing() {
+                let friend = if solo {
+                    my_squad != 0 && o.squad == my_squad
+                } else {
+                    o.team == team
+                };
+                if !o.alive || o.id == id || friend || !o.team.is_playing() {
                     continue;
                 }
                 let c = o.chest();
@@ -864,6 +870,13 @@ impl Game {
             bot.stuck_at = time;
         }
 
+        // knocked down: crawl
+        let downed = self.p(id).is_some_and(|p| p.downed);
+        if downed {
+            stance = Stance::Prone;
+            sprint = false;
+            jump = false;
+        }
         let (f, r) = yaw_basis(yaw);
         let inp = MoveInput {
             forward: move_dir.dot(f),

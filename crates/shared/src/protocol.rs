@@ -13,6 +13,8 @@ pub mod stance_bits {
     /// Skydiving from the battle royale plane (free fall / under the parachute).
     pub const FREEFALL: u8 = 0x04;
     pub const CHUTE: u8 = 0x08;
+    /// Battle royale: knocked down, crawling.
+    pub const DOWNED: u8 = 0x10;
     pub const PROTECTED: u8 = 0x40;
     pub const SILENT: u8 = 0x80;
 }
@@ -101,6 +103,8 @@ pub enum C2S {
     Item(ItemAction),
     /// Ready (or not yet) for the match to start.
     Ready(bool),
+    /// The map marker shown to the squad (None removes it).
+    Marker(Option<[f32; 2]>),
 }
 
 /// What can be thrown out of the battle royale inventory.
@@ -167,6 +171,8 @@ pub struct PlayerSnap {
     pub flags: u8,
     /// Battle royale character (`skins::SKINS`; 0 = team uniform).
     pub skin: u8,
+    /// Battle royale squad (0 = on their own).
+    pub squad: u8,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -192,6 +198,8 @@ pub struct MeSnap {
     pub protected: f32,
     /// The vehicle we are steering, if any.
     pub vehicle: Option<VehicleHud>,
+    /// Battle royale: knocked down (crawling; `hp` is what is left before bleeding out).
+    pub downed: bool,
 }
 
 /// The vehicle a player steers, as the server sees it.
@@ -321,6 +329,22 @@ pub struct BrSnap {
     pub inv: crate::inventory::Inventory,
     /// The hand slot without a gun yet (or after throwing one away).
     pub empty_slot: Option<u8>,
+    /// The squad (us included), in a fixed order.
+    pub squad: Vec<SquadMate>,
+}
+
+/// A member of our battle royale squad.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SquadMate {
+    pub id: u8,
+    pub name: String,
+    /// Health (or what is left before bleeding out when downed).
+    pub hp: f32,
+    pub alive: bool,
+    pub downed: bool,
+    pub pos: V3,
+    /// The marker they put on the map.
+    pub marker: Option<[f32; 2]>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -513,6 +513,8 @@ pub enum Cause {
     Nrk,
     /// Outside the battle royale zone.
     Zone,
+    /// Knocked down in the battle royale and not picked up in time.
+    Bleed,
 }
 
 impl Cause {
@@ -531,6 +533,7 @@ impl Cause {
             Cause::Drop => t("Скид з дрона", "Drone drop"),
             Cause::Nrk => t("НРК", "Ground robot"),
             Cause::Zone => t("Зона", "The zone"),
+            Cause::Bleed => t("Кровотеча", "Bled out"),
         }
     }
 }

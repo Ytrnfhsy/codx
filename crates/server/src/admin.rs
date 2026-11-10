@@ -349,6 +349,16 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 g.cfg.br.bots
             ),
         },
+        "brsquad" => match args.next().and_then(|v| v.parse::<u8>().ok()) {
+            Some(n) if [1, 2, 4].contains(&n) => {
+                g.cfg.br.squad = n;
+                format!("Загони в королівській битві: по {n} (з наступного раунду)")
+            }
+            _ => format!(
+                "Загони в королівській битві: по {}. Використання: brsquad <1|2|4>",
+                g.cfg.br.squad
+            ),
+        },
         "bots" | "addbot" | "kickbots" => {
             let n = match cmd.as_str() {
                 "addbot" => {

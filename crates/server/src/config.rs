@@ -58,6 +58,8 @@ pub struct BrConfig {
     pub max_players: usize,
     /// Fill the server with bots up to this many players.
     pub bots: usize,
+    /// Players per squad: 1 (everyone on their own), 2 or 4.
+    pub squad: u8,
 }
 
 impl Default for BrConfig {
@@ -65,6 +67,7 @@ impl Default for BrConfig {
         BrConfig {
             max_players: 50,
             bots: 50,
+            squad: 1,
         }
     }
 }

@@ -26,6 +26,8 @@ pub struct HostSettings {
     /// The battle royale's own player limit and bots.
     pub br_max_players: usize,
     pub br_bots: usize,
+    /// Players per battle royale squad (1 = everyone on their own).
+    pub br_squad: u8,
 }
 
 impl Default for HostSettings {
@@ -42,6 +44,7 @@ impl Default for HostSettings {
             max_players: 12,
             br_max_players: 50,
             br_bots: 50,
+            br_squad: 1,
         }
     }
 }

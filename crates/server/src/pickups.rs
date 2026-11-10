@@ -81,7 +81,7 @@ impl Game {
         let pk = self.pickups[i];
         let swap = self.tuning.weapon(pk.w.id).swap_time;
         let Some(p) = self.pm(id) else { return };
-        if !p.alive || !near(p.body.pos, pk.pos, PICKUP_RADIUS + 0.3) {
+        if !p.alive || p.downed || !near(p.body.pos, pk.pos, PICKUP_RADIUS + 0.3) {
             return;
         }
         if p.weapons

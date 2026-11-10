@@ -29,7 +29,7 @@ struct Report {
     inside_walls: usize,
 }
 
-fn soak(map: MapId, mode: Mode, bots: usize, secs: f32) -> Report {
+fn soak(map: MapId, mode: Mode, bots: usize, squad: u8, secs: f32) -> Report {
     let mut cfg = ServerConfig {
         // (tests start straight away: nobody presses «Ready»)
         ready_check: false,
@@ -43,6 +43,7 @@ fn soak(map: MapId, mode: Mode, bots: usize, secs: f32) -> Report {
     };
     cfg.br.bots = bots;
     cfg.br.max_players = bots.max(2);
+    cfg.br.squad = squad;
     let mut g = Game::new(cfg);
     g.rng = toon_shared::rng::Rng::new(map as u64 * 31 + mode as u64);
     g.change_map(map, mode);
@@ -215,19 +216,20 @@ fn soak_every_map_and_mode() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(300.0);
-    let mut cases: Vec<(MapId, Mode, usize)> = Vec::new();
+    let mut cases: Vec<(MapId, Mode, usize, u8)> = Vec::new();
     for m in MapId::ALL {
-        cases.push((m, Mode::Tdm, 10));
-        cases.push((m, Mode::Sab, 10));
+        cases.push((m, Mode::Tdm, 10, 1));
+        cases.push((m, Mode::Sab, 10, 1));
     }
-    cases.push((MapId::Island, Mode::Tdm, 24));
-    cases.push((MapId::Island, Mode::Br, 30));
-    cases.push((MapId::Market, Mode::Br, 12));
+    cases.push((MapId::Island, Mode::Tdm, 24, 1));
+    cases.push((MapId::Island, Mode::Br, 30, 1));
+    cases.push((MapId::Island, Mode::Br, 32, 4));
+    cases.push((MapId::Market, Mode::Br, 12, 2));
     let mut bad = 0;
-    for (m, mode, bots) in cases {
-        let r = soak(m, mode, bots, secs);
+    for (m, mode, bots, squad) in cases {
+        let r = soak(m, mode, bots, squad, secs);
         eprintln!(
-            "{:>7} {:>3}: {} kills, {} matches ended, tick avg {:.0} µs worst {:.1} ms, snapshot ≤ {} B, {} stuck, {} in walls",
+            "{:>7} {:>3} ×{squad}: {} kills, {} matches ended, tick avg {:.0} µs worst {:.1} ms, snapshot ≤ {} B, {} stuck, {} in walls",
             m.short(),
             mode.short(),
             r.kills,

@@ -642,6 +642,8 @@ pub fn draw_menu(
                 .round() as usize;
             let skill = toon_server::bots::skill_name(hs.bot_skill);
             let skill_label = tr!("Складність ботів ({skill})", "Bot difficulty ({skill})");
+            // the battle royale: the squads take the other half of the row
+            let sw = if br { (pw - 60.0) / 2.0 } else { pw - 48.0 };
             hs.bot_skill = ui.slider(
                 &skill_label,
                 hs.bot_skill,
@@ -649,9 +651,28 @@ pub fn draw_menu(
                 1.0,
                 x + 24.0,
                 y + 330.0,
-                pw - 48.0,
+                sw,
                 "{}",
             );
+            if br {
+                const SIZES: [u8; 3] = [1, 2, 4];
+                let i = SIZES.iter().position(|s| *s == hs.br_squad).unwrap_or(0);
+                let label = match hs.br_squad {
+                    2 => t("Дуо (по 2)", "Duos (2)").to_string(),
+                    4 => t("Загони по 4", "Squads of 4").to_string(),
+                    _ => t("Кожен сам за себе", "Every one for themselves").to_string(),
+                };
+                let d = ui.stepper(
+                    t("Загони", "Squads"),
+                    &label,
+                    x + 36.0 + (pw - 60.0) / 2.0,
+                    y + 318.0,
+                    (pw - 60.0) / 2.0,
+                );
+                if d != 0 {
+                    hs.br_squad = SIZES[((i as i32 + d).rem_euclid(3)) as usize];
+                }
+            }
             max = ui
                 .slider(
                     max_label,

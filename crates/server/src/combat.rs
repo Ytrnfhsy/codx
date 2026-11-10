@@ -7,6 +7,7 @@ use toon_shared::consts::*;
 use toon_shared::lang::{pick, t};
 use toon_shared::protocol::{MatchState, ShotFx, S2C};
 use toon_shared::ray::{ray_player, ray_sphere, HitZone};
+use toon_shared::tr;
 use toon_shared::weapons::{Cause, Killstreak, Perk2, Perk3, WeaponId};
 use toon_shared::{look_dir, Mode, Team};
 
@@ -153,7 +154,11 @@ impl Game {
                 return;
             }
         }
-        if !p.alive || p.weapon().id != weapon || p.weapon().mag == 0 || time < p.switch_end - slack
+        if !p.alive
+            || p.downed
+            || p.weapon().id != weapon
+            || p.weapon().mag == 0
+            || time < p.switch_end - slack
         {
             return;
         }
@@ -377,10 +382,21 @@ impl Game {
         {
             return;
         }
-        let ff = self.cfg.friendly_fire || self.mode.solo();
+        let ff = self.cfg.friendly_fire;
         let solo = self.mode.solo();
         let time = self.time;
-        let att_team = attacker.and_then(|a| self.p(a)).map(|a| a.team);
+        let friends = attacker.is_some_and(|a| a != victim && self.allied_ids(a, victim));
+        // battle royale squads: a knock-down instead of death while a squadmate still stands
+        let can_knock = solo
+            && self.p(victim).is_some_and(|v| {
+                v.squad != 0
+                    && !v.downed
+                    && self
+                        .players
+                        .iter()
+                        .flatten()
+                        .any(|o| o.id != victim && o.squad == v.squad && o.alive && !o.downed)
+            });
         let Some(v) = self.pm(victim) else { return };
         if !v.alive {
             return;
@@ -389,10 +405,8 @@ impl Game {
         if time < v.protected_until && !matches!(cause, Cause::Fall | Cause::World) {
             return;
         }
-        if let Some(a) = attacker {
-            if a != victim && att_team == Some(v.team) && !ff {
-                return;
-            }
+        if friends && !ff {
+            return;
         }
         let mut amount = amount;
         if v.has_perk2(Perk2::Juggernaut) {
@@ -400,11 +414,45 @@ impl Game {
         }
         // battle royale: the vest takes part of a body hit, the helmet part of a head
         // hit, while they last
-        if solo && !matches!(cause, Cause::Zone | Cause::Fall | Cause::World) {
+        if solo && !v.downed && !matches!(cause, Cause::Zone | Cause::Fall | Cause::World) {
             amount = v.inv.soak(amount, headshot);
             v.inv.healing = 0.0;
         }
         v.hp -= amount;
+        // knocked down: on the ground with a fresh pool of "bleeding" health
+        if v.hp <= 0.0 && can_knock && cause != Cause::World {
+            v.downed = true;
+            v.downed_by = attacker.filter(|a| *a != victim);
+            v.hp = crate::br::DOWNED_HP;
+            v.revive = 0.0;
+            v.reload_end = None;
+            v.inv.healing = 0.0;
+            v.body.stance = toon_shared::physics::Stance::Prone;
+            v.last_damage = time;
+            let name = v.name.clone();
+            self.say(Dest::One(victim), || S2C::Center {
+                text: t(
+                    "Тебе поранено! Повзи в укриття — напарник може підняти",
+                    "You are down! Crawl to cover — a squadmate can pick you up",
+                )
+                .into(),
+                secs: 3.0,
+            });
+            if let Some(a) = attacker.filter(|a| *a != victim) {
+                self.send(
+                    a,
+                    S2C::HitConfirm {
+                        kill: false,
+                        headshot,
+                    },
+                );
+                self.say(Dest::One(a), || S2C::Center {
+                    text: tr!("Поранено: {name}", "Knocked down: {name}"),
+                    secs: 1.5,
+                });
+            }
+            return;
+        }
         v.last_damage = time;
         if let Some(a) = attacker {
             if a != victim {
@@ -449,6 +497,14 @@ impl Game {
             return;
         }
         let dropped = *v.weapon();
+        // a knocked-down player who bleeds out or is finished: the knock-down earns the kill
+        let attacker = match (attacker, v.downed_by) {
+            (None, Some(d)) if v.downed => Some(d),
+            (a, _) => a,
+        };
+        v.downed = false;
+        v.downed_by = None;
+        v.revive = 0.0;
         v.alive = false;
         v.hp = 0.0;
         v.deaths += 1;
@@ -458,6 +514,7 @@ impl Game {
         v.history.clear();
         let vpos = v.body.pos;
         let vteam = v.team;
+        let vsquad = v.squad;
         let vname = v.name.clone();
         let martyr = v.has_perk3(Perk3::Martyrdom);
         let assist_list: Vec<u8> = v
@@ -520,7 +577,7 @@ impl Game {
                 if let Some(k) = self.pm(a) {
                     killer_name = k.name.clone();
                     killer_team = k.team;
-                    if k.team != vteam || solo {
+                    if k.team != vteam || solo && !(vsquad != 0 && k.squad == vsquad) {
                         k.kills += 1;
                         k.streak += 1;
                         let pts = SCORE_KILL + if headshot { SCORE_HEADSHOT_BONUS } else { 0 };
@@ -656,6 +713,7 @@ impl Game {
         };
         let left = if smoke { p.smokes } else { p.grenades };
         if !p.alive
+            || p.downed
             || left == 0
             || !dir.is_finite()
             || dir.length_squared() < 0.1
@@ -819,19 +877,18 @@ impl Game {
         }
         let time = self.time;
         let Some(p) = self.pm(id) else { return };
-        if !p.alive || time < p.melee_ready || time < p.protected_until {
+        if !p.alive || p.downed || time < p.melee_ready || time < p.protected_until {
             return;
         }
         p.melee_ready = time + MELEE_COOLDOWN as f64;
         let eye = p.eye();
         let fwd = look_dir(p.yaw, p.pitch);
-        let team = p.team;
-        let ff = self.cfg.friendly_fire || self.mode.solo();
+        let ff = self.cfg.friendly_fire;
         let target = self
             .players
             .iter()
             .flatten()
-            .filter(|o| o.alive && o.id != id && (o.team != team || ff))
+            .filter(|o| o.alive && o.id != id && (ff || !self.allied_ids(id, o.id)))
             .filter_map(|o| {
                 let c = o.chest();
                 let to = c - eye;

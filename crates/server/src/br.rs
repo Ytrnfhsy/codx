@@ -11,7 +11,7 @@ use toon_shared::inventory::{
 };
 use toon_shared::lang::t;
 use toon_shared::physics::{Body, Chute, Stance};
-use toon_shared::protocol::{BrSnap, EntSnap, Item, ItemAction, LootKind, MatchState, S2C};
+use toon_shared::protocol::{flags, BrSnap, EntSnap, Item, ItemAction, LootKind, MatchState, S2C};
 use toon_shared::tr;
 use toon_shared::weapons::{Cause, WeaponId};
 use toon_shared::{look_dir, yaw_of, Mode};
@@ -22,6 +22,14 @@ pub const PLANE_HEIGHT: f32 = 230.0;
 pub const PLANE_SPEED: f32 = 75.0;
 /// Walking this close to supplies picks them up.
 const LOOT_RADIUS: f32 = 1.3;
+/// A knocked-down player's pool of health: it bleeds out over `BLEED_TIME` seconds and
+/// takes hits like normal health (no vest or helmet).
+pub const DOWNED_HP: f32 = 100.0;
+pub const BLEED_TIME: f32 = 40.0;
+/// Seconds of holding the use key next to a downed squadmate to pick them up, and the
+/// health they get back.
+pub const REVIVE_TIME: f32 = 5.0;
+pub const REVIVE_HP: f32 = 30.0;
 
 /// How far sideways a skydiver gets from `height` metres above the ground: with the
 /// parachute opened right away, or in free fall until it opens by itself.
@@ -172,11 +180,17 @@ impl Game {
             p.empty_slot = None;
             p.driving = None;
             p.respawn_at = f64::MAX;
+            p.downed = false;
+            p.downed_by = None;
+            p.revive = 0.0;
+            p.marker = None;
+            p.squad = 0;
             if p.is_bot() {
                 jumps.push(p.id);
             }
         }
         self.br.entrants = entrants;
+        self.br_make_squads();
         self.br_scatter_loot();
         self.br_assign_drops(&jumps);
         self.center_all(
@@ -237,7 +251,21 @@ impl Game {
             }
         }
         let mut chosen: Vec<Vec3> = Vec::new();
+        // squadmates come down together: the first of a squad picks, the others follow
+        let mut squad_spot: Vec<(u8, Vec3, f64)> = Vec::new();
         for &id in bots {
+            let squad = self.p(id).map_or(0, |p| p.squad);
+            if let Some(&(_, spot, at)) = squad_spot.iter().find(|s| s.0 == squad && squad != 0) {
+                let n = squad_spot.len() as f32;
+                let off = vec3((n * 2.4).cos() * 7.0, 0.0, (n * 2.4).sin() * 7.0);
+                let land = self.nav.snap(spot + off).unwrap_or(spot);
+                if let Some(b) = self.pm(id).and_then(|p| p.bot.as_mut()) {
+                    b.br_jump_at = at + 0.3;
+                    b.br_land = Some(land);
+                }
+                squad_spot.push((squad, spot, at));
+                continue;
+            }
             let pick = cands
                 .iter()
                 .enumerate()
@@ -266,11 +294,146 @@ impl Game {
             };
             if let Some(q) = land {
                 chosen.push(q);
+                if squad != 0 {
+                    squad_spot.push((squad, q, at));
+                }
             }
             if let Some(b) = self.pm(id).and_then(|p| p.bot.as_mut()) {
                 b.br_jump_at = at;
                 b.br_land = land;
             }
+        }
+    }
+
+    /// Splits the players into squads (real players first, in the order they came, so that
+    /// friends who joined together play together; bots fill up the rest).
+    fn br_make_squads(&mut self) {
+        let size = self.cfg.br.squad.clamp(1, 4) as usize;
+        if size < 2 {
+            return;
+        }
+        let mut ids: Vec<u8> = self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| p.in_plane && !p.is_bot())
+            .map(|p| p.id)
+            .collect();
+        let mut bots: Vec<u8> = self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| p.in_plane && p.is_bot())
+            .map(|p| p.id)
+            .collect();
+        for k in (1..bots.len()).rev() {
+            let j = self.rng.below(k + 1);
+            bots.swap(k, j);
+        }
+        ids.extend(bots);
+        for (k, id) in ids.into_iter().enumerate() {
+            if let Some(p) = self.pm(id) {
+                p.squad = (k / size) as u8 + 1;
+            }
+        }
+    }
+
+    /// Sides still in the round: squads, and players on their own.
+    pub fn br_sides(&self) -> usize {
+        let mut squads: Vec<u8> = Vec::new();
+        let mut solo = 0;
+        for p in self.players.iter().flatten() {
+            if !(p.team.is_playing() && (p.alive || p.in_plane)) {
+                continue;
+            }
+            if p.squad == 0 {
+                solo += 1;
+            } else if !squads.contains(&p.squad) {
+                squads.push(p.squad);
+            }
+        }
+        solo + squads.len()
+    }
+
+    /// Knocked-down players bleed and are picked up by squadmates holding the use key next
+    /// to them; a squad with nobody standing is out.
+    fn br_downed(&mut self, dt: f32) {
+        let mut out: Vec<u8> = Vec::new();
+        let ids: Vec<u8> = self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| p.alive && p.squad != 0)
+            .map(|p| p.id)
+            .collect();
+        for &id in &ids {
+            if let Some(p) = self.pm(id) {
+                p.progress = 0.0;
+            }
+        }
+        for &id in &ids {
+            let Some(v) = self.p(id) else { continue };
+            if !v.downed {
+                continue;
+            }
+            let (squad, pos) = (v.squad, v.body.pos);
+            let standing = self
+                .players
+                .iter()
+                .flatten()
+                .any(|o| o.squad == squad && o.alive && !o.downed);
+            if !standing {
+                out.push(id);
+                continue;
+            }
+            // a squadmate holding the use key right next to them
+            let reviver = self
+                .players
+                .iter()
+                .flatten()
+                .find(|o| {
+                    o.squad == squad
+                        && o.alive
+                        && !o.downed
+                        && o.flags & flags::USE != 0
+                        && o.body.pos.distance(pos) < 2.0
+                })
+                .map(|o| o.id);
+            let now = self.time;
+            let Some(v) = self.pm(id) else { continue };
+            match reviver {
+                Some(_) => v.revive += dt / REVIVE_TIME,
+                None => {
+                    v.revive = 0.0;
+                    v.hp -= DOWNED_HP / BLEED_TIME * dt;
+                }
+            }
+            let revive = v.revive;
+            if revive >= 1.0 {
+                v.downed = false;
+                v.downed_by = None;
+                v.revive = 0.0;
+                v.hp = REVIVE_HP;
+                v.last_damage = now;
+                let name = v.name.clone();
+                if let Some(r) = reviver {
+                    self.say(Dest::One(r), || S2C::Center {
+                        text: tr!("Піднято: {name}", "Picked up: {name}"),
+                        secs: 1.5,
+                    });
+                }
+                continue;
+            }
+            v.progress = revive;
+            if v.hp <= 0.0 {
+                out.push(id);
+            }
+            if let Some(r) = reviver.and_then(|r| self.pm(r)) {
+                r.progress = revive;
+            }
+        }
+        for id in out {
+            self.kill(id, None, Cause::Bleed, false);
         }
     }
 
@@ -581,6 +744,7 @@ impl Game {
                 self.damage(id, None, zone.dps, Cause::Zone, false, pos);
             }
         }
+        self.br_downed(dt);
         // medkits being used; reserves following the inventory
         for p in self.players.iter_mut().flatten() {
             if !p.alive {
@@ -615,18 +779,31 @@ impl Game {
             });
             return;
         }
-        // the end
-        let alive = self.br_alive();
-        if alive <= 1 && (self.br.entrants >= 2 || alive == 0) {
-            let winner = self
+        // the end: one player, or one squad, left
+        let sides = self.br_sides();
+        if sides <= 1 && (self.br.entrants >= 2 || sides == 0) {
+            let last = self
                 .players
                 .iter()
                 .flatten()
                 .find(|p| p.team.is_playing() && (p.alive || p.in_plane))
-                .map(|p| p.name.clone());
+                .map(|p| (p.name.clone(), p.squad));
+            let winner = last.map(|(name, squad)| {
+                if squad == 0 {
+                    return name;
+                }
+                // the whole squad, those knocked out on the way included
+                self.players
+                    .iter()
+                    .flatten()
+                    .filter(|p| p.squad == squad)
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            });
             self.br.running = false;
             let text = || match &winner {
-                Some(n) => tr!("{n} — переможець!", "{n} wins!"),
+                Some(n) => tr!("{n} — переможці!", "{n} win!"),
                 None => t("Переможця немає", "Nobody survived").into(),
             };
             self.end_match_text(text);
@@ -645,7 +822,11 @@ impl Game {
             return true;
         };
         let d = l.pos - p.body.pos;
-        if !p.alive || vec3(d.x, 0.0, d.z).length() > LOOT_RADIUS + 0.6 || d.y.abs() > 2.0 {
+        if !p.alive
+            || p.downed
+            || vec3(d.x, 0.0, d.z).length() > LOOT_RADIUS + 0.6
+            || d.y.abs() > 2.0
+        {
             return true;
         }
         let mut left = l.amount;
@@ -781,7 +962,7 @@ impl Game {
             return;
         }
         let Some(p) = self.pm(id) else { return };
-        if p.alive && p.inv.medkits > 0 && p.inv.healing <= 0.0 && p.hp < MAX_HEALTH {
+        if p.alive && !p.downed && p.inv.medkits > 0 && p.inv.healing <= 0.0 && p.hp < MAX_HEALTH {
             p.inv.healing = MEDKIT_TIME;
         }
     }
@@ -1003,7 +1184,25 @@ impl Game {
             return;
         }
         self.br_drop_inventory(victim);
-        let place = self.br_alive() + 1;
+        let squad = self.p(victim).map_or(0, |p| p.squad);
+        let mates_in = squad != 0
+            && self
+                .players
+                .iter()
+                .flatten()
+                .any(|p| p.squad == squad && p.alive);
+        if mates_in {
+            self.say(Dest::One(victim), || S2C::Center {
+                text: t(
+                    "Ти вибув — твій загін ще бореться",
+                    "You are out — your squad fights on",
+                )
+                .into(),
+                secs: 5.0,
+            });
+            return;
+        }
+        let place = self.br_sides() + 1;
         self.say(Dest::One(victim), || S2C::Center {
             text: tr!("Ти вибув! Місце #{place}", "You are out! Place #{place}"),
             secs: 5.0,
@@ -1048,6 +1247,25 @@ impl Game {
             in_plane: me.is_some_and(|p| p.in_plane),
             inv: me.map(|p| p.inv).unwrap_or_default(),
             empty_slot: me.and_then(|p| p.empty_slot),
+            squad: me
+                .filter(|m| m.squad != 0)
+                .map(|m| {
+                    self.players
+                        .iter()
+                        .flatten()
+                        .filter(|p| p.squad == m.squad)
+                        .map(|p| toon_shared::protocol::SquadMate {
+                            id: p.id,
+                            name: p.name.clone(),
+                            hp: p.hp,
+                            alive: p.alive || p.in_plane,
+                            downed: p.downed,
+                            pos: p.body.pos.to_array(),
+                            marker: p.marker,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
     }
 
@@ -1087,6 +1305,46 @@ impl Game {
             }
         } else {
             bot.br_land = None;
+        }
+        // squads: crawl to a squadmate when down; pick up a squadmate who is down; keep up
+        // with the squad
+        let squad = me.squad;
+        if squad != 0 && !skydiving {
+            let mates: Vec<(u8, Vec3, bool, bool)> = self
+                .players
+                .iter()
+                .flatten()
+                .filter(|p| p.squad == squad && p.id != id && p.alive)
+                .map(|p| (p.id, p.body.pos, p.downed, p.is_bot()))
+                .collect();
+            if me.downed {
+                let to = mates
+                    .iter()
+                    .filter(|m| !m.2)
+                    .min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)));
+                return (to.map(|m| m.1), false, true);
+            }
+            if let Some(m) = mates
+                .iter()
+                .filter(|m| m.2 && m.1.distance(pos) < 90.0)
+                .min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
+            {
+                let close = m.1.distance(pos) < 1.6;
+                return (Some(m.1), close, true);
+            }
+            // the leader: a real player in the squad, otherwise its first member
+            let leader = mates
+                .iter()
+                .filter(|m| !m.2)
+                .min_by_key(|m| (m.3, m.0))
+                .filter(|m| !m.3 || m.0 < id);
+            if let Some(l) = leader {
+                if l.1.distance(pos) > 45.0 {
+                    let off = vec3(((id % 3) as f32 - 1.0) * 4.0, 0.0, ((id % 2) as f32) * 4.0);
+                    let g = self.nav.snap(l.1 + off).unwrap_or(l.1);
+                    return (Some(g), false, false);
+                }
+            }
         }
         if !skydiving && flat.distance(c) > r * 0.85 + 3.0 {
             let inside = c + (flat - c).normalize_or_zero() * r * 0.5;
@@ -1265,9 +1523,31 @@ impl Game {
         p.inv = Default::default();
         p.empty_slot = None;
         p.respawn_at = f64::MAX;
+        p.downed = false;
+        p.squad = 0;
         if let Some(b) = p.bot.as_mut() {
             b.br_jump_at = jump;
         }
         self.br.entrants += 1;
+        // a squad with room for one more, or a new one
+        let size = self.cfg.br.squad.clamp(1, 4);
+        if size >= 2 {
+            let mut count = [0u8; 256];
+            for o in self
+                .players
+                .iter()
+                .flatten()
+                .filter(|o| o.in_plane || o.alive)
+            {
+                count[o.squad as usize] += 1;
+            }
+            let squad = (1..=255u8)
+                .find(|s| count[*s as usize] > 0 && count[*s as usize] < size)
+                .or_else(|| (1..=255u8).find(|s| count[*s as usize] == 0))
+                .unwrap_or(0);
+            if let Some(p) = self.pm(id) {
+                p.squad = squad;
+            }
+        }
     }
 }

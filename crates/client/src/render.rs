@@ -559,8 +559,10 @@ pub fn render_world(
         let hidden = a.team != my_team
             && toon_shared::ray::smoke_blocks(view.pos, head - vec3(0.0, 0.5, 0.0), &clouds);
         // battle royale: no names over anybody (they would give players away from afar)
-        if kc.is_none() && !hidden && !g.mode.solo() {
-            let friendly = a.team == my_team;
+        // (squadmates do get theirs)
+        let squadmate = g.mode.solo() && g.remotes.get(&a.id).is_some_and(|r| g.is_friend(r));
+        if kc.is_none() && !hidden && (!g.mode.solo() || squadmate) {
+            let friendly = a.team == my_team || squadmate;
             let name = g.name_of(a.id).unwrap_or("?").to_string();
             tags.push(NameTag {
                 pos: head,

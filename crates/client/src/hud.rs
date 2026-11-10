@@ -115,7 +115,9 @@ impl GameClient {
         }
         if !self.big_map {
             self.draw_world_marker(ui, view);
+            self.draw_squad_world(ui, view);
         }
+        self.draw_squad_panel(ui);
 
         // crosshair
         if self.alive
@@ -518,6 +520,176 @@ impl GameClient {
         );
     }
 
+    /// Colour of a squadmate by their place in the squad (we are yellow, like our marker).
+    pub fn mate_color(&self, id: u8) -> Color {
+        const C: [Color; 4] = [
+            Color::new(1.0, 0.85, 0.15, 1.0),
+            Color::new(0.35, 0.8, 1.0, 1.0),
+            Color::new(0.5, 1.0, 0.4, 1.0),
+            Color::new(1.0, 0.55, 0.3, 1.0),
+        ];
+        if id == self.my_id {
+            return C[0];
+        }
+        let others = self
+            .br
+            .as_ref()
+            .map(|b| {
+                b.squad
+                    .iter()
+                    .filter(|m| m.id != self.my_id)
+                    .position(|m| m.id == id)
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        C[1 + others % 3]
+    }
+
+    /// The squad on the left: names, health, who is down.
+    fn draw_squad_panel(&self, ui: &Ui) {
+        let Some(br) = &self.br else { return };
+        if br.squad.len() < 2 {
+            return;
+        }
+        let x = 16.0;
+        let mut y = screen_height() * 0.5 - 20.0;
+        for m in &br.squad {
+            let c = self.mate_color(m.id);
+            draw_rectangle(x, y, 190.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.45));
+            draw_rectangle(x, y, 5.0, 30.0, c);
+            let name: String = m.name.chars().take(16).collect();
+            ui.text(
+                &name,
+                x + 12.0,
+                y + 14.0,
+                14,
+                if m.alive { TEXT } else { MUTED },
+            );
+            let (frac, col) = if !m.alive {
+                (0.0, MUTED)
+            } else if m.downed {
+                (m.hp / 100.0, BAD)
+            } else {
+                (m.hp / MAX_HEALTH, GOOD)
+            };
+            draw_rectangle(
+                x + 12.0,
+                y + 20.0,
+                168.0,
+                5.0,
+                Color::new(0.0, 0.0, 0.0, 0.5),
+            );
+            draw_rectangle(x + 12.0, y + 20.0, 168.0 * frac.clamp(0.0, 1.0), 5.0, col);
+            if m.downed {
+                ui.text(t("ПОРАНЕНИЙ", "DOWN"), x + 120.0, y + 14.0, 12, BAD);
+            } else if !m.alive {
+                ui.text(t("вибув", "out"), x + 140.0, y + 14.0, 12, MUTED);
+            }
+            y += 34.0;
+        }
+    }
+
+    /// Squadmates' markers and the ones who are down, over the world; knocked down
+    /// ourselves: what is left of us; next to a squadmate who is down: how to pick them up.
+    fn draw_squad_world(&self, ui: &Ui, view: &View) {
+        let Some(br) = &self.br else { return };
+        let (w, h) = (screen_width(), screen_height());
+        let (eye, _, _) = self.camera();
+        for m in br.squad.iter().filter(|m| m.id != self.my_id) {
+            let c = self.mate_color(m.id);
+            if let Some(mk) = m.marker {
+                let ground = self.world.ground(mk[0], mk[1]).unwrap_or(0.0);
+                if let Some(p) = view.project(vec3(mk[0], ground + 2.0, mk[1])) {
+                    if p.x > 0.0 && p.x < w && p.y > 0.0 && p.y < h {
+                        draw_circle(p.x, p.y - 14.0, 7.0, c);
+                        draw_circle_lines(p.x, p.y - 14.0, 7.0, 2.0, BLACK);
+                        let d = vec2(mk[0] - eye.x, mk[1] - eye.z).length();
+                        let label = format!("{:.0} {}", d, t("м", "m"));
+                        let tw = ui.width(&label, 13, true);
+                        ui.shadowed(&label, p.x - tw / 2.0, p.y + 6.0, 13, c);
+                    }
+                }
+            }
+            if m.alive && m.downed {
+                let pos = Vec3::from_array(m.pos) + vec3(0.0, 1.0, 0.0);
+                if let Some(p) = view.project(pos) {
+                    if p.x > 0.0 && p.x < w && p.y > 0.0 && p.y < h {
+                        draw_circle(p.x, p.y, 11.0, BAD);
+                        draw_rectangle(p.x - 2.0, p.y - 7.0, 4.0, 14.0, WHITE);
+                        draw_rectangle(p.x - 7.0, p.y - 2.0, 14.0, 4.0, WHITE);
+                        let d = pos.distance(eye);
+                        let label = format!("{} · {:.0} {}", m.name, d, t("м", "m"));
+                        let tw = ui.width(&label, 13, true);
+                        ui.shadowed(&label, p.x - tw / 2.0, p.y + 26.0, 13, BAD);
+                    }
+                }
+            }
+        }
+        // knocked down ourselves
+        if self.downed() {
+            draw_rectangle(0.0, 0.0, w, h, Color::new(0.5, 0.0, 0.0, 0.18));
+            ui.centered(
+                t("ТЕБЕ ПОРАНЕНО", "YOU ARE DOWN"),
+                w / 2.0,
+                h * 0.62,
+                30,
+                BAD,
+            );
+            ui.centered(
+                t(
+                    "Повзи в укриття — напарник може підняти (тримаючи дію)",
+                    "Crawl to cover — a squadmate can pick you up (holding use)",
+                ),
+                w / 2.0,
+                h * 0.62 + 26.0,
+                16,
+                TEXT,
+            );
+            let bw = 260.0;
+            let (bx, by) = ((w - bw) / 2.0, h * 0.62 + 40.0);
+            draw_rectangle(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
+            draw_rectangle(bx, by, bw * (self.me.hp / 100.0).clamp(0.0, 1.0), 8.0, BAD);
+            if self.me.progress > 0.0 {
+                draw_rectangle(
+                    bx,
+                    by + 12.0,
+                    bw * self.me.progress.clamp(0.0, 1.0),
+                    8.0,
+                    GOOD,
+                );
+            }
+            return;
+        }
+        // a squadmate down right next to us
+        if self.alive {
+            if let Some(m) = br.squad.iter().find(|m| {
+                m.id != self.my_id
+                    && m.alive
+                    && m.downed
+                    && Vec3::from_array(m.pos).distance(self.body.pos) < 2.0
+            }) {
+                ui.centered(
+                    &tr!(
+                        "Тримай {} — підняти {}",
+                        "Hold {} — pick up {}",
+                        key(Action::Use),
+                        m.name
+                    ),
+                    w / 2.0,
+                    h * 0.62,
+                    20,
+                    GOOD,
+                );
+                if self.me.progress > 0.0 {
+                    let bw = 220.0;
+                    let (bx, by) = ((w - bw) / 2.0, h * 0.62 + 12.0);
+                    draw_rectangle(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
+                    draw_rectangle(bx, by, bw * self.me.progress.clamp(0.0, 1.0), 8.0, GOOD);
+                }
+            }
+        }
+    }
+
     fn draw_sab_markers(&self, ui: &Ui, view: &View) {
         let Some(b) = &self.bomb else { return };
         if self.state == MatchState::Warmup {
@@ -737,6 +909,26 @@ impl GameClient {
             let n = to_map(vec3(br.next[0], 0.0, br.next[1]));
             draw_circle_lines(n.x, n.y, br.next[2] * scale, 2.0, WHITE);
         }
+        // squadmates' markers
+        for m in self
+            .br
+            .iter()
+            .flat_map(|b| b.squad.iter())
+            .filter(|m| m.id != self.my_id)
+        {
+            if let Some(mk) = m.marker {
+                let p = to_map(vec3(mk[0], 0.0, mk[1]));
+                let r = size / 2.0 - 8.0;
+                let d = p - c;
+                let p = if d.length() > r {
+                    c + d.normalize() * r
+                } else {
+                    p
+                };
+                draw_circle(p.x, p.y, 5.0, self.mate_color(m.id));
+                draw_circle_lines(p.x, p.y, 5.0, 1.5, BLACK);
+            }
+        }
         // the marker (kept on the edge when it is further than the minimap shows)
         if let Some(mk) = self.marker {
             let p = to_map(vec3(mk.x, 0.0, mk.y));
@@ -811,8 +1003,13 @@ impl GameClient {
                 continue;
             }
             let p = to_map(r.pos);
-            // battle royale: nobody is on our side
-            if r.team == self.team && !self.mode.solo() {
+            // battle royale: only the squad is on our side
+            if self.is_friend(r) && r.downed {
+                draw_circle(p.x, p.y, 6.0, BLACK);
+                draw_circle(p.x, p.y, 5.0, BAD);
+                draw_rectangle(p.x - 1.0, p.y - 3.5, 2.0, 7.0, WHITE);
+                draw_rectangle(p.x - 3.5, p.y - 1.0, 7.0, 2.0, WHITE);
+            } else if self.is_friend(r) {
                 let a = r.yaw - yaw;
                 let d = vec2(-a.sin(), -a.cos());
                 let perp = vec2(-d.y, d.x);
@@ -1519,6 +1716,23 @@ impl GameClient {
         if let Some(mk) = self.marker {
             let p = to_map(mk.x, mk.y);
             draw_marker_pin(p, 1.0);
+        }
+        for m in br.squad.iter().filter(|m| m.id != self.my_id) {
+            if let Some(mk) = m.marker {
+                let p = to_map(mk[0], mk[1]);
+                draw_circle(p.x, p.y - 12.0, 7.0, self.mate_color(m.id));
+                draw_circle_lines(p.x, p.y - 12.0, 7.0, 2.0, BLACK);
+            }
+            if m.alive {
+                let p = to_map(m.pos[0], m.pos[2]);
+                draw_circle(p.x, p.y, 6.0, BLACK);
+                draw_circle(
+                    p.x,
+                    p.y,
+                    4.5,
+                    if m.downed { BAD } else { self.mate_color(m.id) },
+                );
+            }
         }
         let gl = unsafe { get_internal_gl() }.quad_gl;
         gl.scissor(None);
@@ -2918,7 +3132,7 @@ fn draw_cause_icon(c: Cause, x: f32, cy: f32, h: f32, a: f32) -> f32 {
             }
             w
         }
-        Cause::Fall | Cause::World | Cause::Zone => {
+        Cause::Fall | Cause::World | Cause::Zone | Cause::Bleed => {
             // cartoon skull
             let (sx, sy) = (x + h * 0.5, cy);
             draw_circle(sx, sy - h * 0.05, h * 0.42, fg);

@@ -48,6 +48,9 @@ pub struct Remote {
     /// When we first saw this player reloading.
     pub reload_since: Option<f64>,
     pub vel: Vec3,
+    /// Battle royale squad (0 = on their own) and knocked down.
+    pub squad: u8,
+    pub downed: bool,
 }
 
 pub struct Line {
@@ -134,6 +137,8 @@ pub struct GameClient {
     pub marker: Option<Vec2>,
     /// Before the match: (players ready, players, am I ready).
     pub ready: Option<(u8, u8, bool)>,
+    /// Battle royale squad (0 = on our own).
+    pub squad: u8,
     pub ents: Vec<EntSnap>,
     pub scoreboard: Vec<ScoreRow>,
     latest_tick: u32,
@@ -370,6 +375,7 @@ impl GameClient {
             big_map: false,
             marker: None,
             ready: None,
+            squad: 0,
             ents: Vec::new(),
             scoreboard: Vec::new(),
             latest_tick: 0,
@@ -1008,6 +1014,7 @@ impl GameClient {
         for p in s.players {
             if p.id == self.my_id {
                 self.team = p.team;
+                self.squad = p.squad;
                 continue;
             }
             seen.push(p.id);
@@ -1023,6 +1030,8 @@ impl GameClient {
                 silent: false,
                 chute: 0,
                 protected: false,
+                squad: p.squad,
+                downed: false,
                 alive: p.alive,
                 phase: 0.0,
                 walk: 0.0,
@@ -1520,7 +1529,7 @@ impl GameClient {
                 // where the target will be when the bullet gets there
                 let t_arrive = i as f32 * toon_shared::ballistics::STEP;
                 for r in self.remotes.values() {
-                    if !r.alive || r.team == self.team && !self.mode.solo() {
+                    if !r.alive || self.is_friend(r) {
                         continue;
                     }
                     let at = r.pos + r.vel * t_arrive;
@@ -1673,9 +1682,12 @@ impl GameClient {
                 if inside && is_mouse_button_pressed(MouseButton::Left) {
                     let k = img.size / side;
                     self.marker = Some(img.origin + vec2(mx - x0, my - y0) * k);
+                    // the squad sees it too
+                    self.net.send(C2S::Marker(self.marker.map(|m| [m.x, m.y])));
                 }
                 if is_mouse_button_pressed(MouseButton::Right) {
                     self.marker = None;
+                    self.net.send(C2S::Marker(None));
                 }
             }
         }
@@ -1763,16 +1775,22 @@ impl GameClient {
             if key(Action::Left) {
                 right -= 1.0;
             }
-            let jump = pressed(Action::Jump);
+            let downed = self.downed();
+            let jump = pressed(Action::Jump) && !downed;
             if jump {
                 self.want_stance = Stance::Stand;
             }
-            let ads_held = can_act && binds::down(Action::Aim);
+            // knocked down: crawling, no aiming, no sprinting
+            if downed {
+                self.want_stance = Stance::Prone;
+            }
+            let ads_held = can_act && binds::down(Action::Aim) && !downed;
             let reloading = self.reload_until.is_some();
             if self.winded && (!key(Action::Sprint) || self.stamina >= self.sprint_max() * 0.35) {
                 self.winded = false;
             }
             let want_sprint = key(Action::Sprint)
+                && !downed
                 && fwd > 0.0
                 && self.body.stance == Stance::Stand
                 && !ads_held
@@ -1946,7 +1964,8 @@ impl GameClient {
                 }
                 // fall through with attacks blocked below
             }
-            let shielded = self.is_protected();
+            // (knocked down: no attacks of any kind)
+            let shielded = self.is_protected() || self.downed();
             let trigger = if def.auto { trig_down } else { trig_pressed };
             let raising = now - self.sprint_end < def.sprint_out_time as f64;
             let busy = shielded
@@ -2305,6 +2324,8 @@ impl GameClient {
                 0
             };
             r.protected = sb.alive && sb.stance & stance_bits::PROTECTED != 0;
+            r.downed = sb.alive && sb.stance & stance_bits::DOWNED != 0;
+            r.squad = sb.squad;
             r.weapon = sb.weapon;
             r.flags = sb.flags;
             r.team = sb.team;
@@ -2422,6 +2443,20 @@ impl GameClient {
                 crate::ui::MUTED,
             );
         }
+    }
+
+    /// On our side: our team, or in the battle royale our squad.
+    pub fn is_friend(&self, r: &Remote) -> bool {
+        if self.mode.solo() {
+            self.squad != 0 && r.squad == self.squad
+        } else {
+            r.team == self.team
+        }
+    }
+
+    /// Knocked down (battle royale squads): crawling, no shooting.
+    pub fn downed(&self) -> bool {
+        self.alive && self.me.downed
     }
 
     /// The final killcam (end of a round or match) is about to play.

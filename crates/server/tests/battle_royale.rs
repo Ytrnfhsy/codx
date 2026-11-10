@@ -7,7 +7,7 @@ use toon_shared::consts::TICK_DT;
 use toon_shared::map::MapId;
 use toon_shared::physics::Chute;
 use toon_shared::protocol::{MatchState, C2S, S2C};
-use toon_shared::weapons::{Cause, WeaponClass, DEFAULT_CLASSES};
+use toon_shared::weapons::{Cause, WeaponClass, WeaponId, DEFAULT_CLASSES};
 use toon_shared::{Mode, Team};
 
 #[test]
@@ -567,4 +567,152 @@ fn the_match_waits_for_ready_players() {
     g.handle(me, C2S::Ready(true));
     run(&mut g, 2.0);
     assert_ne!(g.state, MatchState::Warmup, "ready, but nothing started");
+}
+
+/// Squads of two: squadmates do not hurt each other; a lethal hit knocks you down while a
+/// squadmate stands; holding the use key next to you picks you up; left alone you bleed
+/// out (the one who knocked you down gets the kill); a squad with nobody standing is out.
+#[test]
+fn squads_knock_down_and_revive() {
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir().join("tw-br7").to_string_lossy().into(),
+        ..Default::default()
+    };
+    // (bots fill up to six players, the two of us included)
+    cfg.br.bots = 6;
+    cfg.br.max_players = 6;
+    cfg.br.squad = 2;
+    let mut g = Game::new(cfg);
+    g.rng = toon_shared::rng::Rng::new(3);
+    g.change_map(MapId::Island, Mode::Br);
+    let join = |g: &mut Game, port: u16| {
+        let id = g
+            .connect(
+                format!("127.0.0.1:{port}").parse().unwrap(),
+                "Гравець",
+                "",
+                toon_shared::consts::PROTOCOL_VERSION,
+            )
+            .unwrap();
+        g.handle(id, C2S::JoinTeam(None));
+        id
+    };
+    let me = join(&mut g, 5009);
+    let mate = join(&mut g, 5010);
+    let step = |g: &mut Game, secs: f32| {
+        for _ in 0..(secs / TICK_DT).max(1.0) as usize {
+            // both hang in the sky, far from the bots
+            for (id, x) in [(me, 0.0), (mate, 1.0)] {
+                if let Some(p) = g.pm(id) {
+                    if p.alive {
+                        p.body.pos = glam::vec3(x, 400.0, 0.0);
+                        p.body.vel = glam::Vec3::ZERO;
+                        p.body.chute = Chute::None;
+                        p.protected_until = 0.0;
+                    }
+                }
+            }
+            g.tick(TICK_DT);
+            g.outbox.clear();
+            g.shots.clear();
+        }
+    };
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        step(&mut g, TICK_DT);
+        if g.br.running {
+            break;
+        }
+    }
+    assert!(g.br.running);
+    let (sq_me, sq_mate) = (g.p(me).unwrap().squad, g.p(mate).unwrap().squad);
+    assert!(
+        sq_me != 0 && sq_me == sq_mate,
+        "the two real players play together"
+    );
+    for s in 1..=3u8 {
+        let n = g.players.iter().flatten().filter(|p| p.squad == s).count();
+        assert_eq!(n, 2, "squad {s} has {n}");
+    }
+    g.handle(me, C2S::BrJump);
+    g.handle(mate, C2S::BrJump);
+    step(&mut g, 0.5);
+    let enemy = g
+        .players
+        .iter()
+        .flatten()
+        .find(|p| p.is_bot())
+        .map(|p| p.id)
+        .unwrap();
+    let at = glam::Vec3::ZERO;
+
+    // squadmates do not hurt each other
+    g.damage(me, Some(mate), 50.0, Cause::Weapon(WeaponId::M4), false, at);
+    assert_eq!(g.p(me).unwrap().hp, 100.0);
+
+    // a lethal hit knocks down
+    g.damage(
+        me,
+        Some(enemy),
+        500.0,
+        Cause::Weapon(WeaponId::M4),
+        false,
+        at,
+    );
+    let p = g.p(me).unwrap();
+    assert!(p.alive && p.downed, "knocked down, not dead");
+    assert!(g.snapshot_for(me).me.downed);
+    // no shooting while down
+    let mag = g.p(me).unwrap().weapon().mag;
+    g.handle(
+        me,
+        C2S::Fire {
+            weapon: g.p(me).unwrap().weapon().id,
+            origin: g.p(me).unwrap().eye().to_array(),
+            dirs: vec![[1.0, 0.0, 0.0]],
+        },
+    );
+    assert_eq!(g.p(me).unwrap().weapon().mag, mag, "fired while down");
+
+    // the squadmate holds the use key next to us: picked up after five seconds
+    g.pm(mate).unwrap().flags = toon_shared::protocol::flags::USE;
+    step(&mut g, 5.4);
+    let p = g.p(me).unwrap();
+    assert!(p.alive && !p.downed, "not picked up");
+    assert!((p.hp - 30.0).abs() < 0.5, "hp {}", p.hp);
+    g.pm(mate).unwrap().flags = 0;
+
+    // knocked down again and left alone: bleeds out, the kill goes to the enemy
+    let kills = g.p(enemy).unwrap().kills;
+    g.damage(
+        me,
+        Some(enemy),
+        500.0,
+        Cause::Weapon(WeaponId::M4),
+        false,
+        at,
+    );
+    assert!(g.p(me).unwrap().downed);
+    step(&mut g, 42.0);
+    assert!(!g.p(me).unwrap().alive, "did not bleed out");
+    assert_eq!(
+        g.p(enemy).unwrap().kills,
+        kills + 1,
+        "the knock-down earns the kill"
+    );
+
+    // the squadmate is knocked down with nobody else standing: out at once
+    g.damage(
+        mate,
+        Some(enemy),
+        500.0,
+        Cause::Weapon(WeaponId::M4),
+        false,
+        at,
+    );
+    step(&mut g, 0.2);
+    assert!(
+        !g.p(mate).unwrap().alive,
+        "a squad with nobody standing is out"
+    );
 }
