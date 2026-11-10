@@ -646,6 +646,10 @@ async fn amain(args: Args) {
                         g.overlay = match g.overlay {
                             Overlay::Edit(_) => Overlay::Class,
                             Overlay::Settings => Overlay::Pause,
+                            Overlay::Video => {
+                                settings.save();
+                                Overlay::Settings
+                            }
                             Overlay::Controls => {
                                 g.binds_editor.close();
                                 Overlay::Settings

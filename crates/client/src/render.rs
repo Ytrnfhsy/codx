@@ -206,11 +206,7 @@ pub fn render_world(
     view: &View,
 ) -> Vec<NameTag> {
     let fog = fog_color(g);
-    let (fog_near, fog_far) = if g.level.terrain {
-        crate::level::TERRAIN_FOG
-    } else {
-        crate::level::ARENA_FOG
-    };
+    let (fog_near, fog_far) = fog_range(g.level.terrain, settings);
     if settings.shadows {
         // big maps: the shadow map covers the area around the camera and follows it
         let (lo, hi) = if g.level.terrain {
@@ -320,7 +316,7 @@ pub fn render_world(
     let px = 2.0 * (view.fovy * 0.5).tan()
         / (screen_height() * settings.render_scale.clamp(0.4, 1.0)).max(1.0);
     let grow = if settings.outlines { px * 0.9 } else { 0.0 };
-    g.level.draw(mats, view.pos, &view.matrix, grow);
+    g.level.draw(mats, view.pos, &view.matrix, grow, fog_far);
 
     // dynamic objects
     let mut m = std::mem::take(&mut g.frame_mesh);
@@ -345,7 +341,8 @@ pub fn render_world(
     let cam = g.camera().0;
     let far = |p: &[f32; 3]| {
         let d = Vec3::from_array(*p) - cam;
-        d.x * d.x + d.z * d.z > LOOT_DRAW * LOOT_DRAW
+        let r = LOOT_DRAW * settings.view_distance.clamp(0.5, 1.0);
+        d.x * d.x + d.z * d.z > r * r
     };
     for e in ents {
         match e {
@@ -587,7 +584,7 @@ pub fn render_world(
     mats.draw_toon(&m);
 
     // rivers, lakes and the sea
-    g.level.draw_water(mats, view.pos);
+    g.level.draw_water(mats, view.pos, fog_far);
     // the battle royale zone: a shimmering wall round the safe circle
     if let Some(br) = g.br.as_ref().filter(|b| b.zone[2] > 0.0 && kc.is_none()) {
         let (c, r) = (vec2(br.zone[0], br.zone[1]), br.zone[2]);
@@ -601,7 +598,7 @@ pub fn render_world(
             let p1 = c + vec2(a1.cos(), a1.sin()) * r;
             // only the part that is not lost in the fog
             let mid = (p0 + p1) * 0.5;
-            if mid.distance(vec2(view.pos.x, view.pos.z)) > crate::level::TERRAIN_FOG.1 + 60.0 {
+            if mid.distance(vec2(view.pos.x, view.pos.z)) > fog_far + 60.0 {
                 continue;
             }
             wall.add_quad(
@@ -640,11 +637,18 @@ pub fn render_world(
 }
 
 fn shadow_res(settings: &Settings) -> u32 {
-    if settings.render_scale < 0.75 {
-        1024
+    settings.shadow_res()
+}
+
+/// Where the fog starts and where it hides everything, by the view distance setting.
+pub fn fog_range(terrain: bool, settings: &Settings) -> (f32, f32) {
+    let (near, far) = if terrain {
+        crate::level::TERRAIN_FOG
     } else {
-        2048
-    }
+        crate::level::ARENA_FOG
+    };
+    let k = settings.view_distance.clamp(0.5, 1.0);
+    (near * k, far * k)
 }
 
 fn blob_shadow(m: &mut crate::mesh::MeshBuilder, c: Vec3, r: f32) {

@@ -433,7 +433,14 @@ impl Level {
     /// thinner than a pixel and break up into flickering dashes.
     /// `outline_grow`: metres per metre of distance that keep an outline about one pixel
     /// wide (0 = no outlines).
-    pub fn draw(&self, mats: &crate::mesh::Materials, cam: Vec3, matrix: &Mat4, outline_grow: f32) {
+    pub fn draw(
+        &self,
+        mats: &crate::mesh::Materials,
+        cam: Vec3,
+        matrix: &Mat4,
+        outline_grow: f32,
+        fog_far: f32,
+    ) {
         let outlines = outline_grow > 0.0;
         let fade = (OUTLINE_FADE.0, OUTLINE_FADE.1, outline_grow);
         if !self.terrain {
@@ -450,7 +457,7 @@ impl Level {
             gl_use_default_material();
             return;
         }
-        let far = TERRAIN_FOG.1 + 10.0;
+        let far = fog_far + 10.0;
         let shown: Vec<(&Tile, f32)> = self
             .tiles
             .iter()
@@ -487,14 +494,14 @@ impl Level {
     }
 
     /// Draws the water surfaces (after everything opaque).
-    pub fn draw_water(&self, mats: &crate::mesh::Materials, cam: Vec3) {
+    pub fn draw_water(&self, mats: &crate::mesh::Materials, cam: Vec3, fog_far: f32) {
         if !self.terrain {
             return;
         }
         gl_use_material(&mats.fx);
         for t in &self.tiles {
             if let Some(w) = &t.water {
-                if Self::dist(t, cam) < TERRAIN_FOG.1 + 10.0 {
+                if Self::dist(t, cam) < fog_far + 10.0 {
                     w.draw();
                 }
             }

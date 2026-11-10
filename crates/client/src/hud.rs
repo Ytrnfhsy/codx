@@ -2139,9 +2139,10 @@ impl GameClient {
             }
             Overlay::Settings => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
-                let pw = 480.0;
-                let (x, y) = ((w - pw) / 2.0, h * 0.18);
-                ui.panel(x, y, pw, 570.0);
+                let pw = 560.0f32.min(w - 20.0);
+                let ph = crate::menu::SETTINGS_H + 110.0;
+                let (x, y) = ((w - pw) / 2.0, ((h - ph) / 2.0).max(0.0));
+                ui.panel(x, y, pw, ph);
                 ui.bold(
                     t("Налаштування", "Settings"),
                     x + 24.0,
@@ -2150,12 +2151,25 @@ impl GameClient {
                     ACCENT,
                 );
                 crate::menu::settings_widgets(ui, settings, x + 24.0, y + 90.0, pw - 48.0);
-                if ui.button2(t("Клавіші", "Controls"), x + 24.0, y + 510.0, 156.0, 44.0) {
+                let by = y + ph - 70.0;
+                if ui.button2(t("Відео", "Video"), x + 24.0, by, 130.0, 44.0) {
+                    self.overlay = Overlay::Video;
+                }
+                if ui.button2(t("Клавіші", "Controls"), x + 162.0, by, 130.0, 44.0) {
                     self.overlay = Overlay::Controls;
                 }
-                if ui.button(t("Готово", "Done"), x + pw - 180.0, y + 510.0, 156.0, 44.0) {
+                if ui.button(t("Готово", "Done"), x + pw - 160.0, by, 136.0, 44.0) {
                     settings.save();
                     self.overlay = Overlay::Pause;
+                }
+                None
+            }
+            Overlay::Video => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                let pw = 600.0f32.min(w - 20.0);
+                let (x, y) = ((w - pw) / 2.0, (h - crate::menu::VIDEO_H).max(0.0) / 2.0);
+                if crate::menu::video_page(ui, settings, x, y, pw) {
+                    self.overlay = Overlay::Settings;
                 }
                 None
             }

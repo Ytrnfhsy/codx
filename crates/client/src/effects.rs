@@ -33,6 +33,8 @@ struct Tracer {
 }
 
 pub struct Effects {
+    /// Most particles at once (the effects setting).
+    pub cap: usize,
     parts: Vec<Particle>,
     tracers: Vec<Tracer>,
     rng: Rng,
@@ -41,6 +43,7 @@ pub struct Effects {
 impl Effects {
     pub fn new() -> Effects {
         Effects {
+            cap: 1500,
             parts: Vec::new(),
             tracers: Vec::new(),
             rng: Rng::new(99),
@@ -56,7 +59,7 @@ impl Effects {
     }
 
     fn push(&mut self, p: Particle) {
-        if self.parts.len() < 1500 {
+        if self.parts.len() < self.cap {
             self.parts.push(p);
         }
     }

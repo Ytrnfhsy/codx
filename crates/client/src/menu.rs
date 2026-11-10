@@ -14,6 +14,7 @@ pub enum Page {
     Host,
     Browser,
     Settings,
+    Video,
     Controls,
 }
 
@@ -99,61 +100,13 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
     let col2 = x + w * 0.52;
     let row = |k: usize| y + 148.0 + k as f32 * 32.0;
     ui.toggle(t("Інвертувати Y", "Invert Y"), &mut s.invert_y, x, row(0));
-    ui.toggle(t("Тіні", "Shadows"), &mut s.shadows, col2, row(0));
-    ui.toggle(t("FPS і пінг", "FPS and ping"), &mut s.show_fps, x, row(1));
-    ui.toggle(t("Текстури", "Textures"), &mut s.textures, col2, row(1));
-    ui.toggle(t("Контури", "Outlines"), &mut s.outlines, x, row(2));
-    ui.toggle(
-        t("Згладжування країв", "Anti-aliasing"),
-        &mut s.msaa,
-        col2,
-        row(2),
-    );
-    ui.toggle(
-        t("Повний екран", "Full screen"),
-        &mut s.fullscreen,
-        x,
-        row(3),
-    );
     ui.toggle(
         t("Згладжування миші", "Mouse smoothing"),
         &mut s.mouse_smoothing,
         col2,
-        row(3),
+        row(0),
     );
-    s.render_scale = (ui.slider(
-        t(
-            "Масштаб рендеру (менше = швидше)",
-            "Render scale (lower = faster)",
-        ),
-        s.render_scale * 100.0,
-        40.0,
-        100.0,
-        x,
-        y + 304.0,
-        w,
-        "{}%",
-    ) / 5.0)
-        .round()
-        * 5.0
-        / 100.0;
-    let was = s.vsync;
-    ui.toggle(
-        t("Верт. синхронізація", "Vertical sync"),
-        &mut s.vsync,
-        x,
-        y + 340.0,
-    );
-    if s.vsync != was || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed)
-    {
-        ui.text(
-            t("(після перезапуску)", "(after a restart)"),
-            x + 36.0,
-            y + 384.0,
-            14,
-            ACCENT,
-        );
-    }
+    ui.toggle(t("FPS і пінг", "FPS and ping"), &mut s.show_fps, x, row(1));
     let li = Lang::ALL.iter().position(|l| *l == s.lang).unwrap_or(0);
     // in the panel's title row, top right
     let d = ui.stepper(
@@ -167,7 +120,148 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         s.lang = Lang::ALL[((li as i32 + d).rem_euclid(Lang::ALL.len() as i32)) as usize];
         toon_shared::lang::set(s.lang);
     }
-    // the FPS cap only matters without vsync: next to its switch
+}
+
+/// Height of the general settings panel.
+pub const SETTINGS_H: f32 = 300.0;
+
+/// Height of the Video panel.
+pub const VIDEO_H: f32 = 600.0;
+
+/// The Video page in a panel at (x, y), `pw` wide (its height is `VIDEO_H`): everything
+/// that trades looks for speed, with presets for a quick start. Returns true when done.
+pub fn video_page(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, pw: f32) -> bool {
+    use crate::settings::Preset;
+    ui.panel(x, y, pw, VIDEO_H);
+    ui.bold(t("Відео", "Video"), x + 24.0, y + 40.0, 26, ACCENT);
+    let (x0, w) = (x + 24.0, pw - 48.0);
+    let col2 = x0 + w * 0.52;
+
+    // presets
+    let current = s.preset();
+    ui.text(
+        &format!(
+            "{}: {}",
+            t("Якість", "Quality"),
+            current.map_or(t("своя", "custom"), |p| p.name())
+        ),
+        x0,
+        y + 76.0,
+        16,
+        MUTED,
+    );
+    let bw = (w - 3.0 * 8.0) / 4.0;
+    for (k, p) in Preset::ALL.into_iter().enumerate() {
+        let bx = x0 + k as f32 * (bw + 8.0);
+        let hit = if current == Some(p) {
+            ui.button(p.name(), bx, y + 86.0, bw, 40.0)
+        } else {
+            ui.button2(p.name(), bx, y + 86.0, bw, 40.0)
+        };
+        if hit {
+            s.apply_preset(p);
+        }
+    }
+
+    // resolution and distance
+    let y1 = y + 166.0;
+    s.render_scale = (ui.slider(
+        t(
+            "Масштаб рендеру (менше = швидше)",
+            "Render scale (lower = faster)",
+        ),
+        s.render_scale * 100.0,
+        40.0,
+        100.0,
+        x0,
+        y1,
+        w,
+        "{}%",
+    ) / 5.0)
+        .round()
+        * 5.0
+        / 100.0;
+    s.view_distance = (ui.slider(
+        t(
+            "Дальність промальовування (великі карти)",
+            "View distance (big maps)",
+        ),
+        s.view_distance * 100.0,
+        50.0,
+        100.0,
+        x0,
+        y1 + 56.0,
+        w,
+        "{}%",
+    ) / 5.0)
+        .round()
+        * 5.0
+        / 100.0;
+
+    // switches
+    let row = |k: usize| y1 + 92.0 + k as f32 * 32.0;
+    ui.toggle(
+        t("Повний екран", "Full screen"),
+        &mut s.fullscreen,
+        x0,
+        row(0),
+    );
+    let was = s.vsync;
+    ui.toggle(
+        t("Верт. синхронізація", "Vertical sync"),
+        &mut s.vsync,
+        col2,
+        row(0),
+    );
+    ui.toggle(t("Тіні", "Shadows"), &mut s.shadows, x0, row(1));
+    ui.toggle(t("Текстури", "Textures"), &mut s.textures, col2, row(1));
+    ui.toggle(t("Контури", "Outlines"), &mut s.outlines, x0, row(2));
+    ui.toggle(
+        t("Згладжування країв", "Anti-aliasing"),
+        &mut s.msaa,
+        col2,
+        row(2),
+    );
+
+    // steppers
+    let y2 = row(3) + 30.0;
+    let sw = w * 0.48;
+    if s.shadows {
+        let names = [
+            t("низька", "low"),
+            t("середня", "medium"),
+            t("висока", "high"),
+        ];
+        let i = s.shadow_quality.clamp(1, 3) as i32 - 1;
+        let d = ui.stepper(
+            t("Якість тіней", "Shadow quality"),
+            names[i as usize],
+            x0,
+            y2,
+            sw,
+        );
+        if d != 0 {
+            s.shadow_quality = ((i + d).rem_euclid(3) + 1) as u8;
+        }
+    }
+    let fx_names = [
+        t("мало", "few"),
+        t("звичайно", "normal"),
+        t("багато", "many"),
+    ];
+    let i = s.effects.min(2) as i32;
+    let d = ui.stepper(
+        t("Ефекти (дим, пил, іскри)", "Effects (smoke, dust, sparks)"),
+        fx_names[i as usize],
+        col2,
+        y2,
+        x0 + w - col2,
+    );
+    if d != 0 {
+        s.effects = (i + d).rem_euclid(3) as u8;
+    }
+    // the FPS cap only matters without vsync
+    let y3 = y2 + 62.0;
     if !s.vsync {
         const LIMITS: [u32; 6] = [60, 120, 144, 165, 240, 0];
         let i = LIMITS.iter().position(|l| *l == s.fps_limit).unwrap_or(2);
@@ -176,17 +270,41 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
         } else {
             format!("{} FPS", s.fps_limit)
         };
-        let d = ui.stepper(
-            t("Обмеження FPS", "FPS limit"),
-            &label,
-            col2,
-            y + 352.0,
-            x + w - col2,
-        );
+        let d = ui.stepper(t("Обмеження FPS", "FPS limit"), &label, x0, y3, sw);
         if d != 0 {
             s.fps_limit = LIMITS[((i as i32 + d).rem_euclid(LIMITS.len() as i32)) as usize];
         }
     }
+    if s.vsync != was || s.vsync != crate::VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        ui.text(
+            t(
+                "Синхронізація зміниться після перезапуску",
+                "Vertical sync changes after a restart",
+            ),
+            x0,
+            y3 + 56.0,
+            14,
+            ACCENT,
+        );
+    }
+
+    let by = y + VIDEO_H - 60.0;
+    ui.text(
+        t(
+            "Слабкий ПК: «Низька», масштаб 50–70 %",
+            "Weak PC: «Low», render scale 50–70 %",
+        ),
+        x0,
+        by + 28.0,
+        14,
+        MUTED,
+    );
+    if ui.button(t("Готово", "Done"), x + pw - 200.0, by, 176.0, 44.0) {
+        s.save();
+        return true;
+    }
+    false
 }
 
 /// A ★ button: gold when the server is a favourite, a hollow ☆ when not.
@@ -706,7 +824,7 @@ pub fn draw_menu(
             }
         }
         Page::Settings => {
-            ui.panel(x, y, pw, 550.0);
+            ui.panel(x, y, pw, SETTINGS_H + 110.0);
             ui.bold(
                 t("Налаштування", "Settings"),
                 x + 24.0,
@@ -715,18 +833,24 @@ pub fn draw_menu(
                 ACCENT,
             );
             settings_widgets(ui, s, x + 24.0, y + 90.0, pw - 48.0);
-            if ui.button2(t("Клавіші", "Controls"), x + 24.0, y + 490.0, 176.0, 44.0) {
+            let by = y + SETTINGS_H + 40.0;
+            if ui.button2(t("Відео", "Video"), x + 24.0, by, 140.0, 44.0) {
+                st.page = Page::Video;
+            }
+            if ui.button2(t("Клавіші", "Controls"), x + 172.0, by, 140.0, 44.0) {
                 st.page = Page::Controls;
             }
-            if ui.button(
-                t("Зберегти", "Save"),
-                x + pw - 200.0,
-                y + 490.0,
-                176.0,
-                44.0,
-            ) {
+            if ui.button(t("Зберегти", "Save"), x + pw - 176.0, by, 152.0, 44.0) {
                 s.save();
                 st.page = Page::Main;
+            }
+        }
+        Page::Video => {
+            let pw = 600.0f32.min(w - 20.0);
+            let (vx, vy) = ((w - pw) / 2.0, (h - VIDEO_H).max(0.0) / 2.0);
+            if video_page(ui, s, vx, vy, pw) || is_key_pressed(KeyCode::Escape) {
+                s.save();
+                st.page = Page::Settings;
             }
         }
         Page::Controls => {

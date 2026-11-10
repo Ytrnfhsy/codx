@@ -90,6 +90,8 @@ pub enum Overlay {
     /// The ground robot: steer it or let it fight on its own.
     RobotMode,
     Settings,
+    /// Video settings (from the settings page).
+    Video,
     /// Key bindings.
     Controls,
     /// Battle royale: picking a character.
@@ -1595,6 +1597,7 @@ impl GameClient {
 
     /// Per-frame update. `input_enabled` is false while menus are open.
     pub fn update(&mut self, dt: f32, settings: &Settings, audio: Option<&Audio>) {
+        self.fx.cap = [350, 1500, 3000][settings.effects.min(2) as usize];
         if settings.skin != self.sent_skin {
             self.sent_skin = settings.skin;
             self.net.send(C2S::SetSkin(settings.skin));
