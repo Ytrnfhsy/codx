@@ -527,6 +527,10 @@ pub struct Materials {
     pub fx: Material,
     /// Writes packed depth for the sun's shadow map.
     pub depth: Material,
+    /// Rivers, lakes and the sea.
+    pub water: Material,
+    /// Colour grading of the finished picture.
+    pub post: Material,
     /// Detail texture atlas (see `textures.rs`).
     pub atlas: Texture2D,
     white: Texture2D,
@@ -543,12 +547,17 @@ varying highp vec3 vWorld;
 varying mediump vec3 vN;
 varying mediump vec2 vTile;
 varying highp vec3 vShadow;
+// x: how much thinner the haze is here (high above the camera), y: time, z: how much
+// this point lies towards the sun as seen from the camera (water glints there)
+varying mediump vec3 vMisc;
 uniform mat4 Model;
 uniform mat4 Projection;
 uniform vec3 CamPos;
+uniform vec3 SunDir;
 uniform mat4 SunMatrix;
 uniform vec4 Params;
-// x: how far along the normal the shadow lookup moves (about a shadow-map texel)
+// x: how far along the normal the shadow lookup moves (about a shadow-map texel),
+// y: time in seconds (leaves in the wind, water)
 uniform vec2 Extra;
 // pushes vertices this far away from the camera (the level's outlines: where two walls
 // meet, an outline pokes out in front of the neighbour and draws a seam line)
@@ -557,6 +566,12 @@ uniform float Push;
 uniform float Grow;
 void main() {
     vec4 wp = Model * vec4(position, 1.0);
+    if (normal.w > 0.5) {
+        // leaves in the wind: the whole crown leans a little, each one in its own time
+        float t = Extra.y;
+        wp.x += sin(t * 1.6 + wp.x * 0.35 + wp.z * 0.27) * 0.07;
+        wp.z += cos(t * 1.3 + wp.x * 0.21 + wp.z * 0.4) * 0.05;
+    }
     if (Push > 0.0) {
         float d = length(wp.xyz - CamPos);
         wp.xyz += normal.xyz * (Grow * d);
@@ -571,6 +586,12 @@ void main() {
     // offset along the normal so surfaces don't shadow themselves
     vec4 sp = SunMatrix * vec4(wp.xyz + normal.xyz * Extra.x, 1.0);
     vShadow = sp.xyz * 0.5 + 0.5;
+    vec2 to = wp.xz - CamPos.xz;
+    vMisc = vec3(
+        clamp((wp.y - CamPos.y - 4.0) / 90.0, 0.0, 1.0),
+        Extra.y,
+        max(dot(to / (length(to) + 0.001), SunDir.xz / (length(SunDir.xz) + 0.001)), 0.0)
+    );
 }
 "#;
 
@@ -586,6 +607,7 @@ varying highp vec3 vWorld;
 varying mediump vec3 vN;
 varying mediump vec2 vTile;
 varying highp vec3 vShadow;
+varying mediump vec3 vMisc;
 uniform sampler2D Texture;
 uniform sampler2D ShadowMap;
 uniform vec4 FogColor;
@@ -634,10 +656,13 @@ void main() {
         }
         // cool, bluish toon shade (sun-facing faces drop more, like the baked bands)
         vec3 shade = ndl > 0.55 ? vec3(0.66, 0.69, 0.84) : vec3(0.8, 0.82, 0.93);
-        col *= mix(shade, vec3(1.0), lit);
+        // (and a touch of warmth where the sun does reach)
+        col *= mix(shade, vec3(1.04, 1.0, 0.94), lit);
     }
     col *= Tint;
     float f = clamp((fogd - FogRange.x) / (FogRange.y - FogRange.x), 0.0, 1.0);
+    // the haze lies low: hilltops and roofs above the eye stand clearer
+    f *= 1.0 - 0.4 * vMisc.x;
     float a = color.a;
     if (Fade.y > Fade.x) {
         // thin far-away outlines would break into flickering dashes
@@ -674,7 +699,84 @@ void main() {
 }
 "#;
 
+/// Water: ripples that move, glints towards the sun, foam along the shore. The vertex
+/// colour is the water's own (lighter in the shallows), `texcoord.x` how close the shore is.
+const WATER_FS: &str = r#"#version 100
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+varying lowp vec4 color;
+varying highp float fogd;
+varying highp vec3 vWorld;
+varying mediump vec2 vTile;
+varying mediump vec3 vMisc;
+uniform vec4 FogColor;
+uniform vec2 FogRange;
+uniform vec3 Tint;
+void main() {
+    float t = vMisc.y;
+    vec2 p = vWorld.xz;
+    float w1 = sin(p.x * 0.9 + t * 1.3) * sin(p.y * 0.7 - t * 1.1);
+    float w2 = sin((p.x + p.y) * 2.3 + t * 2.1);
+    float w3 = sin(p.x * 5.1 - t * 2.7) * sin(p.y * 4.3 + t * 2.3);
+    float ripple = w1 * 0.55 + w2 * 0.3 + w3 * 0.15;
+    // (far away the ripples are smaller than a pixel: they would only shimmer)
+    float near = 1.0 - clamp((fogd - 40.0) / 120.0, 0.0, 1.0);
+    vec3 col = color.rgb * (1.0 + ripple * 0.07 * near);
+    // toon glints: hard little highlights on the crests, on the sunny side
+    float glint = step(0.72, ripple) * vMisc.z * vMisc.z * near;
+    col += vec3(0.5, 0.48, 0.4) * glint;
+    // foam: a white line that breathes in and out along the shore
+    float shore = vTile.x + 0.13 * sin(t * 1.4 + p.x * 1.7 + p.y * 1.3) - 0.1;
+    float foam = step(0.62, shore) * (0.55 + 0.45 * step(0.0, w2));
+    col = mix(col, vec3(0.96, 0.98, 1.0), foam * 0.85);
+    float a = mix(color.a, 0.95, foam);
+    col *= Tint;
+    float f = clamp((fogd - FogRange.x) / (FogRange.y - FogRange.x), 0.0, 1.0);
+    gl_FragColor = vec4(mix(col, FogColor.rgb, f), a);
+}
+"#;
+
+/// The finished 3D picture on its way to the screen: a little more contrast and colour,
+/// warm lights and cool shadows, darker corners.
+const POST_VS: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+varying mediump vec2 uv;
+uniform mat4 Model;
+uniform mat4 Projection;
+void main() {
+    gl_Position = Projection * Model * vec4(position, 1.0);
+    uv = texcoord;
+}
+"#;
+
+const POST_FS: &str = r#"#version 100
+precision mediump float;
+varying mediump vec2 uv;
+uniform sampler2D Texture;
+// x: contrast curve, y: saturation, z: vignette, w: warm/cool split
+uniform vec4 Grade;
+void main() {
+    vec3 c = texture2D(Texture, uv).rgb;
+    c = mix(c, c * c * (3.0 - 2.0 * c), Grade.x);
+    float l = dot(c, vec3(0.299, 0.587, 0.114));
+    c = mix(vec3(l), c, Grade.y);
+    c += (l - 0.5) * vec3(1.0, 0.25, -1.0) * Grade.w;
+    vec2 q = uv - 0.5;
+    c *= 1.0 - dot(q, q) * Grade.z;
+    gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}
+"#;
+
 fn mat(cull: CullFace, depth_write: bool) -> Material {
+    mat_with(FS, cull, depth_write)
+}
+
+fn mat_with(fs: &str, cull: CullFace, depth_write: bool) -> Material {
     let blend = Some(BlendState::new(
         Equation::Add,
         BlendFactor::Value(BlendValue::SourceAlpha),
@@ -683,7 +785,7 @@ fn mat(cull: CullFace, depth_write: bool) -> Material {
     load_material(
         ShaderSource::Glsl {
             vertex: VS,
-            fragment: FS,
+            fragment: fs,
         },
         MaterialParams {
             pipeline_params: PipelineParams {
@@ -834,6 +936,18 @@ impl Materials {
             world: mat(CullFace::Nothing, true),
             outline: mat(CullFace::Front, true),
             fx: mat(CullFace::Nothing, true),
+            water: mat_with(WATER_FS, CullFace::Nothing, true),
+            post: load_material(
+                ShaderSource::Glsl {
+                    vertex: POST_VS,
+                    fragment: POST_FS,
+                },
+                MaterialParams {
+                    uniforms: vec![UniformDesc::new("Grade", UniformType::Float4)],
+                    ..Default::default()
+                },
+            )
+            .expect("post material"),
             depth,
             atlas: crate::textures::detail_atlas(),
             white,
@@ -843,7 +957,7 @@ impl Materials {
             textures: false,
             tint: Vec3::ONE,
         });
-        for mat in [&m.world, &m.outline, &m.fx] {
+        for mat in [&m.world, &m.outline, &m.fx, &m.water] {
             mat.set_uniform("Fade", vec2(0.0, 0.0));
             mat.set_uniform("Push", 0.0f32);
             mat.set_uniform("Grow", 0.0f32);
@@ -852,7 +966,7 @@ impl Materials {
     }
 
     pub fn set_view(&self, cam: Vec3, fog: Color, near: f32, far: f32) {
-        for m in [&self.world, &self.outline, &self.fx] {
+        for m in [&self.world, &self.outline, &self.fx, &self.water] {
             m.set_uniform("CamPos", cam);
             m.set_uniform("FogColor", vec4(fog.r, fog.g, fog.b, 1.0));
             m.set_uniform("FogRange", vec2(near, far));
@@ -878,13 +992,15 @@ impl Materials {
                 vec4(0.0, l.textures as u8 as f32, 0.0, 0.0),
             ),
         };
-        for m in [&self.world, &self.outline, &self.fx] {
+        // (time wraps so that it stays precise in the shaders)
+        let time = (get_time() % 3600.0) as f32;
+        for m in [&self.world, &self.outline, &self.fx, &self.water] {
             m.set_texture("ShadowMap", tex.clone());
             m.set_uniform("SunMatrix", matrix);
             m.set_uniform("SunDir", LIGHT_DIR.normalize());
             m.set_uniform("Params", params);
             m.set_uniform("Tint", l.tint);
-            m.set_uniform("Extra", vec2(offset, 0.0));
+            m.set_uniform("Extra", vec2(offset, time));
         }
     }
 

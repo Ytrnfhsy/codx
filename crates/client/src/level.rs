@@ -62,6 +62,18 @@ pub fn boxes_mesh<'a>(
         }
         m.fill
             .add_aabb(b.min, b.max, c, crate::textures::material_for(b.color));
+        // tree crowns and bushes (green things you can walk through, off the ground)
+        // sway in the wind: the shader moves vertices marked in the normal's w
+        let [r, g, bl] = b.color.map(|v| v as f32);
+        let leafy = !b.solid && b.min.y > 0.3 && size.y > 0.5 && g > r * 1.2 && g > bl * 1.2;
+        if leafy {
+            if let Some(ch) = m.fill.chunks.last_mut() {
+                let n = ch.verts.len();
+                for v in &mut ch.verts[n - 24..] {
+                    v.normal.w = 1.0;
+                }
+            }
+        }
         let is_ground = b.min.y < -0.5 && size.x > 20.0;
         if outlines && b.solid && !is_ground && size.min_element() > 0.15 {
             let w = Vec3::splat(0.045);
@@ -70,6 +82,49 @@ pub fn boxes_mesh<'a>(
         }
     }
     m
+}
+
+/// The water over one tile: only where the ground is under it, lighter and clearer in the
+/// shallows, and each vertex knows how close the shore is (for the foam).
+fn water_mesh(m: &Heightmap, i0: usize, j0: usize) -> MeshBuilder {
+    const STEP: usize = 2;
+    let mut w = MeshBuilder::new();
+    let vert = |i: usize, j: usize| {
+        let p = m.point(i.min(m.w - 1), j.min(m.h - 1));
+        let depth = m.water - p.y;
+        let k = (depth / 2.4).clamp(0.0, 1.0);
+        let mix = |a: f32, b: f32| (a + (b - a) * k) as u8;
+        Vertex {
+            position: vec3(p.x, m.water, p.z),
+            // how close the shore is: 1 at the water's edge, 0 from half a metre deep
+            uv: vec2((1.0 - depth / 0.5).clamp(0.0, 1.0), 0.0),
+            color: [
+                mix(124.0, 54.0),
+                mix(198.0, 118.0),
+                mix(212.0, 172.0),
+                mix(150.0, 222.0),
+            ],
+            normal: Vec4::ZERO,
+        }
+    };
+    let mut j = j0;
+    while j < (j0 + TILE_CELLS).min(m.h - 1) {
+        let mut i = i0;
+        while i < (i0 + TILE_CELLS).min(m.w - 1) {
+            let (i1, j1) = (i + STEP, j + STEP);
+            let v = [vert(i, j), vert(i, j1), vert(i1, j1), vert(i1, j)];
+            // (dry land: no water to draw; a little margin so the edge is under the sand)
+            let wet = [(i, j), (i, j1), (i1, j1), (i1, j)]
+                .iter()
+                .any(|&(a, b)| m.at(a as i64, b as i64) < m.water + 0.15);
+            if wet {
+                w.add_indexed(&v, &[0, 1, 2, 0, 2, 3]);
+            }
+            i += STEP;
+        }
+        j += STEP;
+    }
+    w
 }
 
 struct Tile {
@@ -361,19 +416,8 @@ impl Level {
                     false,
                 );
                 let water = wet.then(|| {
-                    let y = m.water;
-                    hi.y = hi.y.max(y);
-                    let mut w = MeshBuilder::new();
-                    w.add_quad(
-                        [
-                            vec3(lo.x, y, lo.z),
-                            vec3(lo.x, y, lo.z + size),
-                            vec3(lo.x + size, y, lo.z + size),
-                            vec3(lo.x + size, y, lo.z),
-                        ],
-                        [86, 156, 200, 190],
-                    );
-                    w
+                    hi.y = hi.y.max(m.water);
+                    water_mesh(m, i0, j0)
                 });
                 all_lo = all_lo.min(lo);
                 all_hi = all_hi.max(hi);
@@ -499,7 +543,7 @@ impl Level {
         if !self.terrain {
             return;
         }
-        gl_use_material(&mats.fx);
+        gl_use_material(&mats.water);
         for t in &self.tiles {
             if let Some(w) = &t.water {
                 if Self::dist(t, cam) < fog_far + 10.0 {

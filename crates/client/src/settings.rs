@@ -90,6 +90,9 @@ pub struct Settings {
     /// Smooth jagged edges (4× multisampling).
     #[serde(default = "yes")]
     pub msaa: bool,
+    /// Colour grading of the finished picture (contrast, richer colours, darker corners).
+    #[serde(default = "yes")]
+    pub color_grade: bool,
     /// FPS cap when vsync is off (0 = unlimited).
     pub fps_limit: u32,
     /// Sharpness of sun shadows: 1 low, 2 medium, 3 high.
@@ -145,6 +148,7 @@ impl Settings {
             render_scale: 1.0,
             vsync: true,
             msaa: true,
+            color_grade: true,
             skin: 0,
             fps_limit: 144,
             shadow_quality: 2,

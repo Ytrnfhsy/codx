@@ -760,6 +760,19 @@ async fn amain(args: Args) {
                 set_default_camera();
                 if let Some(rt) = &target {
                     clear_background(BLACK);
+                    if settings.color_grade {
+                        // evenings are warmer, rain and fog flatter
+                        use toon_shared::weather::Weather;
+                        let grade = match g.weather {
+                            Weather::Clear => vec4(0.3, 1.14, 0.5, 0.03),
+                            Weather::Evening => vec4(0.35, 1.18, 0.6, 0.05),
+                            Weather::Overcast => vec4(0.22, 1.04, 0.5, 0.01),
+                            Weather::Rain => vec4(0.25, 0.96, 0.7, -0.01),
+                            Weather::Fog => vec4(0.15, 0.94, 0.45, 0.0),
+                        };
+                        mats.post.set_uniform("Grade", grade);
+                        gl_use_material(&mats.post);
+                    }
                     draw_texture_ex(
                         &rt.texture,
                         0.0,
@@ -771,6 +784,7 @@ async fn amain(args: Args) {
                             ..Default::default()
                         },
                     );
+                    gl_use_default_material();
                 }
                 let mut ui = ui::Ui {
                     fonts: &fonts,

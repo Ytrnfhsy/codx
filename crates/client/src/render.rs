@@ -259,14 +259,22 @@ pub fn render_world(
     mats.set_view(view.pos, fog, fog_near, fog_far);
 
     // sky (follows the camera, no fog)
-    let sky_model = Mat4::from_translation(vec3(view.pos.x, 0.0, view.pos.z));
+    // (the clouds drift slowly round; the sun stays where the light comes from)
+    let at = Mat4::from_translation(vec3(view.pos.x, 0.0, view.pos.z));
+    let drift = Mat4::from_rotation_y((get_time() * 0.0018) as f32);
     {
         let gl = unsafe { get_internal_gl() }.quad_gl;
-        gl.push_model_matrix(sky_model);
+        gl.push_model_matrix(at * drift);
     }
     mats.set_view(vec3(0.0, 0.0, 0.0), fog, 10_000.0, 20_000.0);
     gl_use_material(&mats.world);
     g.sky_mesh.draw();
+    {
+        let gl = unsafe { get_internal_gl() }.quad_gl;
+        gl.pop_model_matrix();
+        gl.push_model_matrix(at);
+    }
+    g.sun_mesh.draw();
     gl_use_default_material();
     {
         let gl = unsafe { get_internal_gl() }.quad_gl;
@@ -281,7 +289,7 @@ pub fn render_world(
         // a frame round the terrain (inside it the tiles have their own water)
         let s = 3000.0;
         let (a, b) = (g.level.min, g.level.max);
-        let sea = [70, 132, 176, 255];
+        let sea = [54, 118, 172, 255];
         for (x0, z0, x1, z1) in [
             (-s, -s, s, a.z),
             (-s, b.z, s, s),
@@ -298,7 +306,7 @@ pub fn render_world(
                 sea,
             );
         }
-        gl_use_material(&mats.world);
+        gl_use_material(&mats.water);
         far.draw();
         gl_use_default_material();
     } else {

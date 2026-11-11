@@ -151,6 +151,7 @@ pub struct GameClient {
     pub world: World,
     pub level: crate::level::Level,
     pub sky_mesh: MeshBuilder,
+    pub sun_mesh: MeshBuilder,
     pub mode: Mode,
     pub gs: GameSettings,
 
@@ -410,11 +411,37 @@ pub fn build_sky_in(map: &Map, weather: Weather) -> MeshBuilder {
                 rng.range(-4.0, 4.0),
             );
             let s = rng.range(7.0, 12.0);
-            let m = Mat4::from_translation(base + off) * Mat4::from_scale(vec3(1.3, 0.75, 1.0));
-            sky.add_sphere_ex(&m, s, cloud, 10, 6, 255, false);
+            // two flat tones, toon style: a bright puff with a bluish belly showing under it
+            let squash = Mat4::from_scale(vec3(1.3, 0.75, 1.0));
+            let belly = [
+                (cloud[0] as f32 * 0.84) as u8,
+                (cloud[1] as f32 * 0.87) as u8,
+                (cloud[2] as f32 * 0.93) as u8,
+            ];
+            let low = Mat4::from_translation(base + off - vec3(0.0, s * 0.16, 0.0)) * squash;
+            sky.add_sphere_ex(&low, s * 0.95, belly, 10, 6, 255, true);
+            let m = Mat4::from_translation(base + off) * squash;
+            sky.add_sphere_ex(&m, s, cloud, 10, 6, 255, true);
         }
     }
     sky
+}
+
+/// The sun where the light comes from, with a glow round it (none behind thick clouds).
+pub fn build_sun(weather: Weather) -> MeshBuilder {
+    let mut m = MeshBuilder::new();
+    let (core, glow, size) = match weather {
+        Weather::Clear => ([255, 250, 224], [255, 244, 200], 1.0),
+        Weather::Evening => ([255, 214, 150], [255, 170, 110], 1.35),
+        Weather::Overcast | Weather::Rain | Weather::Fog => return m,
+    };
+    let at = Mat4::from_translation(crate::mesh::LIGHT_DIR.normalize() * 340.0);
+    // (from the inside out: each wider glow lies in front of what it surrounds)
+    m.add_sphere_ex(&at, 13.0 * size, core, 14, 8, 255, true);
+    for (r, alpha) in [(19.0, 90u8), (28.0, 50), (42.0, 26)] {
+        m.add_sphere_ex(&at, r * size, glow, 14, 8, alpha, true);
+    }
+    m
 }
 
 impl GameClient {
@@ -433,6 +460,7 @@ impl GameClient {
             world,
             level,
             sky_mesh,
+            sun_mesh: build_sun(Weather::Clear),
             mode: w.mode,
             gs: w.settings,
             state: MatchState::Warmup,
@@ -672,6 +700,7 @@ impl GameClient {
         self.world = World::from_map(&self.map);
         self.level = crate::level::Level::build(&self.map);
         self.sky_mesh = build_sky(&self.map);
+        self.sun_mesh = build_sun(Weather::Clear);
         self.weather = Weather::Clear;
         self.mode = mode;
         self.gs = gs;
@@ -1237,6 +1266,7 @@ impl GameClient {
         if w != self.weather {
             self.weather = w;
             self.sky_mesh = build_sky_in(&self.map, w);
+            self.sun_mesh = build_sun(w);
             if w != Weather::Clear {
                 self.center_msg(
                     tr!("Погода: {}", "Weather: {}", w.name()),
