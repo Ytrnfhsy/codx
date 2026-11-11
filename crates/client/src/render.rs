@@ -212,8 +212,10 @@ pub fn render_world(
     view: &View,
 ) -> Vec<NameTag> {
     let fog = fog_color(g);
-    let (fog_near, fog_far) =
-        weather_fog(g, fog_range(g.level.terrain, settings, altitude(g, view.pos)));
+    let (fog_near, fog_far) = weather_fog(
+        g,
+        fog_range(g.level.terrain, settings, altitude(g, view.pos)),
+    );
     if settings.shadows {
         // big maps: the shadow map covers the area around the camera and follows it
         let (lo, hi) = if g.level.terrain {
@@ -351,6 +353,28 @@ pub fn render_world(
         let r = LOOT_DRAW * settings.view_distance.clamp(0.5, 1.0);
         d.x * d.x + d.z * d.z > r * r
     };
+    // doors (as they stand now), with a knob on both faces
+    for k in 0..g.world.doors.len() {
+        let d = &g.world.doors[k];
+        if far(&d.centre().to_array()) {
+            continue;
+        }
+        let [lo, hi] = d.panel(g.world.door_open[k]);
+        let mid = (lo + hi) * 0.5;
+        m.boxed(&Mat4::from_translation(mid), (hi - lo) * 0.5, d.color, 0.02);
+        // the knob sits at the far end from the hinge (the low end along the wall)
+        let size = hi - lo;
+        let thin_x = size.x < size.z;
+        let (knob, off) = if thin_x {
+            (vec3(mid.x, lo.y + 1.0, hi.z - 0.18), vec3(0.07, 0.0, 0.0))
+        } else {
+            (vec3(hi.x - 0.18, lo.y + 1.0, mid.z), vec3(0.0, 0.0, 0.07))
+        };
+        for s in [-1.0, 1.0] {
+            let c = Mat4::from_translation(knob + off * s);
+            m.boxed(&c, Vec3::splat(0.035), [200, 170, 70], 0.0);
+        }
+    }
     for e in ents {
         match e {
             EntSnap::Weapon { pos, .. } | EntSnap::Loot { pos, .. } if far(pos) => {}

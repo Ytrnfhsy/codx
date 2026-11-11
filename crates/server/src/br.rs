@@ -184,6 +184,7 @@ impl Game {
 
     /// The plane takes off: everyone boards, supplies are scattered, the zone is drawn.
     pub fn br_start(&mut self) {
+        self.shut_doors();
         let time = self.time;
         let half = self.map.size() * 0.5;
         let centre = self.map.center();
@@ -193,8 +194,12 @@ impl Game {
         let side = vec3(-dir.z, 0.0, dir.x) * self.rng.range(-0.25, 0.25) * half.x;
         let reach = half.max_element() * 1.05;
         let c3 = vec3(centre.x, PLANE_HEIGHT, centre.y);
-        let weather = toon_shared::weather::Weather::parse(&self.cfg.br.weather)
-            .unwrap_or_else(|| toon_shared::weather::Weather::pick(self.rng.f32()));
+        let weather =
+            toon_shared::weather::Weather::parse(&self.cfg.br.weather).unwrap_or_else(|| {
+                // (its own dice: the rest of the round's randomness stays as it was)
+                let seed = (time * 1000.0) as u64 ^ self.rng.clone().next_u64().rotate_left(17);
+                toon_shared::weather::Weather::pick(toon_shared::rng::Rng::new(seed).f32())
+            });
         self.br = crate::br::BrState {
             running: true,
             weather,

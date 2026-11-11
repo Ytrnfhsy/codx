@@ -8,6 +8,7 @@ pub mod br;
 pub mod cars;
 pub mod combat;
 pub mod config;
+pub mod doors;
 pub mod game;
 pub mod http;
 pub mod nav;

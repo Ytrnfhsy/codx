@@ -120,6 +120,8 @@ pub enum C2S {
     Box(BoxCmd),
     /// Out of the battle royale: whose eyes to watch through (255 = a free camera).
     Spectate(u8),
+    /// Open or shut door `k` (standing next to it).
+    Door(u16),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -595,6 +597,8 @@ pub enum S2C {
     },
     /// A flashbang went off in front of us: how hard (0..1).
     Flashed(f32),
+    /// The doors that stand open (all the others are shut).
+    Doors(Vec<u16>),
     Explosion {
         pos: V3,
         radius: f32,

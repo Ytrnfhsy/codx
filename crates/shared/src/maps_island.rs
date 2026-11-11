@@ -870,6 +870,7 @@ fn spawn_at(m: &Heightmap, x: f32, z: f32, yaw: f32) -> Spawn {
 pub fn island() -> Map {
     let m = heightmap();
     let mut b = MapBuilder::new();
+    b.make_doors = true;
     let mut rng = Rng::new(SEED as u64);
     let brs = bridges();
 
@@ -1057,6 +1058,7 @@ pub fn island() -> Map {
             })
             .collect(),
         car_spots,
+        doors: b.doors,
     }
 }
 
@@ -1141,7 +1143,10 @@ mod swim_tests {
         let t = MoveTuning::default();
         let (cx, cz) = (LAKE.0, LAKE.1);
         let tr = world.terrain.as_ref().unwrap();
-        assert!(tr.height(cx, cz) < WATER - 2.5, "the lake is deep in the middle");
+        assert!(
+            tr.height(cx, cz) < WATER - 2.5,
+            "the lake is deep in the middle"
+        );
         let mut b = Body {
             pos: vec3(cx, WATER + 3.0, cz),
             stance: Stance::Stand,
@@ -1153,7 +1158,11 @@ mod swim_tests {
             b.step(&world, &idle, &t, dt);
         }
         assert!(b.swimming(&world), "afloat at {}", b.pos);
-        assert!((b.pos.y - (WATER - SWIM_SINK)).abs() < 0.05, "at the surface {}", b.pos);
+        assert!(
+            (b.pos.y - (WATER - SWIM_SINK)).abs() < 0.05,
+            "at the surface {}",
+            b.pos
+        );
         // paddle east (yaw -pi/2 looks along +x) for a while: slower than walking
         let go = MoveInput {
             forward: 1.0,
@@ -1167,7 +1176,10 @@ mod swim_tests {
             b.step(&world, &go, &t, dt);
         }
         let speed = (b.pos.x - x0) / 2.0;
-        assert!(speed > 1.0 && speed < t.walk_speed * 0.6, "swim speed {speed}");
+        assert!(
+            speed > 1.0 && speed < t.walk_speed * 0.6,
+            "swim speed {speed}"
+        );
         // keep going to the shore
         let mut out = false;
         for _ in 0..60 * 120 {

@@ -377,6 +377,8 @@ pub struct Game {
     pub nav: Nav,
     /// The map played before (with its world and routes), in case the rotation returns.
     spare_map: Option<(Map, World, Nav)>,
+    /// When each door was last worked.
+    pub door_used: std::collections::HashMap<u16, f64>,
     pub mode: Mode,
     pub players: Vec<Option<Player>>,
     pub state: MatchState,
@@ -448,8 +450,11 @@ impl Game {
     pub fn new(cfg: ServerConfig) -> Game {
         let (map_id, mode) = cfg.rotation[0].resolve();
         let map = maps::build(map_id);
-        let world = World::from_map(&map);
+        let mut world = World::from_map(&map);
         let nav = Nav::build(&map, &world);
+        for k in 0..world.doors.len() {
+            world.set_door(k, false);
+        }
         let bans = crate::admin::Bans::load(&cfg.data_dir);
         let br_stats = crate::stats::BrStats::load(&cfg.data_dir);
         let sab = Sab {
@@ -471,6 +476,7 @@ impl Game {
             world,
             nav,
             spare_map: None,
+            door_used: Default::default(),
             mode,
             players: (0..MAX_PLAYERS).map(|_| None).collect(),
             state: MatchState::Warmup,
@@ -746,6 +752,10 @@ impl Game {
             },
         );
         self.send(id, S2C::Tuning(Box::new(self.tuning.clone())));
+        if !self.world.doors.is_empty() {
+            let doors = self.doors_msg();
+            self.send(id, doors);
+        }
         self.say(Dest::All, || S2C::Chat {
             from: String::new(),
             team: Team::Spectator,
@@ -1264,6 +1274,9 @@ impl Game {
                 self.throw_special(id, Vec3::from_array(origin), Vec3::from_array(dir), kind)
             }
             C2S::Item(a) => self.br_item(id, a),
+            C2S::Door(k) => {
+                self.use_door(id, k, None);
+            }
             C2S::Spectate(t) => {
                 if let Some(p) = self.pm(id) {
                     p.spectating = (t != 255).then_some(t);
@@ -1758,6 +1771,7 @@ impl Game {
             settings,
         });
         self.logf(format!("Зміна карти: {} ({})", self.map.name, mode.name()));
+        self.shut_doors();
         for id in self.ids() {
             if self.can_spawn(id) {
                 self.spawn_player(id, true);
@@ -1949,6 +1963,7 @@ impl Game {
         self.update_helis(dt);
         self.update_vehicles(dt);
         self.update_cars(dt);
+        self.bots_open_doors();
 
         if self.time >= self.next_housekeeping {
             self.next_housekeeping = self.time + 1.0;

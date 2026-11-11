@@ -70,6 +70,8 @@ pub enum Pick {
     Car(toon_shared::cars::CarKind),
     /// A death box to look into.
     DeathBox,
+    /// A door (and whether it stands open).
+    Door(bool),
 }
 
 /// A jeep or a boat as we draw it: smoothed towards where the server says it is.
@@ -625,7 +627,8 @@ impl GameClient {
 
     /// Sky, fog and light colours in the current weather.
     pub fn colours(&self) -> ([u8; 3], [u8; 3], [f32; 3]) {
-        self.weather.colours(self.map.sky, self.map.fog, self.map.tint)
+        self.weather
+            .colours(self.map.sky, self.map.fog, self.map.tint)
     }
 
     pub fn eye(&self) -> Vec3 {
@@ -926,6 +929,21 @@ impl GameClient {
                     r.melee_t = now;
                     if let Some(a) = audio {
                         a.play_at(Sfx::Knife, r.pos, self.body.pos, 0.8, 25.0);
+                    }
+                }
+            }
+            S2C::Doors(open) => {
+                let eye = self.eye();
+                for k in 0..self.world.doors.len() {
+                    let o = open.contains(&(k as u16));
+                    if o != self.world.door_open[k] {
+                        self.world.set_door(k, o);
+                        if let Some(a) = audio {
+                            let c = self.world.doors[k].centre();
+                            if c.distance(eye) < 30.0 {
+                                a.play_at(Sfx::Click, c, eye, 0.9, 30.0);
+                            }
+                        }
                     }
                 }
             }
@@ -1441,8 +1459,30 @@ impl GameClient {
                 }
                 _ => None,
             })
+            .chain(self.door_in_reach())
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, id, w)| (id, w))
+    }
+
+    /// The door we look at, close enough to work (a little behind the things on the
+    /// ground, so that loot by a doorway is still picked up).
+    fn door_in_reach(&self) -> Option<(f32, u16, Pick)> {
+        if self.world.doors.is_empty() {
+            return None;
+        }
+        let eye = self.eye();
+        let look = look_dir(self.yaw, self.pitch);
+        self.world
+            .doors
+            .iter()
+            .enumerate()
+            .filter_map(|(k, d)| {
+                let to = d.centre() - eye;
+                let dist = to.length();
+                (dist < 2.6 && to.normalize_or_zero().dot(look) > 0.55)
+                    .then(|| (dist + 0.6, k as u16, Pick::Door(self.world.door_open[k])))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
     /// Standing where F plants, defuses or picks up the bomb.
@@ -2434,6 +2474,7 @@ impl GameClient {
                         Pick::Car(_) => self
                             .net
                             .send(C2S::Car(toon_shared::protocol::CarCmd::Enter(ent))),
+                        Pick::Door(_) => self.net.send(C2S::Door(ent)),
                         Pick::DeathBox => {
                             self.net
                                 .send(C2S::Box(toon_shared::protocol::BoxCmd::Open(ent)));

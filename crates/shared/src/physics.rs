@@ -48,19 +48,32 @@ pub struct World {
     pub bounds: [f32; 4],
     dims: (i32, i32),
     cells: Vec<Vec<u32>>,
+    /// The map's doors: their panels are the last boxes (from `door_base` on).
+    pub doors: Vec<crate::map::Door>,
+    pub door_base: usize,
+    pub door_open: Vec<bool>,
 }
 
 impl World {
     pub fn from_map(map: &Map) -> World {
         let solid: Vec<_> = map.boxes.iter().filter(|b| b.solid).collect();
-        let boxes: Vec<Aabb> = solid
+        let mut boxes: Vec<Aabb> = solid
             .iter()
             .map(|b| Aabb {
                 min: b.min,
                 max: b.max,
             })
             .collect();
-        let mats = solid.iter().map(|b| b.mat).collect();
+        let mut mats: Vec<Mat> = solid.iter().map(|b| b.mat).collect();
+        // doors start open (that is how the bots' routes see the doorways)
+        let door_base = boxes.len();
+        for d in &map.doors {
+            boxes.push(Aabb {
+                min: d.open[0],
+                max: d.open[1],
+            });
+            mats.push(Mat::Wood);
+        }
         let pad = 4.0;
         let origin = (map.min.x - pad, map.min.y - pad);
         let dims = (
@@ -77,10 +90,18 @@ impl World {
             bounds: [map.min.x, map.min.y, map.max.x, map.max.y],
             dims,
             cells: Vec::new(),
+            doors: map.doors.clone(),
+            door_base,
+            door_open: vec![true; map.doors.len()],
         };
         for (i, b) in w.boxes.iter().enumerate() {
-            let (x0, z0) = w.cell_of(b.min.x, b.min.z);
-            let (x1, z1) = w.cell_of(b.max.x, b.max.z);
+            // (a door's cells cover it both shut and open)
+            let (lo, hi) = match i.checked_sub(door_base).and_then(|k| w.doors.get(k)) {
+                Some(d) => (d.shut[0].min(d.open[0]), d.shut[1].max(d.open[1])),
+                None => (b.min, b.max),
+            };
+            let (x0, z0) = w.cell_of(lo.x, lo.z);
+            let (x1, z1) = w.cell_of(hi.x, hi.z);
             for cz in z0..=z1 {
                 for cx in x0..=x1 {
                     cells[(cz * dims.0 + cx) as usize].push(i as u32);
@@ -89,6 +110,20 @@ impl World {
         }
         w.cells = cells;
         w
+    }
+
+    /// Opens or shuts door `k`.
+    pub fn set_door(&mut self, k: usize, open: bool) {
+        let Some(d) = self.doors.get(k) else { return };
+        let [min, max] = d.panel(open);
+        self.boxes[self.door_base + k] = Aabb { min, max };
+        self.door_open[k] = open;
+    }
+
+    /// The box door `k` would take up.
+    pub fn door_box(&self, k: usize, open: bool) -> Option<Aabb> {
+        let [min, max] = self.doors.get(k)?.panel(open);
+        Some(Aabb { min, max })
     }
 
     fn cell_of(&self, x: f32, z: f32) -> (i32, i32) {
@@ -1024,6 +1059,7 @@ mod tests {
             loot: Vec::new(),
             nav_detail: Vec::new(),
             car_spots: Vec::new(),
+            doors: Vec::new(),
         };
         let w = World::from_map(&map);
         let (stop, _, pierced) = w.bullet_trace(vec3(0.0, 1.5, 0.0), vec3(1.0, 0.0, 0.0), 50.0);
@@ -1076,6 +1112,7 @@ mod tests {
             loot: Vec::new(),
             nav_detail: Vec::new(),
             car_spots: Vec::new(),
+            doors: Vec::new(),
         };
         let w = World::from_map(&map);
         let t = mt();
@@ -1164,6 +1201,7 @@ mod tests {
             loot: Vec::new(),
             nav_detail: Vec::new(),
             car_spots: Vec::new(),
+            doors: Vec::new(),
         };
         World::from_map(&map)
     }

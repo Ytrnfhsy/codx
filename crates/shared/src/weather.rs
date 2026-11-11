@@ -69,7 +69,12 @@ impl Weather {
 
     /// The sky's top colour, the horizon / fog colour and the light's tint, from the
     /// map's own.
-    pub fn colours(self, sky: [u8; 3], fog: [u8; 3], tint: [f32; 3]) -> ([u8; 3], [u8; 3], [f32; 3]) {
+    pub fn colours(
+        self,
+        sky: [u8; 3],
+        fog: [u8; 3],
+        tint: [f32; 3],
+    ) -> ([u8; 3], [u8; 3], [f32; 3]) {
         let mix = |a: [u8; 3], b: [u8; 3], k: f32| {
             [0, 1, 2].map(|i| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * k) as u8)
         };

@@ -689,7 +689,9 @@ pub fn draw_menu(
                 use toon_shared::weather::Weather;
                 // random first, then each weather
                 let cur = Weather::parse(&hs.br_weather);
-                let i = cur.map_or(0, |w| Weather::ALL.iter().position(|x| *x == w).unwrap_or(0) + 1);
+                let i = cur.map_or(0, |w| {
+                    Weather::ALL.iter().position(|x| *x == w).unwrap_or(0) + 1
+                });
                 let label = cur.map_or(t("Випадкова", "Random"), |w| w.name());
                 let d = ui.stepper(
                     t("Погода", "Weather"),

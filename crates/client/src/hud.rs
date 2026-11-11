@@ -237,6 +237,20 @@ impl GameClient {
                         "{} — step off the bomb to pick it up",
                         what
                     )
+                } else if let Pick::Door(open) = pick {
+                    if open {
+                        tr!(
+                            "{} — зачинити двері",
+                            "{} — shut the door",
+                            key(Action::Use)
+                        )
+                    } else {
+                        tr!(
+                            "{} — відчинити двері",
+                            "{} — open the door",
+                            key(Action::Use)
+                        )
+                    }
                 } else if let Pick::DeathBox = pick {
                     tr!(
                         "{} — обшукати ящик",
@@ -3675,6 +3689,7 @@ fn pick_label(p: Pick) -> String {
         Pick::Weapon(w) => w.def().name.into(),
         Pick::Car(k) => k.name().into(),
         Pick::DeathBox => t("ящик", "box").into(),
+        Pick::Door(_) => t("двері", "door").into(),
         Pick::Loot(k, n) => match k {
             LootKind::Ammo(_) | LootKind::Medkit if n > 1 => format!("{} ×{n}", k.name()),
             LootKind::Armor(_) | LootKind::Helmet(_) if n < 100 => format!("{} ({n}%)", k.name()),

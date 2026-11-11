@@ -169,6 +169,31 @@ pub struct Map {
     pub nav_detail: Vec<[f32; 4]>,
     /// Jeeps and boats waiting for the battle royale.
     pub car_spots: Vec<crate::cars::CarSpot>,
+    /// Doors that open and shut (houses on the island).
+    pub doors: Vec<Door>,
+}
+
+/// A door: a wooden panel that shuts its doorway or swings into the room.
+#[derive(Clone, Copy, Debug)]
+pub struct Door {
+    /// The panel's box when shut and when open (min, max).
+    pub shut: [Vec3; 2],
+    pub open: [Vec3; 2],
+    pub color: [u8; 3],
+}
+
+impl Door {
+    /// The middle of the doorway.
+    pub fn centre(&self) -> Vec3 {
+        (self.shut[0] + self.shut[1]) * 0.5
+    }
+    pub fn panel(&self, open: bool) -> [Vec3; 2] {
+        if open {
+            self.open
+        } else {
+            self.shut
+        }
+    }
 }
 
 impl Map {
@@ -298,6 +323,9 @@ pub struct MapBuilder {
     pub boxes: Vec<MapBox>,
     pub ladders: Vec<Ladder>,
     pub loot: Vec<Vec3>,
+    /// Hang real doors in the buildings' doorways.
+    pub make_doors: bool,
+    pub doors: Vec<Door>,
 }
 
 impl MapBuilder {
@@ -358,7 +386,13 @@ impl MapBuilder {
     /// Builds what `f` adds `h` higher up (houses, cars, trees on a terrace or a hill).
     pub fn lift(&mut self, h: f32, f: impl FnOnce(&mut Self)) {
         let (nb, nl, no) = (self.boxes.len(), self.ladders.len(), self.loot.len());
+        let nd = self.doors.len();
         f(self);
+        for d in &mut self.doors[nd..] {
+            for p in d.shut.iter_mut().chain(d.open.iter_mut()) {
+                p.y += h;
+            }
+        }
         for p in &mut self.loot[no..] {
             p.y += h;
         }
@@ -559,6 +593,40 @@ impl MapBuilder {
         self.wall_x(x0, x1, z1 - t / 2.0, y0, h, t, &pick(Side::MaxZ), c);
         self.wall_z(z0 + t, z1 - t, x0 + t / 2.0, y0, h, t, &pick(Side::MinX), c);
         self.wall_z(z0 + t, z1 - t, x1 - t / 2.0, y0, h, t, &pick(Side::MaxX), c);
+        if self.make_doors {
+            for (side, o) in ops {
+                if o.bottom > 0.0 || o.w > 2.0 {
+                    continue;
+                }
+                // the wall's centre line, and which way the room is
+                let (line, inward, along_x) = match side {
+                    Side::MinZ => (z0 + t / 2.0, 1.0, true),
+                    Side::MaxZ => (z1 - t / 2.0, -1.0, true),
+                    Side::MinX => (x0 + t / 2.0, 1.0, false),
+                    Side::MaxX => (x1 - t / 2.0, -1.0, false),
+                };
+                let (a, b) = (o.at - o.w / 2.0 + 0.04, o.at + o.w / 2.0 - 0.04);
+                let (ya, yb) = (y0 + 0.02, y0 + o.top - 0.04);
+                let th = 0.06;
+                // shut: in the doorway; open: swung on its hinge (the low end) into the room
+                let inner = line + inward * t / 2.0;
+                let reach = inner + inward * (b - a);
+                let pick_box = |p0: f32, p1: f32, q0: f32, q1: f32| {
+                    // p: along the wall, q: across it
+                    let (q0, q1) = (q0.min(q1), q0.max(q1));
+                    if along_x {
+                        [vec3(p0, ya, q0), vec3(p1, yb, q1)]
+                    } else {
+                        [vec3(q0, ya, p0), vec3(q1, yb, p1)]
+                    }
+                };
+                self.doors.push(Door {
+                    shut: pick_box(a, b, line - th / 2.0, line + th / 2.0),
+                    open: pick_box(a, a + th, inner + inward * 0.02, reach),
+                    color: [122, 84, 54],
+                });
+            }
+        }
         if let Some(rc) = roof {
             self.block(
                 x0 - 0.25,

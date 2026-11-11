@@ -63,8 +63,9 @@ fn a_round_of_battle_royale() {
     assert!(p.alive && !p.in_plane && p.body.chute == Chute::FreeFall);
     assert!(p.body.pos.y > 150.0);
 
-    // a minute later every bot has landed and most found a real gun
-    for _ in 0..(60.0 / TICK_DT) as usize {
+    // a little over a minute later (the last ones jump at the far end of a 2 km run)
+    // every bot has landed and most found a real gun
+    for _ in 0..(75.0 / TICK_DT) as usize {
         step(&mut g);
     }
     let bots: Vec<_> = g.players.iter().flatten().filter(|p| p.is_bot()).collect();
@@ -1358,8 +1359,12 @@ fn spectating_summary_and_records() {
     g.rng = toon_shared::rng::Rng::new(9);
     g.change_map(MapId::Island, Mode::Br);
     let v = toon_shared::consts::PROTOCOL_VERSION;
-    let a = g.connect("127.0.0.1:5101".parse().unwrap(), "Перший", "", v).unwrap();
-    let b = g.connect("127.0.0.1:5102".parse().unwrap(), "Другий", "", v).unwrap();
+    let a = g
+        .connect("127.0.0.1:5101".parse().unwrap(), "Перший", "", v)
+        .unwrap();
+    let b = g
+        .connect("127.0.0.1:5102".parse().unwrap(), "Другий", "", v)
+        .unwrap();
     g.handle(a, C2S::JoinTeam(None));
     g.handle(b, C2S::JoinTeam(None));
     for _ in 0..(40.0 / TICK_DT) as usize {
@@ -1380,7 +1385,11 @@ fn spectating_summary_and_records() {
     g.tick(TICK_DT);
     assert_eq!(g.state, MatchState::Playing, "B is still in");
     let snap = g.snapshot_for(a);
-    let s = snap.br.as_ref().and_then(|b| b.summary.clone()).expect("a summary");
+    let s = snap
+        .br
+        .as_ref()
+        .and_then(|b| b.summary.clone())
+        .expect("a summary");
     assert!(s.place > 1 && s.of >= 10, "place {} of {}", s.place, s.of);
     assert_eq!((s.matches, s.wins), (1, 0));
     assert!(!snap.players.iter().any(|p| p.id == b), "B is far away");
@@ -1393,4 +1402,121 @@ fn spectating_summary_and_records() {
     assert_eq!(again.get("Перший").matches, 1);
     assert_eq!(again.get("Перший").best, s.place as u32);
     assert_eq!(again.get("Другий").matches, 0, "B's round is not over");
+}
+
+/// Island doors: shut at the start, the use key opens and shuts them (not through a
+/// body), shut ones stop you, and bots open the ones they walk up to.
+#[test]
+fn doors_open_shut_and_block() {
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir()
+            .join("tw-br-doors")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 2;
+    cfg.br.max_players = 4;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Island, Mode::Br);
+    let n = g.world.doors.len();
+    assert!(n > 100, "only {n} doors on the island");
+    assert!(g.world.door_open.iter().all(|o| !o), "doors start shut");
+    let v = toon_shared::consts::PROTOCOL_VERSION;
+    let me = g
+        .connect("127.0.0.1:5201".parse().unwrap(), "Гравець", "", v)
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    // (the bots come in on the first ticks)
+    for _ in 0..5 {
+        g.tick(TICK_DT);
+    }
+    g.outbox.clear();
+    // stand in front of door 0 (outside, a metre away from its middle)
+    let d = g.world.doors[0];
+    let c = d.centre();
+    let size = d.shut[1] - d.shut[0];
+    let across = if size.x < size.z {
+        glam::vec3(1.0, 0.0, 0.0)
+    } else {
+        glam::vec3(0.0, 0.0, 1.0)
+    };
+    let inward = (((d.open[0] + d.open[1]) * 0.5 - c) * across).normalize();
+    let outside = glam::vec3(c.x, d.shut[0].y, c.z) - inward * 1.0;
+    {
+        let p = g.pm(me).unwrap();
+        p.alive = true;
+        p.in_plane = false;
+        p.body.pos = outside;
+        p.body.chute = Chute::None;
+    }
+    // shut: walking in is stopped by the panel
+    let w = &g.world;
+    let mut b = toon_shared::physics::Body {
+        pos: outside,
+        ..Default::default()
+    };
+    let go = toon_shared::physics::MoveInput {
+        forward: 1.0,
+        yaw: toon_shared::yaw_of(inward),
+        ..Default::default()
+    };
+    for _ in 0..60 {
+        b.step(w, &go, &g.tuning.movement, 1.0 / 30.0);
+    }
+    assert!(
+        (b.pos - outside).dot(inward) < 0.9,
+        "walked through a shut door"
+    );
+    // open it, then walk in
+    g.handle(me, C2S::Door(0));
+    assert!(g.world.door_open[0], "the door did not open");
+    let mut b = toon_shared::physics::Body {
+        pos: outside,
+        ..Default::default()
+    };
+    for _ in 0..60 {
+        b.step(&g.world, &go, &g.tuning.movement, 1.0 / 30.0);
+    }
+    assert!(
+        (b.pos - outside).dot(inward) > 1.5,
+        "could not walk in: {}",
+        b.pos
+    );
+    // it cannot be shut on somebody standing in the doorway
+    g.pm(me).unwrap().body.pos = glam::vec3(c.x, d.shut[0].y, c.z);
+    g.time += 1.0;
+    g.handle(me, C2S::Door(0));
+    assert!(g.world.door_open[0], "shut on a body");
+    // from outside it shuts; from far away nothing happens
+    g.pm(me).unwrap().body.pos = outside;
+    g.time += 1.0;
+    g.handle(me, C2S::Door(0));
+    assert!(!g.world.door_open[0]);
+    g.pm(me).unwrap().body.pos = outside - inward * 10.0;
+    g.time += 1.0;
+    g.handle(me, C2S::Door(0));
+    assert!(!g.world.door_open[0], "opened from 10 m away");
+    // a bot walking up to it opens it
+    let bot = g
+        .players
+        .iter()
+        .flatten()
+        .find(|p| p.is_bot())
+        .map(|p| p.id)
+        .unwrap();
+    {
+        let p = g.pm(bot).unwrap();
+        p.alive = true;
+        p.in_plane = false;
+        p.body.chute = Chute::None;
+        p.body.pos = outside;
+    }
+    g.pm(me).unwrap().alive = false;
+    for _ in 0..10 {
+        g.tick(TICK_DT);
+        g.pm(bot).unwrap().body.pos = outside;
+    }
+    assert!(g.world.door_open[0], "the bot left the door shut");
 }
