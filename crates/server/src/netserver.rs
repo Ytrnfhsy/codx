@@ -267,6 +267,9 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
         for (addr, c) in conns.iter_mut() {
             let pkt = c.chan.build_packet(now);
             let _ = socket.send_to(&pkt, addr);
+            for more in c.chan.spill.drain(..) {
+                let _ = socket.send_to(&more, addr);
+            }
         }
 
         // ---- timeouts / closing

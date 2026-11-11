@@ -116,6 +116,8 @@ pub struct Player {
     pub progress: f32,
     pub joined_at: f64,
     pub chat_budget: f32,
+    /// The things on the ground this player's client knows of.
+    pub lying: std::collections::HashMap<u16, EntSnap>,
     /// The height of the last place they stood on, and the highest point of the fall
     /// they are in (None: not falling, or it does not count — a parachute, a car).
     pub support_y: f32,
@@ -261,6 +263,7 @@ impl Player {
             progress: 0.0,
             joined_at: now,
             chat_budget: 5.0,
+            lying: Default::default(),
             support_y: f32::MAX,
             fall_top: None,
             fall_life: 0,
@@ -1873,6 +1876,10 @@ impl Game {
             }
         }
         let settings = self.settings();
+        // (a new map: the clients forget what lay on the old one)
+        for p in self.players.iter_mut().flatten() {
+            p.lying.clear();
+        }
         self.broadcast(S2C::MapChange {
             map,
             mode,
@@ -2073,6 +2080,7 @@ impl Game {
         self.update_vehicles(dt);
         self.update_cars(dt);
         self.bots_open_doors();
+        self.sync_lying();
 
         if self.time >= self.next_housekeeping {
             self.next_housekeeping = self.time + 1.0;
@@ -2105,6 +2113,99 @@ impl Game {
                 alive: p.alive,
             })
             .collect()
+    }
+
+    /// What lies on the ground near a player (guns, supplies, death boxes): small things,
+    /// a few pixels at most from further away.
+    pub fn lying_near(&self, id: u8) -> Vec<EntSnap> {
+        let focus = self.interest(id);
+        let near = |q: Vec3| {
+            focus.as_ref().is_none_or(|pts| {
+                pts.iter().any(|f| {
+                    vec3(q.x - f.x, 0.0, q.z - f.z).length_squared() < LOOT_RANGE * LOOT_RANGE
+                })
+            })
+        };
+        let mut out = Vec::new();
+        for pk in &self.pickups {
+            if near(pk.pos) {
+                out.push(pk.snap());
+            }
+        }
+        for l in &self.br.loot {
+            if near(l.pos) {
+                out.push(EntSnap::Loot {
+                    id: l.id,
+                    kind: l.kind,
+                    amount: l.amount,
+                    pos: l.pos.to_array(),
+                });
+            }
+        }
+        for b in &self.br.boxes {
+            if near(b.pos) {
+                out.push(EntSnap::DeathBox {
+                    id: b.id,
+                    pos: b.pos.to_array(),
+                });
+            }
+        }
+        out
+    }
+
+    /// Tells real players what appeared on the ground near them and what is gone, a few
+    /// times a second (the things themselves are not in the snapshots).
+    fn sync_lying(&mut self) {
+        for id in 0..self.players.len() as u8 {
+            if (self.tick + id as u32) % 3 != 0 || self.p(id).is_none_or(|p| p.is_bot()) {
+                continue;
+            }
+            let now = self.lying_near(id);
+            let Some(p) = self.pm(id) else { continue };
+            let mut remove: Vec<u16> = Vec::new();
+            p.lying.retain(|k, _| {
+                let keep = now.iter().any(|e| e.id() == *k);
+                if !keep {
+                    remove.push(*k);
+                }
+                keep
+            });
+            let mut add: Vec<EntSnap> = Vec::new();
+            for e in now {
+                if p.lying.get(&e.id()) != Some(&e) {
+                    p.lying.insert(e.id(), e.clone());
+                    add.push(e);
+                }
+            }
+            // (in pieces that fit a datagram)
+            let mut first = true;
+            for part in add.chunks(36) {
+                let remove = if first {
+                    std::mem::take(&mut remove)
+                } else {
+                    Vec::new()
+                };
+                first = false;
+                self.outbox.push((
+                    Dest::One(id),
+                    S2C::Ents {
+                        add: part.to_vec(),
+                        remove,
+                    },
+                    true,
+                ));
+            }
+            for part in remove.chunks(300) {
+                self.outbox.push((
+                    Dest::One(id),
+                    S2C::Ents {
+                        add: Vec::new(),
+                        remove: part.to_vec(),
+                    },
+                    true,
+                ));
+            }
+        }
     }
 
     /// Builds the snapshot for one recipient.
@@ -2270,12 +2371,9 @@ impl Game {
                 age: (self.time - born) as f32,
             });
         }
-        for pk in &self.pickups {
-            ents.push(pk.snap());
-        }
-        ents.extend(self.br_loot_snaps());
+        // (guns, supplies and boxes on the ground go out once: `sync_lying`)
+        ents.extend(self.br_drop_snaps());
         ents.extend(self.car_snaps());
-        ents.extend(self.box_snaps());
         for h in &self.helis {
             ents.push(EntSnap::Heli {
                 id: h.id,
@@ -2310,11 +2408,9 @@ impl Game {
                 | EntSnap::Car { pos, .. }
                 | EntSnap::AirDrop { pos, .. }
                 | EntSnap::Fire { pos, .. } => near(Vec3::from_array(*pos), INTEREST_RANGE),
-                EntSnap::DeathBox { pos, .. } => near(Vec3::from_array(*pos), LOOT_RANGE),
-                // small things on the ground: a few pixels at most from further away
-                EntSnap::Weapon { pos, .. } | EntSnap::Loot { pos, .. } => {
-                    near(Vec3::from_array(*pos), LOOT_RANGE)
-                }
+                EntSnap::DeathBox { pos, .. }
+                | EntSnap::Weapon { pos, .. }
+                | EntSnap::Loot { pos, .. } => near(Vec3::from_array(*pos), LOOT_RANGE),
             });
         }
         // gunshots carry further than you can see

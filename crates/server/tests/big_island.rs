@@ -90,9 +90,7 @@ fn fifty_players_on_the_island() {
             "far enemy {d} m away in the snapshot"
         );
     }
-    let bytes = bincode::serialize(&S2C::Snapshot(Box::new(snap)))
-        .unwrap()
-        .len();
+    let bytes = toon_shared::net::encode(&S2C::Snapshot(Box::new(snap))).len();
     eprintln!("snapshot: {bytes} bytes");
     assert!(bytes < 4000);
 }

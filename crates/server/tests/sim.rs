@@ -231,7 +231,7 @@ fn dropped_weapons_can_be_picked_up_and_scavenged() {
     assert_eq!(g.pickups.len(), 1);
     let pk = g.pickups[0];
     assert_eq!(pk.w.id, WeaponId::M249);
-    assert!(g.snapshot_for(me).ents.iter().any(|e| matches!(
+    assert!(g.lying_near(me).iter().any(|e| matches!(
         e,
         toon_shared::protocol::EntSnap::Weapon {
             weapon: WeaponId::M249,

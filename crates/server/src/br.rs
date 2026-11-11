@@ -1898,21 +1898,12 @@ impl Game {
         })
     }
 
-    pub fn br_loot_snaps(&self) -> impl Iterator<Item = EntSnap> + '_ {
-        self.br
-            .loot
-            .iter()
-            .map(|l| EntSnap::Loot {
-                id: l.id,
-                kind: l.kind,
-                amount: l.amount,
-                pos: l.pos.to_array(),
-            })
-            .chain(self.br.drops.iter().map(|d| EntSnap::AirDrop {
-                id: d.id,
-                pos: d.pos.to_array(),
-                landed: d.landed,
-            }))
+    pub fn br_drop_snaps(&self) -> impl Iterator<Item = EntSnap> + '_ {
+        self.br.drops.iter().map(|d| EntSnap::AirDrop {
+            id: d.id,
+            pos: d.pos.to_array(),
+            landed: d.landed,
+        })
     }
 
     /// Where a battle royale bot heads: into the zone first, then to a gun if it has

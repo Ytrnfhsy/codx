@@ -74,9 +74,7 @@ fn soak(map: MapId, mode: Mode, bots: usize, squad: u8, secs: f32) -> Report {
         for id in &ids {
             let s = g.snapshot_for(*id);
             if *id == me {
-                let n = bincode::serialize(&S2C::Snapshot(Box::new(s)))
-                    .unwrap()
-                    .len();
+                let n = toon_shared::net::encode(&S2C::Snapshot(Box::new(s))).len();
                 r.biggest_snapshot = r.biggest_snapshot.max(n);
             }
         }

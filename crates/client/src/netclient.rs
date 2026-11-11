@@ -72,6 +72,9 @@ impl NetClient {
         let now = self.started.elapsed().as_secs_f64();
         let pkt = self.chan.build_packet(now);
         let _ = self.sock.send_to(&pkt, self.server);
+        for more in self.chan.spill.drain(..) {
+            let _ = self.sock.send_to(&more, self.server);
+        }
         self.last_send = Instant::now();
     }
 

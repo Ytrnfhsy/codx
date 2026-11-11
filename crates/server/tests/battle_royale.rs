@@ -1627,3 +1627,93 @@ fn squad_fights_on_and_leavers_are_out() {
     assert_eq!(g.br_stats.get("Перший").matches, 1);
     assert_eq!(g.state, MatchState::PostMatch, "no real player left");
 }
+
+/// What lies on the ground is not in the snapshots: a client is told once what is near,
+/// then only what changes (taken things go, new ones come).
+#[test]
+fn lying_things_are_sent_as_changes() {
+    use toon_shared::protocol::EntSnap;
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir()
+            .join("tw-br-lying")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 2;
+    cfg.br.max_players = 4;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Island, Mode::Br);
+    let v = toon_shared::consts::PROTOCOL_VERSION;
+    let me = g
+        .connect("127.0.0.1:5601".parse().unwrap(), "Гравець", "", v)
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(None));
+    for _ in 0..(40.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+        if g.br.running {
+            break;
+        }
+    }
+    assert!(g.br.running && g.br.loot.len() > 200);
+    // on the ground by some loot
+    let at = g.br.loot[0].pos;
+    {
+        let p = g.pm(me).unwrap();
+        p.in_plane = false;
+        p.alive = true;
+        p.body.chute = Chute::None;
+        p.body.pos = at;
+    }
+    // what the client knows, built from the messages as a client would
+    let mut known: std::collections::HashMap<u16, EntSnap> = Default::default();
+    let mut msgs = 0;
+    let mut pump = |g: &mut Game, known: &mut std::collections::HashMap<u16, EntSnap>| {
+        let mut n = 0;
+        for _ in 0..6 {
+            g.tick(TICK_DT);
+            for (_, m, reliable) in g.outbox.drain(..) {
+                if let S2C::Ents { add, remove } = m {
+                    assert!(reliable);
+                    n += 1;
+                    for id in remove {
+                        assert!(
+                            known.remove(&id).is_some(),
+                            "told to forget an unknown thing"
+                        );
+                    }
+                    for e in add {
+                        known.insert(e.id(), e);
+                    }
+                }
+            }
+            g.shots.clear();
+        }
+        n
+    };
+    msgs += pump(&mut g, &mut known);
+    assert!(msgs > 0 && !known.is_empty());
+    let near = g.lying_near(me);
+    assert_eq!(known.len(), near.len());
+    assert!(near.iter().all(|e| known.get(&e.id()) == Some(e)));
+    assert!(known.len() < g.br.loot.len(), "only what is near");
+    // nothing in the snapshots, and nothing more to say while nothing changes
+    let snap = g.snapshot_for(me);
+    assert!(!snap.ents.iter().any(|e| e.lies_still()));
+    let size = toon_shared::net::encode(&S2C::Snapshot(Box::new(snap))).len();
+    assert!(size < 1100, "snapshot of {size} bytes");
+    assert_eq!(pump(&mut g, &mut known), 0, "repeats itself");
+    // a thing is taken: it goes; walking away, the rest goes too
+    let first = g.br.loot[0].id;
+    g.br.loot.remove(0);
+    assert!(pump(&mut g, &mut known) > 0);
+    assert!(!known.contains_key(&first));
+    g.pm(me).unwrap().body.pos = at + glam::vec3(0.0, 0.0, 900.0);
+    pump(&mut g, &mut known);
+    let near = g.lying_near(me);
+    assert_eq!(known.len(), near.len());
+    assert!(near.iter().all(|e| known.contains_key(&e.id())));
+}

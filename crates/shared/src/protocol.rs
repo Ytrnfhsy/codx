@@ -269,7 +269,7 @@ pub struct VehicleHud {
     pub ammo: u8,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EntSnap {
     Grenade {
         id: u16,
@@ -355,6 +355,34 @@ pub enum EntSnap {
         /// Who sits in each seat (255 = nobody; the driver first).
         seats: [u8; crate::cars::SEATS],
     },
+}
+
+impl EntSnap {
+    pub fn id(&self) -> u16 {
+        match self {
+            EntSnap::Grenade { id, .. }
+            | EntSnap::Fire { id, .. }
+            | EntSnap::Smoke { id, .. }
+            | EntSnap::Heli { id, .. }
+            | EntSnap::Plane { id, .. }
+            | EntSnap::Vehicle { id, .. }
+            | EntSnap::Drop { id, .. }
+            | EntSnap::Weapon { id, .. }
+            | EntSnap::Loot { id, .. }
+            | EntSnap::DeathBox { id, .. }
+            | EntSnap::AirDrop { id, .. }
+            | EntSnap::Car { id, .. } => *id,
+        }
+    }
+
+    /// Lies where it is until somebody takes it: sent once (`S2C::Ents`), not in every
+    /// snapshot.
+    pub fn lies_still(&self) -> bool {
+        matches!(
+            self,
+            EntSnap::Weapon { .. } | EntSnap::Loot { .. } | EntSnap::DeathBox { .. }
+        )
+    }
 }
 
 /// Battle royale supplies.
@@ -603,6 +631,14 @@ pub enum S2C {
     Flashed(f32),
     /// The doors that stand open (all the others are shut).
     Doors(Vec<u16>),
+    /// One door opened or shut.
+    Door(u16, bool),
+    /// Things lying on the ground near us: new or changed ones, and the ids of those
+    /// gone (taken, or left behind).
+    Ents {
+        add: Vec<EntSnap>,
+        remove: Vec<u16>,
+    },
     Explosion {
         pos: V3,
         radius: f32,

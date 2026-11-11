@@ -161,6 +161,8 @@ pub struct GameClient {
     pub bomb: Option<BombSnap>,
     /// Battle royale state (plane, zone, players left).
     pub br: Option<BrSnap>,
+    /// Guns, supplies and boxes on the ground near us, as the server last told us.
+    pub lying: HashMap<u16, EntSnap>,
     /// The battle royale round's weather (clear elsewhere).
     pub weather: Weather,
     /// Battle royale: the big map is open.
@@ -435,6 +437,7 @@ impl GameClient {
             bomb: None,
             weather: Weather::Clear,
             br: None,
+            lying: HashMap::new(),
             big_map: false,
             marker: None,
             ready: None,
@@ -668,6 +671,7 @@ impl GameClient {
         self.match_end = None;
         self.bomb = None;
         self.ents.clear();
+        self.lying.clear();
         self.airstrikes.clear();
         self.killfeed.clear();
         self.recorder.clear();
@@ -933,18 +937,27 @@ impl GameClient {
                 }
             }
             S2C::Doors(open) => {
-                let eye = self.eye();
                 for k in 0..self.world.doors.len() {
-                    let o = open.contains(&(k as u16));
-                    if o != self.world.door_open[k] {
-                        self.world.set_door(k, o);
-                        if let Some(a) = audio {
-                            let c = self.world.doors[k].centre();
-                            if c.distance(eye) < 30.0 {
-                                a.play_at(Sfx::Click, c, eye, 0.9, 30.0);
-                            }
-                        }
+                    self.world.set_door(k, open.contains(&(k as u16)));
+                }
+            }
+            S2C::Door(k, open) => {
+                let k = k as usize;
+                if k < self.world.doors.len() && self.world.door_open[k] != open {
+                    self.world.set_door(k, open);
+                    let eye = self.eye();
+                    let c = self.world.doors[k].centre();
+                    if let Some(a) = audio.filter(|_| c.distance(eye) < 30.0) {
+                        a.play_at(Sfx::Click, c, eye, 0.9, 30.0);
                     }
+                }
+            }
+            S2C::Ents { add, remove } => {
+                for id in remove {
+                    self.lying.remove(&id);
+                }
+                for e in add {
+                    self.lying.insert(e.id(), e);
                 }
             }
             S2C::ScorePopup { points, text } => {
@@ -1097,6 +1110,9 @@ impl GameClient {
                 self.match_end = None;
             }
         }
+        // what lies on the ground comes separately (`S2C::Ents`)
+        let mut s = s;
+        s.ents.extend(self.lying.values().cloned());
         self.recorder.push(Frame {
             t: st,
             players: s.players.clone(),

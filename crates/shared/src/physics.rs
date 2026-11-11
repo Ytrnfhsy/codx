@@ -665,7 +665,16 @@ impl Body {
                 self.pos.y = g0;
             }
         } else {
-            self.pos.y = g;
+            // the ground rising under a low ceiling (a river bank under a bridge): no
+            // further than where the head still fits
+            let up = vec3(self.pos.x, g, self.pos.z);
+            if !fits(world, up, self.stance) && fits(world, start, self.stance) {
+                self.pos = start;
+                self.vel.x = 0.0;
+                self.vel.z = 0.0;
+            } else {
+                self.pos.y = g;
+            }
         }
         self.on_ground = true;
         self.vel.y = self.vel.y.max(0.0);

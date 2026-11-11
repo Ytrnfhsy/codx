@@ -76,8 +76,7 @@ impl Game {
         }
         self.world.set_door(k, want);
         self.door_used.insert(k as u16, self.time);
-        let msg = self.doors_msg();
-        self.broadcast(msg);
+        self.broadcast(S2C::Door(k as u16, want));
         true
     }
 
