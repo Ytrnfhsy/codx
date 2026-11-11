@@ -253,6 +253,9 @@ impl Game {
             p.br_place = 0;
             p.br_out_at = 0.0;
             p.spectating = None;
+            p.spec_free = false;
+            p.killed_by = None;
+            p.downed_dist = 0;
             if p.is_bot() {
                 jumps.push(p.id);
             }
@@ -403,6 +406,78 @@ impl Game {
         for (k, id) in ids.into_iter().enumerate() {
             if let Some(p) = self.pm(id) {
                 p.squad = (k / size) as u8 + 1;
+            }
+        }
+    }
+
+    /// Whom a player out of the round may watch: their squadmates while any is still in
+    /// (no peeking at the enemy for them), otherwise anybody.
+    fn br_watchable(&self, id: u8) -> Vec<u8> {
+        let squad = self.p(id).map_or(0, |p| p.squad);
+        let alive = |p: &&crate::game::Player| p.team.is_playing() && p.alive && p.id != id;
+        let mates: Vec<u8> = self
+            .players
+            .iter()
+            .flatten()
+            .filter(alive)
+            .filter(|p| squad != 0 && p.squad == squad)
+            .map(|p| p.id)
+            .collect();
+        if !mates.is_empty() {
+            return mates;
+        }
+        self.players
+            .iter()
+            .flatten()
+            .filter(alive)
+            .map(|p| p.id)
+            .collect()
+    }
+
+    /// The next (or previous) player to watch.
+    pub fn br_spectate_step(&mut self, id: u8, step: i32) {
+        if self.mode != Mode::Br || self.p(id).is_none_or(|p| p.alive) {
+            return;
+        }
+        let list = self.br_watchable(id);
+        let cur = self.p(id).and_then(|p| p.spectating);
+        let next = if list.is_empty() {
+            None
+        } else {
+            let i = cur.and_then(|c| list.iter().position(|x| *x == c));
+            let k = match i {
+                Some(i) => (i as i32 + step).rem_euclid(list.len() as i32) as usize,
+                None => 0,
+            };
+            Some(list[k])
+        };
+        if let Some(p) = self.pm(id) {
+            p.spectating = next;
+            p.spec_free = false;
+        }
+    }
+
+    /// Players out of the round always have somebody to watch: the one who got them, a
+    /// squadmate, or whoever is nearest.
+    fn br_spectators(&mut self) {
+        for id in 0..self.players.len() as u8 {
+            let Some(p) = self.p(id) else { continue };
+            if p.is_bot() || p.alive || p.in_plane || p.spec_free || !p.team.is_playing() {
+                continue;
+            }
+            let list = self.br_watchable(id);
+            if p.spectating.is_some_and(|t| list.contains(&t)) {
+                continue;
+            }
+            let at = p.body.pos;
+            let pick = p.killed_by.filter(|k| list.contains(k)).or_else(|| {
+                list.iter().copied().min_by(|a, b| {
+                    let d = |x: &u8| self.p(*x).map_or(f32::MAX, |q| q.body.pos.distance(at));
+                    d(a).total_cmp(&d(b))
+                })
+            });
+            if let Some(p) = self.pm(id) {
+                p.spectating = pick;
             }
         }
     }
@@ -1096,11 +1171,21 @@ impl Game {
             p.br_sync_ammo();
         }
         // no real player left in the round: nobody needs to watch the bots play it out
-        let humans_in = self
-            .players
-            .iter()
-            .flatten()
-            .any(|p| !p.is_bot() && p.team.is_playing() && (p.alive || p.in_plane));
+        // (a real player whose squad still fights is still in it: they watch their mates)
+        let humans_in = self.players.iter().flatten().any(|p| {
+            !p.is_bot()
+                && p.team.is_playing()
+                && (p.alive
+                    || p.in_plane
+                    || p.squad != 0
+                        && p.br_place == 0
+                        && self
+                            .players
+                            .iter()
+                            .flatten()
+                            .any(|m| m.squad == p.squad && (m.alive || m.in_plane)))
+        });
+        self.br_spectators();
         if !humans_in {
             self.br.running = false;
             self.end_match_text(|| {
@@ -1769,6 +1854,9 @@ impl Game {
                 .red
                 .map(|z| [z.c.x, z.c.y, z.r, (z.start - self.time).max(0.0) as f32]),
             open_box: self.box_view(id),
+            watching: me
+                .filter(|m| !m.alive && !m.spec_free)
+                .and_then(|m| m.spectating),
             summary: me.filter(|m| m.br_place != 0).map(|m| {
                 let rec = self.br_stats.get(&m.name);
                 toon_shared::protocol::BrSummary {

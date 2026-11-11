@@ -1392,11 +1392,35 @@ fn spectating_summary_and_records() {
         .expect("a summary");
     assert!(s.place > 1 && s.of >= 10, "place {} of {}", s.place, s.of);
     assert_eq!((s.matches, s.wins), (1, 0));
-    assert!(!snap.players.iter().any(|p| p.id == b), "B is far away");
-    g.handle(a, C2S::Spectate(b));
-    assert_eq!(g.p(a).unwrap().spectating, Some(b));
+    // the server gave A somebody to watch, and sends what is around them
+    let w = g.p(a).unwrap().spectating.expect("somebody to watch");
+    assert!(g.p(w).unwrap().alive);
+    assert_eq!(snap.br.as_ref().unwrap().watching, Some(w));
+    assert!(snap.players.iter().any(|p| p.id == w));
+    // stepping through the players gets to B, far away as they are
+    let mut seen = vec![w];
+    for _ in 0..12 {
+        g.handle(a, C2S::Spectate(0));
+        seen.push(g.p(a).unwrap().spectating.unwrap());
+    }
+    assert!(seen.contains(&b), "never got to B: {seen:?}");
+    while g.p(a).unwrap().spectating != Some(b) {
+        g.handle(a, C2S::Spectate(1));
+    }
     let snap = g.snapshot_for(a);
     assert!(snap.players.iter().any(|p| p.id == b), "watching B shows B");
+    // a free camera watches nobody; the one watched dying moves us on
+    g.handle(a, C2S::Spectate(2));
+    assert_eq!(g.snapshot_for(a).br.unwrap().watching, None);
+    g.handle(a, C2S::Spectate(3));
+    g.tick(TICK_DT);
+    let w = g.p(a).unwrap().spectating.unwrap();
+    if w != b {
+        g.kill(w, None, Cause::Zone, false);
+        g.tick(TICK_DT);
+        let w2 = g.p(a).unwrap().spectating.unwrap();
+        assert!(w2 != w && g.p(w2).unwrap().alive);
+    }
     // saved, and read back by a new server
     let again = toon_server::stats::BrStats::load(&dir.to_string_lossy());
     assert_eq!(again.get("Перший").matches, 1);
@@ -1519,4 +1543,87 @@ fn doors_open_shut_and_block() {
         g.pm(bot).unwrap().body.pos = outside;
     }
     assert!(g.world.door_open[0], "the bot left the door shut");
+}
+
+/// A real player knocked out while their squad's bots fight on stays in the round (and
+/// watches only the squad); when the squad is out they get their place and a record.
+/// Leaving the game mid-round counts as being knocked out.
+#[test]
+fn squad_fights_on_and_leavers_are_out() {
+    let dir = std::env::temp_dir().join("tw-br-squadon");
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: dir.to_string_lossy().into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 8;
+    cfg.br.max_players = 8;
+    cfg.br.squad = 2;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Island, Mode::Br);
+    let v = toon_shared::consts::PROTOCOL_VERSION;
+    let a = g
+        .connect("127.0.0.1:5401".parse().unwrap(), "Перший", "", v)
+        .unwrap();
+    let b = g
+        .connect("127.0.0.1:5402".parse().unwrap(), "Другий", "", v)
+        .unwrap();
+    g.handle(a, C2S::JoinTeam(None));
+    g.handle(b, C2S::JoinTeam(None));
+    for _ in 0..(40.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+        for id in [a, b] {
+            if g.br.running && g.p(id).is_some_and(|p| p.in_plane) {
+                g.handle(id, C2S::BrJump);
+            }
+        }
+    }
+    assert!(g.br.running);
+    let squad = g.p(a).unwrap().squad;
+    assert!(squad != 0);
+    // B leaves mid-round: out, with a place and a box where they stood
+    let b_squad = g.p(b).unwrap().squad;
+    let boxes = g.br.boxes.len();
+    g.remove_player(b, None);
+    assert!(g.p(b).is_none());
+    assert!(
+        g.br.boxes.len() > boxes || b_squad == squad,
+        "no box left behind"
+    );
+    // A is knocked out for good; the bot mate fights on, so the round goes on
+    let mate = g
+        .players
+        .iter()
+        .flatten()
+        .find(|p| p.squad == squad && p.id != a)
+        .map(|p| p.id);
+    g.kill(a, None, Cause::Zone, false);
+    for _ in 0..5 {
+        g.tick(TICK_DT);
+    }
+    if let Some(m) = mate.filter(|m| g.p(*m).is_some_and(|p| p.alive)) {
+        assert_eq!(g.state, MatchState::Playing, "the squad still fights");
+        assert_eq!(g.p(a).unwrap().br_place, 0);
+        assert_eq!(
+            g.p(a).unwrap().spectating,
+            Some(m),
+            "watching the squadmate"
+        );
+        // (and nobody else, however often they ask)
+        for _ in 0..5 {
+            g.handle(a, C2S::Spectate(0));
+            assert_eq!(g.p(a).unwrap().spectating, Some(m));
+        }
+        // the mate falls too: the squad has its place, A a summary and a record
+        g.kill(m, None, Cause::Zone, false);
+        g.tick(TICK_DT);
+    }
+    let p = g.p(a).unwrap();
+    assert!(p.br_place > 1, "place {}", p.br_place);
+    assert!(g.snapshot_for(a).br.unwrap().summary.is_some());
+    assert_eq!(g.br_stats.get("Перший").matches, 1);
+    assert_eq!(g.state, MatchState::PostMatch, "no real player left");
 }

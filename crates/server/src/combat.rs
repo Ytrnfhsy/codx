@@ -452,6 +452,7 @@ impl Game {
             v.body.stance = toon_shared::physics::Stance::Prone;
             v.last_damage = time;
             let name = v.name.clone();
+            let vpos = v.body.pos;
             self.say(Dest::One(victim), || S2C::Center {
                 text: t(
                     "Тебе поранено! Повзи в укриття — напарник може підняти",
@@ -461,6 +462,10 @@ impl Game {
                 secs: 3.0,
             });
             if let Some(a) = attacker.filter(|a| *a != victim) {
+                let far = self.p(a).map_or(0.0, |k| k.body.pos.distance(vpos));
+                if let Some(v) = self.pm(victim) {
+                    v.downed_dist = far.round().min(9999.0) as u16;
+                }
                 if let Some(ap) = self.pm(a) {
                     ap.br_dmg += dealt;
                 }
@@ -528,10 +533,13 @@ impl Game {
         }
         let dropped = *v.weapon();
         // a knocked-down player who bleeds out or is finished: the knock-down earns the kill
+        let bled = attacker.is_none() && v.downed && v.downed_by.is_some();
         let attacker = match (attacker, v.downed_by) {
             (None, Some(d)) if v.downed => Some(d),
             (a, _) => a,
         };
+        v.killed_by = attacker.filter(|a| *a != victim);
+        let downed_dist = v.downed_dist;
         v.downed = false;
         v.downed_by = None;
         v.revive = 0.0;
@@ -549,7 +557,13 @@ impl Game {
         let mut dist = 0u16;
         if let Some(a) = attacker.filter(|a| *a != victim) {
             let far = self.p(a).map_or(0.0, |k| k.body.pos.distance(vpos_now));
-            dist = far.round().min(9999.0) as u16;
+            // (bled out: as far as the shot that knocked them down)
+            dist = if bled {
+                downed_dist
+            } else {
+                far.round().min(9999.0) as u16
+            };
+            let far = if bled { downed_dist as f32 } else { far };
             if let Some(k) = self.pm(a) {
                 k.br_longest = k.br_longest.max(far);
             }

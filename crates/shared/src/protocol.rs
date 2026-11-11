@@ -118,7 +118,9 @@ pub enum C2S {
     Car(CarCmd),
     /// Death boxes.
     Box(BoxCmd),
-    /// Out of the battle royale: whose eyes to watch through (255 = a free camera).
+    /// Out of the battle royale: 0 = watch the next player, 1 = the previous one,
+    /// 2 = a free camera, 3 = back to watching. The server picks whom (squadmates only
+    /// while the squad is still in).
     Spectate(u8),
     /// Open or shut door `k` (standing next to it).
     Door(u16),
@@ -434,6 +436,8 @@ pub struct BrSnap {
     pub red: Option<[f32; 4]>,
     /// Our round once we are out (or it is over).
     pub summary: Option<BrSummary>,
+    /// Out of the round: whose eyes we watch through.
+    pub watching: Option<u8>,
     /// The death box we are looking into.
     pub open_box: Option<BoxView>,
 }

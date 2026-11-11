@@ -97,8 +97,12 @@ pub struct Player {
     pub marker: Option<[f32; 2]>,
     /// The death box they look into.
     pub open_box: Option<u16>,
-    /// Out of the battle royale: whom they watch.
+    /// Out of the battle royale: whom they watch (or a free camera), and who got them.
     pub spectating: Option<u8>,
+    pub spec_free: bool,
+    pub killed_by: Option<u8>,
+    /// How far the one who knocked them down was (for the kill feed).
+    pub downed_dist: u16,
     /// This battle royale round: damage dealt, longest kill, place once out, when out.
     pub br_dmg: f32,
     pub br_longest: f32,
@@ -235,6 +239,9 @@ impl Player {
             marker: None,
             open_box: None,
             spectating: None,
+            spec_free: false,
+            killed_by: None,
+            downed_dist: 0,
             br_dmg: 0.0,
             br_longest: 0.0,
             br_place: 0,
@@ -765,6 +772,11 @@ impl Game {
     }
 
     pub fn remove_player(&mut self, id: u8, reason: Option<&str>) {
+        // leaving a battle royale round counts as being knocked out: the things stay in
+        // a box, the place is recorded, whoever knocked them down gets the kill
+        if self.mode == Mode::Br && self.br.running && self.p(id).is_some_and(|p| p.alive) {
+            self.kill(id, None, toon_shared::weapons::Cause::World, false);
+        }
         let Some(p) = self.players[id as usize].take() else {
             return;
         };
@@ -1277,11 +1289,19 @@ impl Game {
             C2S::Door(k) => {
                 self.use_door(id, k, None);
             }
-            C2S::Spectate(t) => {
-                if let Some(p) = self.pm(id) {
-                    p.spectating = (t != 255).then_some(t);
+            C2S::Spectate(cmd) => match cmd {
+                0 => self.br_spectate_step(id, 1),
+                1 => self.br_spectate_step(id, -1),
+                2 | 3 => {
+                    if let Some(p) = self.pm(id) {
+                        p.spec_free = cmd == 2;
+                        if p.spec_free {
+                            p.spectating = None;
+                        }
+                    }
                 }
-            }
+                _ => {}
+            },
             C2S::Box(cmd) => match cmd {
                 toon_shared::protocol::BoxCmd::Open(b) => {
                     if let Some(p) = self.pm(id) {
@@ -2027,6 +2047,7 @@ impl Game {
         let me = self.p(id);
         let my_team = me.map(|p| p.team).unwrap_or(Team::Spectator);
         let my_squad = me.map_or(0, |p| p.squad);
+        let watched = me.filter(|p| !p.alive).and_then(|p| p.spectating);
         let uav = my_team.is_playing() && self.uav_until[my_team.index()] > self.time;
         // big maps: only what is near enough to matter (the fog hides the rest anyway)
         let focus = self.interest(id);
@@ -2045,6 +2066,7 @@ impl Game {
                 p.id == id
                     || p.team == my_team && my_team.is_playing() && !self.mode.solo()
                     || my_squad != 0 && p.squad == my_squad
+                    || watched == Some(p.id)
                     || near(p.body.pos, INTEREST_RANGE)
             })
             .map(|p| {

@@ -2666,15 +2666,19 @@ impl GameClient {
     /// Out of the battle royale: watch the one who got us, a squadmate, or anybody still
     /// in (LMB / RMB: next / previous, Space: a free camera).
     fn update_br_spectate(&mut self, input: bool) {
-        let mut alive: Vec<u8> = self
-            .remotes
-            .iter()
-            .filter(|(_, r)| r.alive)
-            .map(|(id, _)| *id)
-            .collect();
-        alive.sort_unstable();
-        let was = self.spectate;
-        if input && binds::pressed(Action::Jump) {
+        // the server picks whom we watch (squadmates only while the squad is in)
+        self.spectate = if self.spec_free {
+            None
+        } else {
+            self.br
+                .as_ref()
+                .and_then(|b| b.watching)
+                .filter(|t| self.remotes.get(t).is_some_and(|r| r.alive))
+        };
+        if !input {
+            return;
+        }
+        if binds::pressed(Action::Jump) {
             self.spec_free = !self.spec_free;
             if self.spec_free {
                 // the free camera starts where we were watching from
@@ -2684,44 +2688,12 @@ impl GameClient {
                 self.pitch = pi;
                 self.spectate = None;
             }
-        }
-        if !self.spec_free {
-            let step = if input && binds::pressed(Action::Fire) {
-                1
-            } else if input && binds::pressed(Action::Aim) {
-                -1
-            } else {
-                0
-            };
-            let current_ok = self.spectate.is_some_and(|t| alive.contains(&t));
-            if step != 0 && !alive.is_empty() {
-                let i = self
-                    .spectate
-                    .and_then(|t| alive.iter().position(|a| *a == t))
-                    .unwrap_or(0) as i32;
-                self.spectate = Some(alive[(i + step).rem_euclid(alive.len() as i32) as usize]);
-            } else if !current_ok {
-                // the one who got us, a squadmate, or whoever is nearest
-                let killer = self.death_info.as_ref().and_then(|d| d.2);
-                let mate = self
-                    .br
-                    .as_ref()
-                    .and_then(|b| b.squad.iter().find(|m| m.id != self.my_id && m.alive))
-                    .map(|m| m.id);
-                let here = self.death_pos;
-                let nearest = alive.iter().copied().min_by(|a, b| {
-                    let da = self.remotes[a].pos.distance(here);
-                    let db = self.remotes[b].pos.distance(here);
-                    da.total_cmp(&db)
-                });
-                self.spectate = killer
-                    .filter(|k| alive.contains(k))
-                    .or(mate.filter(|m| alive.contains(m)))
-                    .or(nearest);
-            }
-        }
-        if self.spectate != was {
-            self.net.send(C2S::Spectate(self.spectate.unwrap_or(255)));
+            self.net
+                .send(C2S::Spectate(if self.spec_free { 2 } else { 3 }));
+        } else if !self.spec_free && binds::pressed(Action::Fire) {
+            self.net.send(C2S::Spectate(0));
+        } else if !self.spec_free && binds::pressed(Action::Aim) {
+            self.net.send(C2S::Spectate(1));
         }
     }
 
