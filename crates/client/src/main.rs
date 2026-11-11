@@ -474,17 +474,17 @@ async fn amain(args: Args) {
                                 let port = h.port;
                                 // back from the game, the main page shows the server's status
                                 menu.page = menu::Page::Main;
-                                menu.host_info = Some(format!(
-                                    "{}",
-                                    if h.http_port.is_some() {
+                                menu.host_info = Some(
+                                    (if h.http_port.is_some() {
                                         tr!(
                                             "адмінка: http://localhost:{port}/admin",
                                             "admin: http://localhost:{port}/admin"
                                         )
                                     } else {
                                         String::new()
-                                    }
-                                ));
+                                    })
+                                    .to_string(),
+                                );
                                 server = Some(h);
                                 let addr = format!("127.0.0.1:{port}");
                                 match NetClient::connect(

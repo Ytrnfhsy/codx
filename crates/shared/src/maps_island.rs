@@ -366,7 +366,7 @@ fn heightmap() -> Heightmap {
                     c = paint::DIRT;
                 }
             }
-            if ROADS.iter().any(|r| line_dist(q, r) < 3.2) && !(p.y < WATER) {
+            if ROADS.iter().any(|r| line_dist(q, r) < 3.2) && p.y >= WATER {
                 c = paint::ROAD;
             }
             m.paint[idx] = c;

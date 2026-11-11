@@ -353,26 +353,53 @@ pub fn render_world(
         let r = LOOT_DRAW * settings.view_distance.clamp(0.5, 1.0);
         d.x * d.x + d.z * d.z > r * r
     };
-    // doors (as they stand now), with a knob on both faces
+    // doors, swinging on their hinges to where they stand now, with a knob on both faces
     for k in 0..g.world.doors.len() {
         let d = &g.world.doors[k];
         if far(&d.centre().to_array()) {
             continue;
         }
-        let [lo, hi] = d.panel(g.world.door_open[k]);
-        let mid = (lo + hi) * 0.5;
-        m.boxed(&Mat4::from_translation(mid), (hi - lo) * 0.5, d.color, 0.02);
-        // the knob sits at the far end from the hinge (the low end along the wall)
+        let t = g.door_swing.get(k).copied().unwrap_or(0.0);
+        let [lo, hi] = d.shut;
         let size = hi - lo;
-        let thin_x = size.x < size.z;
-        let (knob, off) = if thin_x {
-            (vec3(mid.x, lo.y + 1.0, hi.z - 0.18), vec3(0.07, 0.0, 0.0))
+        let along_x = size.x > size.z;
+        let (len, thick) = if along_x {
+            (size.x, size.z)
         } else {
-            (vec3(hi.x - 0.18, lo.y + 1.0, mid.z), vec3(0.0, 0.0, 0.07))
+            (size.z, size.x)
         };
+        let shut_mid = (lo + hi) * 0.5;
+        let open_mid = (d.open[0] + d.open[1]) * 0.5;
+        // the hinge is at the low end of the doorway; open, the panel points into the room
+        let (hinge, u, v) = if along_x {
+            (
+                vec3(lo.x, shut_mid.y, shut_mid.z),
+                Vec3::X,
+                Vec3::Z * (open_mid.z - shut_mid.z).signum(),
+            )
+        } else {
+            (
+                vec3(shut_mid.x, shut_mid.y, lo.z),
+                Vec3::Z,
+                Vec3::X * (open_mid.x - shut_mid.x).signum(),
+            )
+        };
+        let a = t * std::f32::consts::FRAC_PI_2;
+        let dir = u * a.cos() + v * a.sin();
+        let rot = Mat4::from_rotation_y((-dir.z).atan2(dir.x));
+        let at = |along: f32, across: f32, up: f32| {
+            let side = vec3(-dir.z, 0.0, dir.x);
+            Mat4::from_translation(hinge + dir * along + side * across + Vec3::Y * up) * rot
+        };
+        m.boxed(
+            &at(len * 0.5, 0.0, 0.0),
+            vec3(len * 0.5, size.y * 0.5, thick * 0.5),
+            d.color,
+            0.02,
+        );
         for s in [-1.0, 1.0] {
-            let c = Mat4::from_translation(knob + off * s);
-            m.boxed(&c, Vec3::splat(0.035), [200, 170, 70], 0.0);
+            let knob = at(len - 0.18, s * 0.07, lo.y + 1.0 - shut_mid.y);
+            m.boxed(&knob, Vec3::splat(0.035), [200, 170, 70], 0.0);
         }
     }
     for e in ents {

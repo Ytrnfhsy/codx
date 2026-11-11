@@ -1671,7 +1671,7 @@ fn lying_things_are_sent_as_changes() {
     // what the client knows, built from the messages as a client would
     let mut known: std::collections::HashMap<u16, EntSnap> = Default::default();
     let mut msgs = 0;
-    let mut pump = |g: &mut Game, known: &mut std::collections::HashMap<u16, EntSnap>| {
+    let pump = |g: &mut Game, known: &mut std::collections::HashMap<u16, EntSnap>| {
         let mut n = 0;
         for _ in 0..6 {
             g.tick(TICK_DT);

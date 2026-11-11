@@ -508,7 +508,7 @@ fn set_var(g: &mut Game, key: &str, v: &str) -> String {
         },
         "botskill" => match crate::bots::parse_skill(v) {
             Some(n) => g.cfg.bot_skill = n,
-            None => return format!("botskill: число 0..1 або easy | normal | hard | veteran"),
+            None => return "botskill: число 0..1 або easy | normal | hard | veteran".to_string(),
         },
         "spawnprotect" | "spawnprotection" => match num {
             Ok(n) if (0.0..=30.0).contains(&n) => g.cfg.spawn_protection = n,

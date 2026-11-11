@@ -764,9 +764,8 @@ impl Game {
                     } else if dist_to_target > 14.0
                         && class != WeaponClass::Shotgun
                         && r < if long_gun { 0.8 } else { 0.55 }
+                        || dist_to_target > 8.0 && r < 0.2
                     {
-                        Stance::Crouch
-                    } else if dist_to_target > 8.0 && r < 0.2 {
                         Stance::Crouch
                     } else {
                         Stance::Stand

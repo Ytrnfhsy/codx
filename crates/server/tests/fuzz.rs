@@ -46,7 +46,7 @@ fn random_msg(rng: &mut Rng, life: u16, seq: &mut u32) -> C2S {
             ..DEFAULT_CLASSES[rng.below(DEFAULT_CLASSES.len())].1
         }),
         2 => C2S::Spawn,
-        3 | 4 | 5 => {
+        3..=5 => {
             *seq = seq.wrapping_add(rng.below(3) as u32);
             C2S::Input(InputState {
                 seq: if rng.chance(0.1) {

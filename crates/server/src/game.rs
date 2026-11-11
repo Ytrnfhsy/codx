@@ -2204,7 +2204,7 @@ impl Game {
     /// times a second (the things themselves are not in the snapshots).
     fn sync_lying(&mut self) {
         for id in 0..self.players.len() as u8 {
-            if (self.tick + id as u32) % 3 != 0 || self.p(id).is_none_or(|p| p.is_bot()) {
+            if !(self.tick + id as u32).is_multiple_of(3) || self.p(id).is_none_or(|p| p.is_bot()) {
                 continue;
             }
             let now = self.lying_near(id);

@@ -164,6 +164,8 @@ pub struct GameClient {
     pub br: Option<BrSnap>,
     /// Guns, supplies and boxes on the ground near us, as the server last told us.
     pub lying: HashMap<u16, EntSnap>,
+    /// How far each door has swung open (0 shut .. 1 open), for drawing.
+    pub door_swing: Vec<f32>,
     /// The battle royale round's weather (clear elsewhere).
     pub weather: Weather,
     /// Battle royale: the big map is open.
@@ -442,6 +444,7 @@ impl GameClient {
             weather: Weather::Clear,
             br: None,
             lying: HashMap::new(),
+            door_swing: Vec::new(),
             big_map: false,
             marker: None,
             ready: None,
@@ -1071,17 +1074,17 @@ impl GameClient {
             S2C::Ping(ms) => self.net.send_unreliable(C2S::Pong(ms)),
             S2C::Tuning(mut t) => {
                 t.finalize();
-                if self.tuning.movement != t.movement || self.tuning.weapons != t.weapons {
-                    if self.have_clock {
-                        self.push_chat(
-                            toon_shared::lang::t(
-                                "Сервер оновив налаштування руху/зброї",
-                                "The server changed movement/weapon settings",
-                            )
-                            .into(),
-                            crate::ui::MUTED,
-                        );
-                    }
+                if (self.tuning.movement != t.movement || self.tuning.weapons != t.weapons)
+                    && self.have_clock
+                {
+                    self.push_chat(
+                        toon_shared::lang::t(
+                            "Сервер оновив налаштування руху/зброї",
+                            "The server changed movement/weapon settings",
+                        )
+                        .into(),
+                        crate::ui::MUTED,
+                    );
                 }
                 self.tuning = *t;
             }
@@ -1933,6 +1936,19 @@ impl GameClient {
         self.now = get_time();
         let now = self.now;
         // while a replay plays, the live game is silent
+        // doors swing to where they stand (a new map: straight there)
+        if self.door_swing.len() != self.world.doors.len() {
+            self.door_swing = self
+                .world
+                .door_open
+                .iter()
+                .map(|o| *o as u8 as f32)
+                .collect();
+        }
+        for (s, open) in self.door_swing.iter_mut().zip(&self.world.door_open) {
+            let to = *open as u8 as f32;
+            *s += (to - *s).clamp(-dt * 4.5, dt * 4.5);
+        }
         let mut audio_opt = if self.killcam.is_some() { None } else { audio };
         if let (Some(a), None) = (audio, &self.killcam) {
             a.set_listener_yaw(self.camera().1);
@@ -2314,22 +2330,21 @@ impl GameClient {
             self.trigger_was_down = trig_down;
             // spawn protection: you can't be hurt, so you can't attack either.
             // Any attack key gives the protection up instead (no shot is fired).
-            if self.is_protected() {
-                if trig_pressed
+            if self.is_protected()
+                && (trig_pressed
                     || pressed(Action::Grenade)
                     || pressed(Action::Smoke)
                     || pressed(Action::Knife)
-                    || pressed(Action::Killstreak)
-                {
-                    self.protection_dropped = true;
-                    self.net.send(C2S::DropProtection);
-                    self.next_fire = now + 0.25;
-                    self.melee_ready = self.melee_ready.max(now + 0.25);
-                    self.throw_until = self.throw_until.max(now + 0.25);
-                    self.trigger_was_down = true; // the click must not also fire
-                }
-                // fall through with attacks blocked below
+                    || pressed(Action::Killstreak))
+            {
+                self.protection_dropped = true;
+                self.net.send(C2S::DropProtection);
+                self.next_fire = now + 0.25;
+                self.melee_ready = self.melee_ready.max(now + 0.25);
+                self.throw_until = self.throw_until.max(now + 0.25);
+                self.trigger_was_down = true; // the click must not also fire
             }
+            // fall through with attacks blocked below
             // (knocked down: no attacks of any kind)
             let shielded =
                 self.is_protected() || self.downed() || self.seat().is_some_and(|(_, k)| k == 0);
@@ -2661,6 +2676,16 @@ impl GameClient {
                 })
                 .reduce(f32::min);
             a.heli(heli);
+            // rain: loud out in it, a murmur under a roof
+            let rain = (self.weather == Weather::Rain && self.killcam.is_none()).then(|| {
+                let eye = self.camera().0;
+                if self.world.line_of_sight(eye, eye + vec3(0.0, 25.0, 0.0)) {
+                    1.0
+                } else {
+                    0.4
+                }
+            });
+            a.rain(rain);
             // the nearest drone buzzes (our own one right in our ears)
             let ear = self.camera().0;
             let own = self

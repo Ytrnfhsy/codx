@@ -21,3 +21,6 @@ tiny_http = "0.12"
 # self-update from GitHub Releases
 ureq = { version = "2", default-features = false, features = ["tls", "native-certs"] }
 self-replace = "1"
+
+[lints]
+workspace = true

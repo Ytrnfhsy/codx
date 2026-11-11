@@ -66,6 +66,8 @@ pub enum Sfx {
     Whistle,
     /// Drone rotors (looped).
     Drone,
+    /// Rain falling all around (looped).
+    Rain,
     /// A weapon's own reload sounds, where recordings exist (`mag_out_ak47`, …); the
     /// generic `MagOut`/`MagIn`/`Bolt` play for the rest.
     MagOutOf(WeaponId),
@@ -934,6 +936,40 @@ impl Synth {
         mono(&out)
     }
 
+    /// Steady rain: hiss with a little patter in it, different in each ear, two seconds
+    /// that loop without a seam.
+    fn rain(&mut self) -> Vec<[f32; 2]> {
+        let period = 2.0;
+        let xf = 0.25;
+        let n = ((period + xf) * SR) as usize;
+        let p = (period * SR) as usize;
+        let side = |me: &mut Self| {
+            let mut b = vec![0.0f32; n];
+            let mut hiss = Biquad::new(Kind::High, 1800.0, 0.7);
+            let mut top = Biquad::new(Kind::Low, 7000.0, 0.7);
+            let mut patter = Biquad::new(Kind::Band, 900.0, 0.9);
+            let mut drop = 0.0f32;
+            for v in b.iter_mut() {
+                let nse = me.noise();
+                if me.rng.chance(0.004) {
+                    drop = me.rng.range(0.5, 1.0);
+                }
+                drop *= 0.994;
+                *v = top.run(hiss.run(nse)) * 0.6 + patter.run(nse) * drop * 0.8;
+            }
+            let x = n - p;
+            let mut out: Vec<f32> = b[..p].to_vec();
+            for i in 0..x {
+                let k = i as f32 / x as f32;
+                out[i] = b[i] * k + b[p + i] * (1.0 - k);
+            }
+            Synth::norm(&mut out, 0.6);
+            out
+        };
+        let (l, r) = (side(self), side(self));
+        l.iter().zip(&r).map(|(a, b)| [*a, *b]).collect()
+    }
+
     /// A short "ugh": a buzzing voice through the formants of an "uh" vowel.
     fn hurt(&mut self) -> Vec<f32> {
         let len = 0.28;
@@ -1213,7 +1249,7 @@ impl Synth {
                 Synth::norm(&mut b, 0.6);
                 mono(&b)
             }
-            Sfx::Whiz => self.whiz(if variant % 2 == 0 { -0.7 } else { 0.7 }),
+            Sfx::Whiz => self.whiz(if variant.is_multiple_of(2) { -0.7 } else { 0.7 }),
             Sfx::Beep => mono(&Synth::tone(0.12, 1760.0, 14.0, &[0.7, 0.15])),
             Sfx::Jet => self.jet(),
             Sfx::Click => mono(&Synth::tone(0.04, 1100.0, 80.0, &[0.6, 0.2])),
@@ -1240,6 +1276,7 @@ impl Synth {
                 mono(&b)
             }
             Sfx::Drone => self.drone(),
+            Sfx::Rain => self.rain(),
             Sfx::Streak => mono(&Synth::chord(
                 &[(0.0, 523.0), (0.09, 659.0), (0.18, 784.0), (0.27, 1046.0)],
                 0.3,
@@ -1294,6 +1331,7 @@ fn all() -> Vec<Sfx> {
         Sfx::Heli,
         Sfx::Whistle,
         Sfx::Drone,
+        Sfx::Rain,
     ]);
     for w in WeaponId::all() {
         v.extend([Sfx::MagOutOf(w), Sfx::MagInOf(w), Sfx::BoltOf(w)]);
@@ -1638,6 +1676,7 @@ pub struct Audio {
     last: RefCell<HashMap<Sfx, f64>>,
     heli_on: RefCell<bool>,
     drone_on: RefCell<bool>,
+    rain_on: RefCell<bool>,
     pending: RefCell<Vec<(f64, Sfx, f32)>>,
     rng: RefCell<Rng>,
 }
@@ -1687,6 +1726,7 @@ impl Audio {
             last: RefCell::new(HashMap::new()),
             heli_on: RefCell::new(false),
             drone_on: RefCell::new(false),
+            rain_on: RefCell::new(false),
             pending: RefCell::new(Vec::new()),
             rng: RefCell::new(Rng::from_time()),
         }
@@ -1715,6 +1755,18 @@ impl Audio {
         }
         let (_, right) = toon_shared::yaw_basis(self.listener_yaw.get());
         flat.normalize().dot(right)
+    }
+
+    /// Sounds from behind are a little quieter than those in front.
+    fn behind(&self, pos: Vec3, listener: Vec3) -> f32 {
+        let d = pos - listener;
+        let flat = vec3(d.x, 0.0, d.z);
+        if flat.length_squared() < 1.0 {
+            return 1.0;
+        }
+        let (fwd, _) = toon_shared::yaw_basis(self.listener_yaw.get());
+        let back = (-flat.normalize().dot(fwd)).max(0.0);
+        1.0 - 0.3 * back
     }
 
     /// A sound from a place: the left or right version when it is off to one side.
@@ -1820,6 +1872,7 @@ impl Audio {
         let d = pos.distance(listener);
         let k = (1.0 - d / range).clamp(0.0, 1.0);
         let side = self.side_of(pos, listener);
+        let vol = vol * self.behind(pos, listener);
         self.play_placed(s, vol * (0.08 + 0.92 * k * k), side);
     }
 
@@ -1828,6 +1881,7 @@ impl Audio {
     pub fn play_shot(&self, s: Sfx, pos: Vec3, listener: Vec3, vol: f32) {
         let d = pos.distance(listener);
         let side = self.side_of(pos, listener);
+        let vol = vol * self.behind(pos, listener);
         let near = (1.0 - d / 60.0).clamp(0.0, 1.0);
         if near > 0.0 {
             self.play_placed(s, vol * near * near, side);
@@ -1847,6 +1901,17 @@ impl Audio {
     /// Drone buzz of the nearest drone (None = stop).
     pub fn drone(&self, dist: Option<f32>) {
         self.looped(Sfx::Drone, &self.drone_on, dist, 45.0, 0.55);
+    }
+
+    /// Rain all around: 1 out in it, less under a roof (None = it does not rain).
+    pub fn rain(&self, level: Option<f32>) {
+        self.looped(
+            Sfx::Rain,
+            &self.rain_on,
+            level.map(|l| 1.0 - l.clamp(0.0, 1.0)),
+            1.0,
+            0.5,
+        );
     }
 
     fn looped(&self, s: Sfx, on: &RefCell<bool>, dist: Option<f32>, range: f32, gain: f32) {

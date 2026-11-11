@@ -171,7 +171,7 @@ fn sample(t: u8, u: f32, v: f32, px: usize, py: usize) -> f32 {
             let planks = 4.0;
             let plank = (v * planks).floor();
             let ly = (v * planks).fract();
-            let seam = ly < 0.05 || ly > 0.97;
+            let seam = !(0.05..=0.97).contains(&ly);
             let warp = fbm(u, v, 2, 2, 91) - 0.5;
             let rings = ((u * 3.0 + warp * 0.6 + plank * 0.37) * TAU * 3.0).sin();
             0.5 + rings * 0.06

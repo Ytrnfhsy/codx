@@ -444,7 +444,7 @@ impl Nav {
             } else {
                 MAX_UP
             };
-            let ok = dy.abs() <= up || (allow_drop && dy < 0.0 && dy >= -MAX_DROP);
+            let ok = dy.abs() <= up || (allow_drop && (-MAX_DROP..0.0).contains(&dy));
             if ok && best.map(|b| dy.abs() < b.1).unwrap_or(true) {
                 best = Some((m, dy.abs()));
             }

@@ -31,3 +31,12 @@ opt-level = 3
 # the texture size around to 0, crashing the game at random while drawing text.
 [patch.crates-io]
 macroquad = { path = "vendor/macroquad" }
+
+# Style lints that do not fit this code: map builders take many plain numbers, and
+# index loops over several parallel arrays read better than zipped iterators.
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+needless_range_loop = "allow"
+type_complexity = "allow"
+large_enum_variant = "allow"
+field_reassign_with_default = "allow"

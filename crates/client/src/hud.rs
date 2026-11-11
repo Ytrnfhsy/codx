@@ -2672,7 +2672,7 @@ impl GameClient {
                 MUTED,
             );
             let mut rows: Vec<_> = self.scoreboard.iter().filter(|r| r.team == *team).collect();
-            rows.sort_by(|a, b| b.score.cmp(&a.score));
+            rows.sort_by_key(|r| std::cmp::Reverse(r.score));
             for (k, r) in rows.iter().enumerate() {
                 let yy = y + 24.0 + k as f32 * 24.0;
                 if r.id == self.my_id {
