@@ -30,6 +30,9 @@ pub fn resolve(addr: &str) -> Result<SocketAddr, String> {
         .ok_or_else(|| toon_shared::tr!("Не вдалося знайти «{a}»", "Could not find \"{a}\""))
 }
 
+/// This installation's own number (from the settings), sent when connecting.
+pub static PLAYER_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 impl NetClient {
     pub fn connect(addr: &str, name: &str, password: &str) -> Result<NetClient, String> {
         let server = resolve(addr)?;
@@ -54,6 +57,7 @@ impl NetClient {
             password: password.to_string(),
             version: PROTOCOL_VERSION,
             game: toon_shared::consts::GAME_VERSION.to_string(),
+            key: PLAYER_KEY.load(std::sync::atomic::Ordering::Relaxed),
         });
         c.flush();
         Ok(c)

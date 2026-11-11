@@ -113,6 +113,11 @@ pub struct Player {
     pub history: VecDeque<HistEntry>,
     pub rcon: bool,
     pub rcon_fails: u32,
+    /// This connection's number for admin command proofs, and the last command's count.
+    pub nonce: u64,
+    pub rcon_seq: u32,
+    /// The installation's own number (0: none): records are kept under it.
+    pub key: u64,
     pub progress: f32,
     pub joined_at: f64,
     pub chat_budget: f32,
@@ -260,6 +265,9 @@ impl Player {
             history: VecDeque::new(),
             rcon: false,
             rcon_fails: 0,
+            nonce: random_u64(),
+            rcon_seq: 0,
+            key: 0,
             progress: 0.0,
             joined_at: now,
             chat_budget: 5.0,
@@ -330,6 +338,35 @@ pub enum Dest {
     All,
     Team(Team),
     One(u8),
+}
+
+/// A number nobody can guess (from the system's randomness behind `RandomState`).
+pub fn random_u64() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u64(0x5eed);
+    h.finish()
+}
+
+impl Player {
+    /// What this player's records are kept under: the installation's number, or the name
+    /// for those without one.
+    pub fn stats_key(&self) -> String {
+        if self.key != 0 {
+            format!("#{:016x}", self.key)
+        } else {
+            self.name.clone()
+        }
+    }
+}
+
+impl Game {
+    /// A real player's installation number, as its client gave it.
+    pub fn set_key(&mut self, id: u8, key: u64) {
+        if let Some(p) = self.pm(id) {
+            p.key = key;
+        }
+    }
 }
 
 /// In the air nobody gets higher than this above where they last stood (a jump is 1.1 m).
@@ -799,6 +836,7 @@ impl Game {
                 map: self.map.id,
                 mode: self.mode,
                 settings: self.settings(),
+                nonce: self.p(id).map_or(0, |p| p.nonce),
             },
         );
         self.send(id, S2C::Tuning(Box::new(self.tuning.clone())));
@@ -1394,7 +1432,7 @@ impl Game {
                 keys,
             } => self.on_drive(id, Vec3::from_array(pos), yaw, pitch, keys),
             C2S::Chat { text, team_only } => self.on_chat(id, text, team_only),
-            C2S::Rcon { password, cmd } => self.on_rcon(id, &password, &cmd),
+            C2S::Rcon { seq, proof, cmd } => self.on_rcon(id, seq, &proof, &cmd),
             C2S::Pong(ms) => {
                 let now_ms = (self.time * 1000.0) as u32;
                 if let Some(p) = self.pm(id) {
@@ -1621,13 +1659,22 @@ impl Game {
         }
     }
 
-    fn on_rcon(&mut self, id: u8, password: &str, cmd: &str) {
+    fn on_rcon(&mut self, id: u8, seq: u32, proof: &str, cmd: &str) {
         let ok = {
             let Some(p) = self.p(id) else { return };
+            // (each command counts up: one overheard cannot be sent again)
             !self.cfg.rcon_password.is_empty()
                 && p.rcon_fails < 5
-                && password == self.cfg.rcon_password
+                && seq > p.rcon_seq
+                && cmd.len() <= 512
+                && proof
+                    == toon_shared::protocol::rcon_proof(&self.cfg.rcon_password, p.nonce, seq, cmd)
         };
+        if ok {
+            if let Some(p) = self.pm(id) {
+                p.rcon_seq = seq;
+            }
+        }
         if !ok {
             if let Some(p) = self.pm(id) {
                 p.rcon_fails += 1;

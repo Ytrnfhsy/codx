@@ -497,9 +497,9 @@ impl Game {
         if p.is_bot() {
             return;
         }
-        let (name, kills, dmg, longest) = (p.name.clone(), p.kills as u32, p.br_dmg, p.br_longest);
+        let (key, kills, dmg, longest) = (p.stats_key(), p.kills as u32, p.br_dmg, p.br_longest);
         self.br_stats
-            .record(&name, place as u32, kills, dmg, longest);
+            .record(&key, place as u32, kills, dmg, longest);
     }
 
     /// Sides still in the round: squads, and players on their own.
@@ -1881,7 +1881,7 @@ impl Game {
                 .filter(|m| !m.alive && !m.spec_free)
                 .and_then(|m| m.spectating),
             summary: me.filter(|m| m.br_place != 0).map(|m| {
-                let rec = self.br_stats.get(&m.name);
+                let rec = self.br_stats.get(&m.stats_key());
                 toon_shared::protocol::BrSummary {
                     place: m.br_place,
                     of: self.br.entrants as u16,

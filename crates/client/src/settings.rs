@@ -60,6 +60,9 @@ impl Default for HostSettings {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// A number this installation made up once: servers keep our records under it.
+    #[serde(default)]
+    pub player_key: u64,
     pub name: String,
     pub address: String,
     pub password: String,
@@ -121,6 +124,7 @@ impl Settings {
     fn defaults(lang: toon_shared::lang::Lang) -> Self {
         use toon_shared::lang::t;
         Settings {
+            player_key: 0,
             name: format!(
                 "{}{}",
                 t("Боєць", "Soldier"),
@@ -197,6 +201,14 @@ impl Settings {
         for c in &mut s.custom {
             c.loadout = c.loadout.sanitized();
         }
+        if s.player_key == 0 {
+            use std::hash::{BuildHasher, Hasher};
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u64(1);
+            s.player_key = h.finish().max(1);
+            s.save();
+        }
+        crate::netclient::PLAYER_KEY.store(s.player_key, std::sync::atomic::Ordering::Relaxed);
         s
     }
 

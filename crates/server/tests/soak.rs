@@ -154,7 +154,11 @@ fn soak(map: MapId, mode: Mode, bots: usize, squad: u8, secs: f32) -> Report {
             if busy {
                 still.remove(&p.id);
             }
-            if p.is_bot() && playing && !busy {
+            // (the tester sends no input, so it never moves: its squadmates wait by it,
+            // which is what they should do)
+            let waits_for_tester =
+                p.squad != 0 && g.p(me).is_some_and(|t| t.alive && t.squad == p.squad);
+            if p.is_bot() && playing && !busy && !waits_for_tester {
                 let e = still.entry(p.id).or_insert((pos, time));
                 if vec2(pos.x - e.0.x, pos.z - e.0.z).length() > 1.5 || (pos.y - e.0.y).abs() > 1.0
                 {

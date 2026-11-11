@@ -97,7 +97,8 @@ fn random_msg(rng: &mut Rng, life: u16, seq: &mut u32) -> C2S {
             team_only: rng.chance(0.5),
         },
         14 => C2S::Rcon {
-            password: long.clone(),
+            seq: rng.next_u64() as u32,
+            proof: long.clone(),
             cmd: long,
         },
         15 => C2S::Pong(rng.next_u64() as u32),

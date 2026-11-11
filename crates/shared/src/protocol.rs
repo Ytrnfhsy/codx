@@ -40,6 +40,9 @@ pub enum C2S {
         version: u16,
         /// `GAME_VERSION` of the client build.
         game: String,
+        /// A number this installation made up for itself once: the server keeps the
+        /// player's records under it (a name alone could be anybody's). 0 = none.
+        key: u64,
     },
     JoinTeam(Option<Team>),
     /// Selects a class; spawns immediately if allowed.
@@ -79,8 +82,12 @@ pub enum C2S {
         text: String,
         team_only: bool,
     },
+    /// An admin command. `proof` is `rcon_proof` of the password, the connection's
+    /// nonce, `seq` (higher each time) and the command: the password itself is not sent,
+    /// and an overheard command cannot be sent again or changed.
     Rcon {
-        password: String,
+        seq: u32,
+        proof: String,
         cmd: String,
     },
     Pong(u32),
@@ -586,6 +593,9 @@ pub enum S2C {
         map: MapId,
         mode: Mode,
         settings: GameSettings,
+        /// A number for this connection that goes into the proof of every admin
+        /// command (`rcon_proof`), so that the password never travels.
+        nonce: u64,
     },
     Reject(String),
     /// Map/mode change: the client rebuilds the level.
@@ -692,4 +702,16 @@ pub enum S2C {
     Tuning(Box<crate::tuning::Tuning>),
     /// Latency probe; the client answers with `C2S::Pong`.
     Ping(u32),
+}
+
+/// What proves an admin command comes from somebody who knows the password.
+pub fn rcon_proof(password: &str, nonce: u64, seq: u32, cmd: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(nonce.to_le_bytes());
+    h.update(seq.to_le_bytes());
+    h.update((password.len() as u32).to_le_bytes());
+    h.update(password.as_bytes());
+    h.update(cmd.as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }

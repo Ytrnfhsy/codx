@@ -566,8 +566,10 @@ async fn amain(args: Args) {
                             map,
                             mode,
                             settings: gs,
+                            nonce,
                         } if welcome.is_none() => {
                             welcome = Some(Welcome {
+                                nonce,
                                 id,
                                 server_name,
                                 motd,

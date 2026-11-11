@@ -140,6 +140,7 @@ pub struct Welcome {
     pub map: MapId,
     pub mode: Mode,
     pub settings: GameSettings,
+    pub nonce: u64,
 }
 
 pub struct GameClient {
@@ -286,6 +287,9 @@ pub struct GameClient {
     pub skin_preview: Option<Rect>,
     pub fx: Effects,
     pub rcon_pass: String,
+    /// The connection's number for admin command proofs, and our count of them.
+    pub rcon_nonce: u64,
+    rcon_seq: u32,
     pub spec_pos: Vec3,
     last_input_send: f64,
     pub shake: f32,
@@ -528,6 +532,8 @@ impl GameClient {
             skin_preview: None,
             fx: Effects::new(),
             rcon_pass: String::new(),
+            rcon_nonce: w.nonce,
+            rcon_seq: 0,
             spec_pos: spec,
             last_input_send: 0.0,
             shake: 0.0,
@@ -2890,8 +2896,13 @@ impl GameClient {
                 } else {
                     rest.to_string()
                 };
-                let password = self.rcon_pass.clone();
-                self.net.send(C2S::Rcon { password, cmd });
+                self.rcon_seq += 1;
+                let proof = rcon_proof(&self.rcon_pass, self.rcon_nonce, self.rcon_seq, &cmd);
+                self.net.send(C2S::Rcon {
+                    seq: self.rcon_seq,
+                    proof,
+                    cmd,
+                });
             }
             return;
         }

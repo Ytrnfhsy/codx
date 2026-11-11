@@ -155,3 +155,78 @@ fn long_falls_hurt_and_short_ones_do_not() {
         }
     }
 }
+
+/// Admin commands carry a proof made from the password, never the password: the right
+/// proof runs the command once, and neither a repeat of it nor a changed command passes.
+#[test]
+fn rcon_needs_a_fresh_proof() {
+    use toon_shared::protocol::rcon_proof;
+    let (mut g, me) = game();
+    g.cfg.rcon_password = "таємниця".into();
+    let nonce = g.p(me).unwrap().nonce;
+    let replies = |g: &mut Game| -> Vec<String> {
+        g.outbox
+            .drain(..)
+            .filter_map(|m| match m.1 {
+                S2C::RconReply(t) => Some(t),
+                _ => None,
+            })
+            .collect()
+    };
+    let wrong = |r: &[String]| r.iter().any(|t| t.contains("RCON:"));
+    let cmd = "help".to_string();
+    let proof = rcon_proof("таємниця", nonce, 1, &cmd);
+    g.handle(
+        me,
+        C2S::Rcon {
+            seq: 1,
+            proof: proof.clone(),
+            cmd: cmd.clone(),
+        },
+    );
+    let r = replies(&mut g);
+    assert!(
+        !r.is_empty() && !wrong(&r),
+        "the right proof was refused: {r:?}"
+    );
+    // the same datagram again
+    g.handle(
+        me,
+        C2S::Rcon {
+            seq: 1,
+            proof: proof.clone(),
+            cmd: cmd.clone(),
+        },
+    );
+    assert!(wrong(&replies(&mut g)), "a repeat passed");
+    // the proof of one command on another, and a proof for another connection
+    g.handle(
+        me,
+        C2S::Rcon {
+            seq: 2,
+            proof,
+            cmd: "status".into(),
+        },
+    );
+    assert!(wrong(&replies(&mut g)));
+    let other = rcon_proof("таємниця", nonce ^ 1, 3, &cmd);
+    g.handle(
+        me,
+        C2S::Rcon {
+            seq: 3,
+            proof: other,
+            cmd: cmd.clone(),
+        },
+    );
+    assert!(wrong(&replies(&mut g)));
+    // the password itself is no proof
+    g.handle(
+        me,
+        C2S::Rcon {
+            seq: 4,
+            proof: "таємниця".into(),
+            cmd,
+        },
+    );
+    assert!(wrong(&replies(&mut g)));
+}

@@ -156,6 +156,7 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                                     password,
                                     version,
                                     game: client_game,
+                                    key,
                                 },
                             ) => {
                                 if conn.closing.is_some() {
@@ -169,7 +170,10 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                                     &client_game,
                                     conn.lang,
                                 ) {
-                                    Ok(id) => conn.id = Some(id),
+                                    Ok(id) => {
+                                        conn.id = Some(id);
+                                        game.set_key(id, key);
+                                    }
                                     Err(reason) => {
                                         println!("[net] відмова {addr}: {reason}");
                                         conn.chan.send_reliable(&S2C::Reject(reason));

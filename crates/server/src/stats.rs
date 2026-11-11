@@ -1,5 +1,6 @@
-//! Battle royale records kept between matches, by player name, in `br_stats.json` in the
-//! server's data directory.
+//! Battle royale records kept between matches in `br_stats.json` in the server's data
+//! directory, under the number each installation made up for itself (`#…`; under the
+//! name for a client without one).
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
