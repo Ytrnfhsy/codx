@@ -334,6 +334,7 @@ pub fn render_world(
         / (screen_height() * settings.render_scale.clamp(0.4, 1.0)).max(1.0);
     let grow = if settings.outlines { px * 0.9 } else { 0.0 };
     g.level.draw(mats, view.pos, &view.matrix, grow, fog_far);
+    g.level.draw_grass(mats, &g.world, view.pos, settings.grass);
 
     // dynamic objects
     let mut m = std::mem::take(&mut g.frame_mesh);

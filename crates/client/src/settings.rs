@@ -101,6 +101,9 @@ pub struct Settings {
     pub view_distance: f32,
     /// Smoke, dust, sparks and debris: 0 few, 1 normal, 2 many.
     pub effects: u8,
+    /// Grass near you on big maps: 0 none, 1 some, 2 thick.
+    #[serde(default = "one")]
+    pub grass: u8,
     /// Language of the game (the system's one at first start).
     pub lang: toon_shared::lang::Lang,
     pub custom: Vec<CustomClass>,
@@ -154,6 +157,7 @@ impl Settings {
             shadow_quality: 2,
             view_distance: 1.0,
             effects: 1,
+            grass: 1,
             lang,
             custom: (1..=3)
                 .map(|i| CustomClass {
@@ -316,6 +320,11 @@ impl Settings {
             Preset::High => (1.0, true, 2, true, true, true, 1.0, 1),
             Preset::Ultra => (1.0, true, 3, true, true, true, 1.0, 2),
         };
+        self.grass = match p {
+            Preset::Low => 0,
+            Preset::Medium | Preset::High => 1,
+            Preset::Ultra => 2,
+        };
         self.render_scale = scale;
         self.shadows = shadows;
         self.shadow_quality = sq;
@@ -339,6 +348,7 @@ impl Settings {
                 && s.msaa == self.msaa
                 && (s.view_distance - self.view_distance).abs() < 0.01
                 && s.effects == self.effects
+                && s.grass == self.grass
         })
     }
 
@@ -354,4 +364,8 @@ impl Settings {
 
 fn yes() -> bool {
     true
+}
+
+fn one() -> u8 {
+    1
 }

@@ -127,6 +127,88 @@ fn water_mesh(m: &Heightmap, i0: usize, j0: usize) -> MeshBuilder {
     w
 }
 
+/// Tufts of grass over one chunk of natural ground: two crossed blades each, rooted in
+/// the ground's own colour and lighter at the tips. The tips are marked (normal.w = 2,
+/// their height in texcoord.y) so that the shader sways them and sinks them far away.
+fn grass_chunk(
+    m: &Heightmap,
+    world: &toon_shared::physics::World,
+    ci: usize,
+    cj: usize,
+    density: u8,
+) -> MeshBuilder {
+    let mut out = MeshBuilder::new();
+    let mut rng = Rng::new((cj * 4099 + ci) as u64 + 17);
+    let per_cell = if density >= 2 { 8 } else { 4 };
+    for j in cj * GRASS_CHUNK..((cj + 1) * GRASS_CHUNK).min(m.h - 1) {
+        for i in ci * GRASS_CHUNK..((ci + 1) * GRASS_CHUNK).min(m.w - 1) {
+            let cover = m.paint_at(i as i64, j as i64);
+            if !matches!(cover, paint::AUTO | paint::FOREST | paint::MEADOW) {
+                // (keep the dice rolling the same whatever is skipped)
+                continue;
+            }
+            let base = ground_color(m, i, j);
+            // rock and snow grow nothing
+            if (base[1] as f32) < base[0] as f32 * 1.12 {
+                continue;
+            }
+            let corner = m.point(i, j);
+            for _ in 0..per_cell {
+                let x = corner.x + rng.f32() * m.cell;
+                let z = corner.z + rng.f32() * m.cell;
+                let a = rng.range(0.0, std::f32::consts::PI);
+                let h = rng.range(0.3, 0.62) * if cover == paint::MEADOW { 1.25 } else { 1.0 };
+                let y = m.height(x, z);
+                if y < m.water + 0.25 || m.slope(x, z) > 0.7 {
+                    continue;
+                }
+                // not through a floor or a porch standing here
+                if world
+                    .floor_below(vec3(x, y + 2.5, z), 2.42)
+                    .is_some_and(|f| f > y + 0.05)
+                {
+                    continue;
+                }
+                let shade = rng.range(0.9, 1.06);
+                let tip = [
+                    (base[0] as f32 * 1.02 * shade).min(255.0) as u8,
+                    (base[1] as f32 * 1.1 * shade).min(255.0) as u8,
+                    (base[2] as f32 * 0.98 * shade).min(255.0) as u8,
+                    255,
+                ];
+                let root = [
+                    (base[0] as f32 * 0.86) as u8,
+                    (base[1] as f32 * 0.9) as u8,
+                    (base[2] as f32 * 0.86) as u8,
+                    255,
+                ];
+                let lean = vec3(rng.range(-0.1, 0.1), 0.0, rng.range(-0.1, 0.1));
+                for d in [vec3(a.cos(), 0.0, a.sin()), vec3(-a.sin(), 0.0, a.cos())] {
+                    let w = d * 0.13;
+                    let p = vec3(x, y - 0.03, z);
+                    let top = p + vec3(0.0, h, 0.0) + lean;
+                    let v = |position: Vec3, color: [u8; 4], tipness: f32| Vertex {
+                        position,
+                        uv: vec2(0.0, h * tipness.min(1.0)),
+                        color,
+                        normal: Vec3::Y.extend(tipness),
+                    };
+                    out.add_indexed(
+                        &[
+                            v(p - w, root, 0.0),
+                            v(p + w, root, 0.0),
+                            v(top + w * 0.12 + d * 0.1, tip, 2.0),
+                            v(top - w * 0.12 + d * 0.1, tip, 2.0),
+                        ],
+                        &[0, 1, 2, 0, 2, 3],
+                    );
+                }
+            }
+        }
+    }
+    out
+}
+
 struct Tile {
     min: Vec3,
     max: Vec3,
@@ -148,7 +230,17 @@ pub struct MapImage {
     pub size: f32,
 }
 
+/// Grass is built in chunks of this many grid cells, only near the camera.
+const GRASS_CHUNK: usize = 16;
+/// Chunks whose middle is this near are drawn (the blades shrink into the ground a
+/// little before that, so they do not pop).
+const GRASS_RANGE: f32 = 58.0;
+
 pub struct Level {
+    /// The ground under a big map (for the grass).
+    hm: Option<std::sync::Arc<Heightmap>>,
+    /// Grass chunks built so far, and the density they were built for.
+    grass: std::cell::RefCell<(u8, std::collections::HashMap<(usize, usize), MeshBuilder>)>,
     tiles: Vec<Tile>,
     pub terrain: bool,
     pub image: Option<MapImage>,
@@ -347,6 +439,8 @@ impl Level {
             }
             lo.y = lo.y.max(-1.0);
             return Level {
+                hm: None,
+                grass: Default::default(),
                 tiles: vec![Tile {
                     min: lo,
                     max: hi,
@@ -433,12 +527,73 @@ impl Level {
         }
         let image = Some(map_image(map, m, &colors));
         Level {
+            hm: map.terrain.clone(),
+            grass: Default::default(),
             tiles,
             terrain: true,
             image,
             min: all_lo,
             max: all_hi,
         }
+    }
+
+    /// Draws the grass near the camera, building a chunk or two per frame as they come
+    /// into range. `density`: 0 none, 1 some, 2 thick.
+    pub fn draw_grass(
+        &self,
+        mats: &crate::mesh::Materials,
+        world: &toon_shared::physics::World,
+        cam: Vec3,
+        density: u8,
+    ) {
+        let Some(m) = self.hm.as_ref().filter(|_| density > 0) else {
+            return;
+        };
+        let size = GRASS_CHUNK as f32 * m.cell;
+        let mut cache = self.grass.borrow_mut();
+        if cache.0 != density {
+            *cache = (density, Default::default());
+        }
+        let centre = |ci: usize, cj: usize| {
+            vec2(
+                m.origin.x + (ci as f32 + 0.5) * size,
+                m.origin.y + (cj as f32 + 0.5) * size,
+            )
+        };
+        let here = vec2(cam.x, cam.z);
+        let idx = |v: f32, o: f32| ((v - o) / size).floor().max(0.0) as usize;
+        let (i0, i1) = (
+            idx(cam.x - GRASS_RANGE, m.origin.x),
+            idx(cam.x + GRASS_RANGE, m.origin.x),
+        );
+        let (j0, j1) = (
+            idx(cam.z - GRASS_RANGE, m.origin.y),
+            idx(cam.z + GRASS_RANGE, m.origin.y),
+        );
+        let mut built = 0;
+        gl_use_material(&mats.world);
+        for cj in j0..=j1.min(m.h / GRASS_CHUNK) {
+            for ci in i0..=i1.min(m.w / GRASS_CHUNK) {
+                if centre(ci, cj).distance(here) > GRASS_RANGE + size * 0.5 {
+                    continue;
+                }
+                if !cache.1.contains_key(&(ci, cj)) {
+                    // (building takes a moment: a couple per frame, nearest rows first)
+                    if built >= 2 {
+                        continue;
+                    }
+                    built += 1;
+                    cache
+                        .1
+                        .insert((ci, cj), grass_chunk(m, world, ci, cj, density));
+                }
+                cache.1[&(ci, cj)].draw();
+            }
+        }
+        gl_use_default_material();
+        cache
+            .1
+            .retain(|k, _| centre(k.0, k.1).distance(here) < GRASS_RANGE * 2.5);
     }
 
     /// Horizontal distance from `p` to a tile.

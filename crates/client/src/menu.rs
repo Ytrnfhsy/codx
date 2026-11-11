@@ -269,6 +269,18 @@ pub fn video_page(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, pw: f32) -> boo
     }
     // the FPS cap only matters without vsync
     let y3 = y2 + 62.0;
+    let grass_names = [t("немає", "none"), t("рідка", "some"), t("густа", "thick")];
+    let i = s.grass.min(2) as i32;
+    let d = ui.stepper(
+        t("Трава (великі карти)", "Grass (big maps)"),
+        grass_names[i as usize],
+        col2,
+        y3,
+        x0 + w - col2,
+    );
+    if d != 0 {
+        s.grass = (i + d).rem_euclid(3) as u8;
+    }
     if !s.vsync {
         const LIMITS: [u32; 6] = [60, 120, 144, 165, 240, 0];
         let i = LIMITS.iter().position(|l| *l == s.fps_limit).unwrap_or(2);

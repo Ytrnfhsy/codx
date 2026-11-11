@@ -769,6 +769,7 @@ async fn amain(args: Args) {
                             Weather::Overcast => vec4(0.22, 1.04, 0.5, 0.01),
                             Weather::Rain => vec4(0.25, 0.96, 0.7, -0.01),
                             Weather::Fog => vec4(0.15, 0.94, 0.45, 0.0),
+                            Weather::Night => vec4(0.3, 0.9, 0.9, -0.03),
                         };
                         mats.post.set_uniform("Grade", grade);
                         gl_use_material(&mats.post);

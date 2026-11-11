@@ -571,6 +571,11 @@ void main() {
         float t = Extra.y;
         wp.x += sin(t * 1.6 + wp.x * 0.35 + wp.z * 0.27) * 0.07;
         wp.z += cos(t * 1.3 + wp.x * 0.21 + wp.z * 0.4) * 0.05;
+        if (normal.w > 1.5) {
+            // tips of grass: far away they sink into the ground instead of popping out
+            float far = clamp((length(wp.xyz - CamPos) - 42.0) / 14.0, 0.0, 1.0);
+            wp.y -= texcoord.y * far;
+        }
     }
     if (Push > 0.0) {
         float d = length(wp.xyz - CamPos);

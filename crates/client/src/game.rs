@@ -355,6 +355,7 @@ pub fn build_sky_in(map: &Map, weather: Weather) -> MeshBuilder {
         Weather::Overcast | Weather::Fog => [214, 216, 220],
         Weather::Evening => [255, 206, 176],
         Weather::Clear => [255, 255, 255],
+        Weather::Night => [70, 82, 118],
     };
     let clouds = if matches!(weather, Weather::Rain | Weather::Overcast) {
         26
@@ -398,6 +399,20 @@ pub fn build_sky_in(map: &Map, weather: Weather) -> MeshBuilder {
             }
         }
     }
+    // stars at night: flat dots high on the dome
+    if weather == Weather::Night {
+        let mut rng = Rng::new(map.id as u64 + 5);
+        for _ in 0..160 {
+            let a = rng.range(0.0, std::f32::consts::TAU);
+            let up = rng.range(0.25, 1.0f32);
+            let flat = (1.0 - up * up).sqrt();
+            let p = vec3(a.cos() * flat, up, a.sin() * flat) * 360.0;
+            let s = rng.range(0.5, 1.3);
+            let shine = rng.range(170.0, 255.0) as u8;
+            let m = Mat4::from_translation(p);
+            sky.add_sphere_ex(&m, s, [shine, shine, 255], 4, 2, 255, true);
+        }
+    }
     // puffy clouds
     let mut rng = Rng::new(map.id as u64 + 11);
     for _ in 0..clouds {
@@ -433,6 +448,8 @@ pub fn build_sun(weather: Weather) -> MeshBuilder {
     let (core, glow, size) = match weather {
         Weather::Clear => ([255, 250, 224], [255, 244, 200], 1.0),
         Weather::Evening => ([255, 214, 150], [255, 170, 110], 1.35),
+        // (the moon stands where the light comes from)
+        Weather::Night => ([232, 238, 255], [150, 170, 230], 0.8),
         Weather::Overcast | Weather::Rain | Weather::Fog => return m,
     };
     let at = Mat4::from_translation(crate::mesh::LIGHT_DIR.normalize() * 340.0);
@@ -2674,6 +2691,27 @@ impl GameClient {
         }
         self.airstrikes.retain(|a| now - a.2 < 5.0);
         self.artillery.retain(|a| now - a.2 < 9.0);
+        // rain splashes on whatever is under the sky around us
+        if self.weather == Weather::Rain && self.killcam.is_none() {
+            let eye = self.camera().0;
+            let n = (dt * 90.0 * (1.0 + settings.effects as f32)).min(8.0);
+            let mut k = n.floor() as u32 + (self.rng.f32() < n.fract()) as u32;
+            while k > 0 {
+                k -= 1;
+                let a = self.rng.range(0.0, std::f32::consts::TAU);
+                let d = 1.5 + 12.0 * self.rng.f32().sqrt();
+                let p = eye + vec3(a.cos() * d, 0.0, a.sin() * d);
+                let top = self
+                    .world
+                    .floor_below(p + vec3(0.0, 20.0, 0.0), 45.0)
+                    .into_iter()
+                    .chain(self.world.ground(p.x, p.z))
+                    .fold(f32::MIN, f32::max);
+                if top > f32::MIN && (top - eye.y).abs() < 12.0 {
+                    self.fx.splash(vec3(p.x, top + 0.03, p.z));
+                }
+            }
+        }
         self.fx.update(dt);
         // grenade smoke trails
         for e in &self.ents {

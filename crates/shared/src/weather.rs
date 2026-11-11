@@ -17,15 +17,18 @@ pub enum Weather {
     Rain,
     /// Thick fog: everything past a hundred metres or so is gone.
     Fog,
+    /// A moonlit night: blue and dim, shorter sight.
+    Night,
 }
 
 impl Weather {
-    pub const ALL: [Weather; 5] = [
+    pub const ALL: [Weather; 6] = [
         Weather::Clear,
         Weather::Evening,
         Weather::Overcast,
         Weather::Rain,
         Weather::Fog,
+        Weather::Night,
     ];
 
     /// How far you see, as a part of a clear day.
@@ -36,6 +39,7 @@ impl Weather {
             Weather::Overcast => 0.85,
             Weather::Rain => 0.65,
             Weather::Fog => 0.45,
+            Weather::Night => 0.6,
         }
     }
 
@@ -46,6 +50,7 @@ impl Weather {
             Weather::Overcast => t("Хмарно", "Overcast"),
             Weather::Rain => t("Дощ", "Rain"),
             Weather::Fog => t("Туман", "Fog"),
+            Weather::Night => t("Місячна ніч", "Moonlit night"),
         }
     }
 
@@ -59,11 +64,12 @@ impl Weather {
     /// A round's weather from a random number 0..1 (clear days are the most common).
     pub fn pick(r: f32) -> Weather {
         match r {
-            r if r < 0.35 => Weather::Clear,
-            r if r < 0.55 => Weather::Evening,
-            r if r < 0.72 => Weather::Overcast,
-            r if r < 0.87 => Weather::Rain,
-            _ => Weather::Fog,
+            r if r < 0.32 => Weather::Clear,
+            r if r < 0.50 => Weather::Evening,
+            r if r < 0.64 => Weather::Overcast,
+            r if r < 0.78 => Weather::Rain,
+            r if r < 0.89 => Weather::Fog,
+            _ => Weather::Night,
         }
     }
 
@@ -100,6 +106,11 @@ impl Weather {
                 mix(sky, [196, 198, 200], 0.9),
                 mix(fog, [204, 206, 208], 0.95),
                 mul(tint, [0.86, 0.87, 0.89]),
+            ),
+            Weather::Night => (
+                mix(sky, [20, 30, 66], 0.96),
+                mix(fog, [44, 58, 96], 0.95),
+                mul(tint, [0.5, 0.58, 0.82]),
             ),
         }
     }

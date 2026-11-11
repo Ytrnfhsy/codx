@@ -70,6 +70,22 @@ impl Effects {
         }
     }
 
+    /// A raindrop hitting the ground: a small pale splash.
+    pub fn splash(&mut self, pos: Vec3) {
+        let v = self.rv(0.5) + vec3(0.0, 1.1, 0.0);
+        self.push(Particle {
+            pos,
+            vel: v,
+            life: 0.0,
+            max: 0.22,
+            size: 0.035,
+            grow: 0.25,
+            color: [210, 222, 236],
+            kind: Kind::Puff,
+            grav: 6.0,
+        });
+    }
+
     pub fn impact(&mut self, pos: Vec3) {
         for _ in 0..3 {
             let v = self.rv(1.2) + vec3(0.0, 1.2, 0.0);
