@@ -681,10 +681,33 @@ pub fn draw_menu(
                     toon_shared::consts::MAX_PLAYERS as f32,
                     x + 24.0,
                     y + 380.0,
-                    pw - 48.0,
+                    sw,
                     "{}",
                 )
                 .round() as usize;
+            if br {
+                use toon_shared::weather::Weather;
+                // random first, then each weather
+                let cur = Weather::parse(&hs.br_weather);
+                let i = cur.map_or(0, |w| Weather::ALL.iter().position(|x| *x == w).unwrap_or(0) + 1);
+                let label = cur.map_or(t("Випадкова", "Random"), |w| w.name());
+                let d = ui.stepper(
+                    t("Погода", "Weather"),
+                    label,
+                    x + 36.0 + (pw - 60.0) / 2.0,
+                    y + 368.0,
+                    (pw - 60.0) / 2.0,
+                );
+                if d != 0 {
+                    let n = Weather::ALL.len() as i32 + 1;
+                    let k = (i as i32 + d).rem_euclid(n) as usize;
+                    hs.br_weather = if k == 0 {
+                        "random".into()
+                    } else {
+                        format!("{:?}", Weather::ALL[k - 1]).to_lowercase()
+                    };
+                }
+            }
             // bots only fill up free places
             bots = bots.min(max);
             if br {

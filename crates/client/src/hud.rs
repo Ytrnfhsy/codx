@@ -66,6 +66,8 @@ impl GameClient {
             draw_circle_lines(cx, cy, 5.0, 1.0, Color::new(1.0, 0.2, 0.1, 0.35));
         }
 
+        self.draw_rain(view.pos);
+
         // low health / damage flash
         if self.alive {
             let k = (1.0 - self.me.hp / MAX_HEALTH).clamp(0.0, 1.0);
@@ -130,6 +132,16 @@ impl GameClient {
         }
         self.draw_squad_panel(ui);
         self.draw_br_out(ui);
+        if self.alive && self.body.swimming(&self.world) {
+            let (w, h) = (screen_width(), screen_height());
+            ui.centered(
+                t("Пливеш — стріляти не можна", "Swimming — you cannot shoot"),
+                w / 2.0,
+                h * 0.72,
+                16,
+                MUTED,
+            );
+        }
 
         // crosshair
         if self.alive
@@ -604,6 +616,36 @@ impl GameClient {
             })
             .unwrap_or(0);
         C[1 + others % 3]
+    }
+
+    /// Rain streaking down the screen (not under a roof, not high up in the plane).
+    fn draw_rain(&self, eye: Vec3) {
+        if self.weather != toon_shared::weather::Weather::Rain || self.killcam.is_some() {
+            return;
+        }
+        if !self.world.line_of_sight(eye, eye + vec3(0.0, 25.0, 0.0)) {
+            return;
+        }
+        let ground = self.world.ground(eye.x, eye.z).unwrap_or(0.0);
+        let fade = (1.0 - (eye.y - ground - 60.0).max(0.0) / 60.0).clamp(0.0, 1.0);
+        if fade <= 0.0 {
+            return;
+        }
+        let (w, h) = (screen_width(), screen_height());
+        // looking up the drops come at you, looking down they fall away
+        let len = 14.0 + 10.0 * (1.0 - self.camera().2.abs().min(1.0));
+        let n = 140;
+        let t = self.now as f32;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.2, 0.24, 0.3, 0.08 * fade));
+        for i in 0..n {
+            let k = i as f32;
+            let speed = 0.9 + (k * 0.731).fract() * 0.6;
+            let x0 = (k * 0.618_034).fract() * (w + 80.0) - 40.0;
+            let y = ((k * 0.377).fract() + t * speed).fract() * (h + len) - len;
+            let x = x0 - (y / h) * 30.0;
+            let a = (0.18 + 0.2 * (k * 0.913).fract()) * fade;
+            draw_line(x, y, x - 4.0, y + len, 1.2, Color::new(0.8, 0.85, 0.95, a));
+        }
     }
 
     /// Out of the battle royale: whom we watch, and how the round went.
@@ -2240,7 +2282,10 @@ impl GameClient {
             };
             let vw = ui.width(&k.victim, 16, true);
             let gap = 10.0;
-            let total = kw + vw + icon_w + gap * if suicide { 1.0 } else { 2.0 };
+            // (how far: worth showing once it is a real shot)
+            let dist = (!suicide && k.dist >= 10).then(|| tr!("{} м", "{} m", k.dist));
+            let dw = dist.as_ref().map_or(0.0, |d| ui.width(d, 13, false) + gap);
+            let total = kw + vw + icon_w + dw + gap * if suicide { 1.0 } else { 2.0 };
             let mut x = w - 20.0 - total;
             draw_rectangle(
                 x - 6.0,
@@ -2273,6 +2318,9 @@ impl GameClient {
                 16,
                 with_alpha(self.feed_color(k.vteam, k.vme), a),
             );
+            if let Some(d) = &dist {
+                ui.shadowed(d, x + vw + gap, y - 1.0, 13, with_alpha(MUTED, a));
+            }
             y += 26.0;
         }
     }

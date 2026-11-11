@@ -261,6 +261,9 @@ impl Killcam {
     }
 
     pub fn update(&mut self, dt: f32, world: &World, tuning: &Tuning, audio: Option<&Audio>) {
+        if let Some(a) = audio {
+            a.set_listener_yaw(self.yaw);
+        }
         if self.done {
             return;
         }

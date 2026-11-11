@@ -403,6 +403,8 @@ impl LootKind {
 /// The battle royale state a player sees.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct BrSnap {
+    /// The round's weather and time of day.
+    pub weather: crate::weather::Weather,
     /// Players still in the game (in the plane or on the ground).
     pub alive: u16,
     /// Safe zone now: centre x, z and radius.
@@ -580,6 +582,8 @@ pub enum S2C {
         victim_name: String,
         killer_team: Team,
         victim_team: Team,
+        /// How far the killer was, metres (0: no killer, or their own doing).
+        dist: u16,
     },
     HitConfirm {
         kill: bool,

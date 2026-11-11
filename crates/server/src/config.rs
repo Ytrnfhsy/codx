@@ -60,6 +60,9 @@ pub struct BrConfig {
     pub bots: usize,
     /// Players per squad: 1 (everyone on their own), 2 or 4.
     pub squad: u8,
+    /// Weather each round: "random", or one of "clear", "evening", "overcast", "rain",
+    /// "fog".
+    pub weather: String,
 }
 
 impl Default for BrConfig {
@@ -68,6 +71,7 @@ impl Default for BrConfig {
             max_players: 50,
             bots: 50,
             squad: 1,
+            weather: "random".into(),
         }
     }
 }

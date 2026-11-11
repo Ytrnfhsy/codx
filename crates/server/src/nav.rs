@@ -266,8 +266,10 @@ impl Nav {
                 } else {
                     0.0
                 };
-            // wading is slow
-            if pb.y < nav.water - 0.35 {
+            // wading is slow, swimming slower still
+            if pb.y < nav.water - toon_shared::physics::SWIM_DEPTH {
+                cost *= 5.0;
+            } else if pb.y < nav.water - 0.35 {
                 cost *= 2.5;
             }
             cost

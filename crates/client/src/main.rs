@@ -36,6 +36,8 @@ use toon_shared::{Mode, Team};
 
 #[derive(Default, Clone)]
 struct Args {
+    /// Battle royale weather for a hosted game ("rain", "fog", …).
+    weather: Option<String>,
     connect: Option<String>,
     name: Option<String>,
     host: bool,
@@ -127,6 +129,10 @@ fn parse_args() -> Args {
             }
             "--mode" => {
                 a.mode = next;
+                i += 1;
+            }
+            "--weather" => {
+                a.weather = next;
                 i += 1;
             }
             "--bots" => {
@@ -317,6 +323,7 @@ async fn amain(args: Args) {
         cfg.br.bots = hs.br_bots;
         cfg.br.max_players = hs.br_max_players;
         cfg.br.squad = hs.br_squad.clamp(1, 4);
+        cfg.br.weather = args.weather.clone().unwrap_or(hs.br_weather.clone());
         cfg.bot_skill = hs.bot_skill;
         cfg.rcon_password = args.rcon.clone().unwrap_or(hs.rcon.clone());
         cfg.password = hs.password.clone();

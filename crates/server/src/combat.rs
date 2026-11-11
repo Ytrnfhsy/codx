@@ -142,11 +142,10 @@ impl Game {
         if matches!(self.seat_of(id), Some((_, 0))) {
             return;
         }
-        // nobody shoots while skydiving
-        if self
-            .p(id)
-            .is_some_and(|p| p.body.chute != toon_shared::physics::Chute::None)
-        {
+        // nobody shoots while skydiving or swimming
+        if self.p(id).is_some_and(|p| {
+            p.body.chute != toon_shared::physics::Chute::None || p.body.swimming(&self.world)
+        }) {
             return;
         }
         let cur_mag = self.tuning.weapon(cur).mag;
@@ -547,8 +546,10 @@ impl Game {
         let vpos = v.body.pos;
         let vteam = v.team;
         let vsquad = v.squad;
+        let mut dist = 0u16;
         if let Some(a) = attacker.filter(|a| *a != victim) {
             let far = self.p(a).map_or(0.0, |k| k.body.pos.distance(vpos_now));
+            dist = far.round().min(9999.0) as u16;
             if let Some(k) = self.pm(a) {
                 k.br_longest = k.br_longest.max(far);
             }
@@ -701,6 +702,7 @@ impl Game {
             victim_name: vname,
             killer_team,
             victim_team: vteam,
+            dist,
         });
 
         if counts && self.mode == Mode::Tdm {

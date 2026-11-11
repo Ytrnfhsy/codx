@@ -129,7 +129,8 @@ pub struct NameTag {
 }
 
 fn fog_color(g: &GameClient) -> Color {
-    Color::from_rgba(g.map.fog[0], g.map.fog[1], g.map.fog[2], 255)
+    let f = g.colours().1;
+    Color::from_rgba(f[0], f[1], f[2], 255)
 }
 
 pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarget>) -> View {
@@ -189,7 +190,7 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         viewport: None,
         // a near plane this far keeps the depth buffer precise at range (no shimmering)
         z_near,
-        z_far: fog_range(g.level.terrain, settings, altitude(g, pos))
+        z_far: weather_fog(g, fog_range(g.level.terrain, settings, altitude(g, pos)))
             .1
             .max(380.0)
             + 40.0,
@@ -211,7 +212,8 @@ pub fn render_world(
     view: &View,
 ) -> Vec<NameTag> {
     let fog = fog_color(g);
-    let (fog_near, fog_far) = fog_range(g.level.terrain, settings, altitude(g, view.pos));
+    let (fog_near, fog_far) =
+        weather_fog(g, fog_range(g.level.terrain, settings, altitude(g, view.pos)));
     if settings.shadows {
         // big maps: the shadow map covers the area around the camera and follows it
         let (lo, hi) = if g.level.terrain {
@@ -248,7 +250,7 @@ pub fn render_world(
         shadow: g.shadow.as_ref().filter(|_| settings.shadows),
         textures: settings.textures,
         // every map has its own light: warm evening, dusty noon, grey morning…
-        tint: Vec3::from_array(g.map.tint),
+        tint: Vec3::from_array(g.colours().2),
     });
     set_camera(&view.cam);
     clear_background(fog);
@@ -680,6 +682,12 @@ pub fn fog_range(terrain: bool, settings: &Settings, altitude: f32) -> (f32, f32
     (near * k + up, far * k + up * 1.6)
 }
 
+/// Rain and fog bring the haze closer.
+fn weather_fog(g: &GameClient, (near, far): (f32, f32)) -> (f32, f32) {
+    let v = g.weather.visibility();
+    (near * v, far * v)
+}
+
 /// How high the camera is above the ground under it.
 pub fn altitude(g: &GameClient, pos: Vec3) -> f32 {
     pos.y - g.world.ground(pos.x, pos.z).unwrap_or(0.0)
@@ -716,7 +724,12 @@ pub fn render_viewmodel(
             vm
         }
         Some(_) => return,
-        None if g.alive && !g.scoped() && g.piloting.is_none() && g.me.seat.is_none() => {
+        None if g.alive
+            && !g.scoped()
+            && g.piloting.is_none()
+            && g.me.seat.is_none()
+            && !g.body.swimming(&g.world) =>
+        {
             g.vm_state()
         }
         None => return,
@@ -742,7 +755,7 @@ pub fn render_viewmodel(
     mats.set_lighting(&crate::mesh::Lighting {
         shadow: None,
         textures: false,
-        tint: Vec3::from_array(g.map.tint)
+        tint: Vec3::from_array(g.colours().2)
             * if in_shade {
                 vec3(0.74, 0.77, 0.9)
             } else {

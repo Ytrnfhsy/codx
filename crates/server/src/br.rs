@@ -123,6 +123,8 @@ pub struct BrState {
     pub boxes: Vec<crate::boxes::DeathBox>,
     /// The bombarded area, if any, and when the next one comes.
     pub red: Option<RedZone>,
+    /// This round's weather and time of day.
+    pub weather: toon_shared::weather::Weather,
     pub next_red: f64,
 }
 
@@ -191,8 +193,11 @@ impl Game {
         let side = vec3(-dir.z, 0.0, dir.x) * self.rng.range(-0.25, 0.25) * half.x;
         let reach = half.max_element() * 1.05;
         let c3 = vec3(centre.x, PLANE_HEIGHT, centre.y);
+        let weather = toon_shared::weather::Weather::parse(&self.cfg.br.weather)
+            .unwrap_or_else(|| toon_shared::weather::Weather::pick(self.rng.f32()));
         self.br = crate::br::BrState {
             running: true,
+            weather,
             plane_from: c3 - dir * reach + side,
             plane_dir: dir,
             plane_t0: time,
@@ -1710,6 +1715,7 @@ impl Game {
         };
         let me = self.p(id);
         Some(BrSnap {
+            weather: self.br.weather,
             alive: self.br_alive() as u16,
             zone: if self.br.running {
                 [c.x, c.y, r]

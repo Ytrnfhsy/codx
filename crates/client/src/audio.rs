@@ -116,6 +116,22 @@ impl Sfx {
         }
     }
 
+    /// Comes from somewhere in the world, so it gets a left and a right version too.
+    fn placed(self) -> bool {
+        matches!(
+            self,
+            Sfx::Gun(_)
+                | Sfx::HeliGun
+                | Sfx::Far
+                | Sfx::Explosion
+                | Sfx::Step
+                | Sfx::Flesh
+                | Sfx::Knife
+                | Sfx::Beep
+                | Sfx::Smoke
+        )
+    }
+
     /// Loud enough to be heard across the map.
     fn loud(self) -> bool {
         match self {
@@ -433,6 +449,31 @@ fn spatialize(dry: &[f32], sp: Space, tail: f32, rng: &mut Rng) -> Vec<[f32; 2]>
         }
     }
     out
+}
+
+/// The left- and right-side versions of a sound in the world (one of each per sound,
+/// to keep memory down on weak machines): the far ear hears it quieter and duller.
+async fn add_sides(sides: &mut HashMap<Sfx, [Vec<Sound>; 2]>, k: Sfx, pcm: &[[f32; 2]]) {
+    let e = sides.entry(k).or_default();
+    if !e[0].is_empty() {
+        return;
+    }
+    for (ch, list) in e.iter_mut().enumerate() {
+        // ch 0: from the left, so the right ear (1) is the far one
+        let far = 1 - ch;
+        let mut lp = Biquad::new(Kind::Low, 2500.0, 0.7);
+        let side: Vec<[f32; 2]> = pcm
+            .iter()
+            .map(|v| {
+                let mut o = *v;
+                o[far] = lp.run(v[far]) * 0.4;
+                o
+            })
+            .collect();
+        if let Ok(snd) = load_sound_from_bytes(&wav(&side)).await {
+            list.push(snd);
+        }
+    }
 }
 
 fn mono(b: &[f32]) -> Vec<[f32; 2]> {
@@ -1588,6 +1629,10 @@ fn synthesize(jobs: &[(Sfx, usize)]) -> Vec<(Sfx, Vec<[f32; 2]>)> {
 
 pub struct Audio {
     sounds: HashMap<Sfx, Vec<Sound>>,
+    /// The same, heard from the left and from the right (sounds out in the world).
+    sides: HashMap<Sfx, [Vec<Sound>; 2]>,
+    /// Where the listener looks (which way is left).
+    listener_yaw: std::cell::Cell<f32>,
     /// Master volume (the settings slider changes it while the game runs).
     volume: std::cell::Cell<f32>,
     last: RefCell<HashMap<Sfx, f64>>,
@@ -1600,6 +1645,7 @@ pub struct Audio {
 impl Audio {
     pub async fn load(volume: f32, enabled: bool) -> Audio {
         let mut sounds: HashMap<Sfx, Vec<Sound>> = HashMap::new();
+        let mut sides: HashMap<Sfx, [Vec<Sound>; 2]> = HashMap::new();
         if enabled {
             // recordings first; everything else is synthesized on all CPU cores
             let mut jobs = Vec::new();
@@ -1608,7 +1654,12 @@ impl Audio {
                 for (file, data) in recordings(k) {
                     match decode(&data) {
                         Ok(pcm) => match load_sound_from_bytes(&wav(&pcm)).await {
-                            Ok(snd) => v.push(snd),
+                            Ok(snd) => {
+                                v.push(snd);
+                                if k.placed() {
+                                    add_sides(&mut sides, k, &pcm).await;
+                                }
+                            }
                             Err(e) => eprintln!("sound {file}: {e:?}"),
                         },
                         Err(e) => eprintln!("sound {file}: skipped, {e}"),
@@ -1622,11 +1673,16 @@ impl Audio {
             for (k, pcm) in synthesize(&jobs) {
                 if let Ok(snd) = load_sound_from_bytes(&wav(&pcm)).await {
                     sounds.entry(k).or_default().push(snd);
+                    if k.placed() {
+                        add_sides(&mut sides, k, &pcm).await;
+                    }
                 }
             }
         }
         Audio {
             sounds,
+            sides,
+            listener_yaw: std::cell::Cell::new(0.0),
             volume: std::cell::Cell::new(volume),
             last: RefCell::new(HashMap::new()),
             heli_on: RefCell::new(false),
@@ -1643,6 +1699,62 @@ impl Audio {
 
     pub fn volume(&self) -> f32 {
         self.volume.get()
+    }
+
+    /// Which way the listener faces (call once a frame, before placed sounds).
+    pub fn set_listener_yaw(&self, yaw: f32) {
+        self.listener_yaw.set(yaw);
+    }
+
+    /// -1 well to the left .. 1 well to the right, as heard from `listener`.
+    fn side_of(&self, pos: Vec3, listener: Vec3) -> f32 {
+        let d = pos - listener;
+        let flat = vec3(d.x, 0.0, d.z);
+        if flat.length_squared() < 1.0 {
+            return 0.0;
+        }
+        let (_, right) = toon_shared::yaw_basis(self.listener_yaw.get());
+        flat.normalize().dot(right)
+    }
+
+    /// A sound from a place: the left or right version when it is off to one side.
+    fn play_placed(&self, s: Sfx, vol: f32, side: f32) {
+        let k = if side < -0.35 {
+            0
+        } else if side > 0.35 {
+            1
+        } else {
+            return self.play(s, vol);
+        };
+        match self.sides.get(&s).map(|v| &v[k]).filter(|l| !l.is_empty()) {
+            Some(list) => {
+                let i = (self.rng.borrow_mut().f32() * list.len() as f32) as usize;
+                self.play_one(s, &list[i.min(list.len() - 1)], vol);
+            }
+            None => self.play(s, vol),
+        }
+    }
+
+    fn play_one(&self, s: Sfx, snd: &Sound, vol: f32) {
+        if vol <= 0.01 || self.volume.get() <= 0.0 {
+            return;
+        }
+        let now = get_time();
+        {
+            let mut last = self.last.borrow_mut();
+            let l = last.entry(s).or_insert(-1.0);
+            if now - *l < 0.02 {
+                return;
+            }
+            *l = now;
+        }
+        play_sound(
+            snd,
+            PlaySoundParams {
+                looped: false,
+                volume: (vol * self.volume.get()).min(1.0),
+            },
+        );
     }
 
     pub fn play(&self, s: Sfx, vol: f32) {
@@ -1707,21 +1819,23 @@ impl Audio {
     pub fn play_at(&self, s: Sfx, pos: Vec3, listener: Vec3, vol: f32, range: f32) {
         let d = pos.distance(listener);
         let k = (1.0 - d / range).clamp(0.0, 1.0);
-        self.play(s, vol * (0.08 + 0.92 * k * k));
+        let side = self.side_of(pos, listener);
+        self.play_placed(s, vol * (0.08 + 0.92 * k * k), side);
     }
 
     /// Gunfire with distance: close shots are sharp, far ones turn into a muffled boom
     /// rolling through the streets.
     pub fn play_shot(&self, s: Sfx, pos: Vec3, listener: Vec3, vol: f32) {
         let d = pos.distance(listener);
+        let side = self.side_of(pos, listener);
         let near = (1.0 - d / 60.0).clamp(0.0, 1.0);
         if near > 0.0 {
-            self.play(s, vol * near * near);
+            self.play_placed(s, vol * near * near, side);
         }
         if d > 15.0 {
             let far = ((d - 15.0) / 20.0).clamp(0.0, 1.0) * (1.0 - (d - 140.0).max(0.0) / 120.0);
             let loud = if s.loud() { 0.7 } else { 0.45 };
-            self.play(Sfx::Far, vol * far.max(0.0) * loud);
+            self.play_placed(Sfx::Far, vol * far.max(0.0) * loud, side);
         }
     }
 

@@ -188,8 +188,8 @@ fn natural(x: f32, z: f32) -> f32 {
     let nw = vec2(x + 700.0, z + 700.0).length();
     let ridge = smoothstep(320.0, 80.0, nw) * 18.0 * ridged(x / 110.0 + 7.0, z / 110.0);
     let h = hills + mountains + downs + ridge;
-    // the beach: from the land down to the shallow sea floor
-    -1.1 + (h + 1.1) * land
+    // the beach: from the land down to the shallow sea floor, and deeper out at sea
+    -1.1 - 3.0 * smoothstep(960.0, 1040.0, r) + (h + 1.1) * land
 }
 
 /// A bridge where a road crosses the river.
@@ -272,7 +272,9 @@ fn heightmap() -> Heightmap {
             let ld = vec2(p.x - LAKE.0, p.z - LAKE.1).length();
             if ld < lr + 24.0 {
                 let k = smoothstep(lr + 24.0, lr, ld);
-                h += (WATER - 1.1 - h) * k;
+                // shallow at the shore, deep enough to swim further in
+                let deep = 2.8 * smoothstep(lr * 0.85, lr * 0.45, ld);
+                h += (WATER - 1.1 - deep - h) * k;
             }
             m.set(i, j, h);
         }
@@ -1121,5 +1123,61 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod swim_tests {
+    use super::*;
+    use crate::physics::{Body, MoveInput, Stance, World, SWIM_SINK};
+    use crate::tuning::MoveTuning;
+
+    /// Jumping into the deep part of the lake: you float at the surface, paddle slowly
+    /// towards the shore and walk out on your feet.
+    #[test]
+    fn swim_across_the_lake_and_walk_out() {
+        let map = island();
+        let world = World::from_map(&map);
+        let t = MoveTuning::default();
+        let (cx, cz) = (LAKE.0, LAKE.1);
+        let tr = world.terrain.as_ref().unwrap();
+        assert!(tr.height(cx, cz) < WATER - 2.5, "the lake is deep in the middle");
+        let mut b = Body {
+            pos: vec3(cx, WATER + 3.0, cz),
+            stance: Stance::Stand,
+            ..Default::default()
+        };
+        let dt = 1.0 / 60.0;
+        let idle = MoveInput::default();
+        for _ in 0..180 {
+            b.step(&world, &idle, &t, dt);
+        }
+        assert!(b.swimming(&world), "afloat at {}", b.pos);
+        assert!((b.pos.y - (WATER - SWIM_SINK)).abs() < 0.05, "at the surface {}", b.pos);
+        // paddle east (yaw -pi/2 looks along +x) for a while: slower than walking
+        let go = MoveInput {
+            forward: 1.0,
+            sprint: true,
+            yaw: -std::f32::consts::FRAC_PI_2,
+            want_stance: Stance::Stand,
+            ..Default::default()
+        };
+        let x0 = b.pos.x;
+        for _ in 0..120 {
+            b.step(&world, &go, &t, dt);
+        }
+        let speed = (b.pos.x - x0) / 2.0;
+        assert!(speed > 1.0 && speed < t.walk_speed * 0.6, "swim speed {speed}");
+        // keep going to the shore
+        let mut out = false;
+        for _ in 0..60 * 120 {
+            b.step(&world, &go, &t, dt);
+            if !b.swimming(&world) && tr.height(b.pos.x, b.pos.z) > WATER + 0.2 {
+                out = true;
+                break;
+            }
+        }
+        assert!(out, "never got out of the water: {}", b.pos);
+        assert!(b.pos.y >= tr.height(b.pos.x, b.pos.z) - 0.01);
     }
 }

@@ -20,6 +20,7 @@ use toon_shared::rng::Rng;
 use toon_shared::tr;
 use toon_shared::tuning::{Tuning, WeaponStats};
 use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
+use toon_shared::weather::Weather;
 use toon_shared::{look_dir, maps, wrap_angle, yaw_basis, Mode, Team};
 
 pub struct Remote {
@@ -102,6 +103,8 @@ pub struct KillLine {
     /// has a team colour).
     pub kme: bool,
     pub vme: bool,
+    /// Metres between them (0: not shown).
+    pub dist: u16,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -156,6 +159,8 @@ pub struct GameClient {
     pub bomb: Option<BombSnap>,
     /// Battle royale state (plane, zone, players left).
     pub br: Option<BrSnap>,
+    /// The battle royale round's weather (clear elsewhere).
+    pub weather: Weather,
     /// Battle royale: the big map is open.
     pub big_map: bool,
     /// A marker put on the big map (x, z), shown on the minimap and in the world.
@@ -327,9 +332,24 @@ pub fn build_map_mesh(map: &Map) -> ToonMesh {
 }
 
 pub fn build_sky(map: &Map) -> MeshBuilder {
+    build_sky_in(map, Weather::Clear)
+}
+
+/// The sky dome in this weather (grey clouds when it rains).
+pub fn build_sky_in(map: &Map, weather: Weather) -> MeshBuilder {
     let mut sky = MeshBuilder::new();
-    let top = [map.sky[0], map.sky[1], map.sky[2]];
-    let hor = [map.fog[0], map.fog[1], map.fog[2]];
+    let (top, hor, _) = weather.colours(map.sky, map.fog, map.tint);
+    let cloud = match weather {
+        Weather::Rain => [150, 154, 162],
+        Weather::Overcast | Weather::Fog => [214, 216, 220],
+        Weather::Evening => [255, 206, 176],
+        Weather::Clear => [255, 255, 255],
+    };
+    let clouds = if matches!(weather, Weather::Rain | Weather::Overcast) {
+        26
+    } else {
+        14
+    };
     // gradient dome
     let seg = 16;
     let rings = 8;
@@ -369,7 +389,7 @@ pub fn build_sky(map: &Map) -> MeshBuilder {
     }
     // puffy clouds
     let mut rng = Rng::new(map.id as u64 + 11);
-    for _ in 0..14 {
+    for _ in 0..clouds {
         let a = rng.range(0.0, std::f32::consts::TAU);
         let d = rng.range(120.0, 260.0);
         let base = vec3(a.cos() * d, rng.range(60.0, 110.0), a.sin() * d);
@@ -381,7 +401,7 @@ pub fn build_sky(map: &Map) -> MeshBuilder {
             );
             let s = rng.range(7.0, 12.0);
             let m = Mat4::from_translation(base + off) * Mat4::from_scale(vec3(1.3, 0.75, 1.0));
-            sky.add_sphere_ex(&m, s, [255, 255, 255], 10, 6, 255, false);
+            sky.add_sphere_ex(&m, s, cloud, 10, 6, 255, false);
         }
     }
     sky
@@ -411,6 +431,7 @@ impl GameClient {
             overtime: false,
             me: MeSnap::default(),
             bomb: None,
+            weather: Weather::Clear,
             br: None,
             big_map: false,
             marker: None,
@@ -602,6 +623,11 @@ impl GameClient {
         self.center = Some((text.into(), self.now + secs, color));
     }
 
+    /// Sky, fog and light colours in the current weather.
+    pub fn colours(&self) -> ([u8; 3], [u8; 3], [f32; 3]) {
+        self.weather.colours(self.map.sky, self.map.fog, self.map.tint)
+    }
+
     pub fn eye(&self) -> Vec3 {
         self.body.pos + vec3(0.0, self.body.stance.eye(), 0.0)
     }
@@ -631,6 +657,7 @@ impl GameClient {
         self.world = World::from_map(&self.map);
         self.level = crate::level::Level::build(&self.map);
         self.sky_mesh = build_sky(&self.map);
+        self.weather = Weather::Clear;
         self.mode = mode;
         self.gs = gs;
         self.remotes.clear();
@@ -776,6 +803,7 @@ impl GameClient {
                 victim_name,
                 killer_team,
                 victim_team,
+                dist,
             } => {
                 let st = self.server_now();
                 self.recorder.event(
@@ -846,6 +874,7 @@ impl GameClient {
                     time: now,
                     kme: killer == Some(self.my_id),
                     vme: victim == self.my_id,
+                    dist,
                 });
                 if self.killfeed.len() > 6 {
                     self.killfeed.remove(0);
@@ -1161,6 +1190,18 @@ impl GameClient {
         }
         self.br = s.br;
         self.ready = s.ready;
+        let w = self.br.as_ref().map_or(Weather::Clear, |b| b.weather);
+        if w != self.weather {
+            self.weather = w;
+            self.sky_mesh = build_sky_in(&self.map, w);
+            if w != Weather::Clear {
+                self.center_msg(
+                    tr!("Погода: {}", "Weather: {}", w.name()),
+                    3.0,
+                    crate::ui::TEXT,
+                );
+            }
+        }
         // cars: the latest of each
         let now = self.now;
         let mut seen_cars = Vec::new();
@@ -1831,6 +1872,9 @@ impl GameClient {
         let now = self.now;
         // while a replay plays, the live game is silent
         let mut audio_opt = if self.killcam.is_some() { None } else { audio };
+        if let (Some(a), None) = (audio, &self.killcam) {
+            a.set_listener_yaw(self.camera().1);
+        }
         for m in self.net.poll() {
             self.handle_msg(m, &mut audio_opt);
         }
@@ -2197,8 +2241,10 @@ impl GameClient {
             if pressed(Action::Reload) {
                 self.start_reload();
             }
-            // nobody shoots while skydiving
-            let can_act = can_act && self.body.chute == toon_shared::physics::Chute::None;
+            // nobody shoots while skydiving or swimming
+            let can_act = can_act
+                && self.body.chute == toon_shared::physics::Chute::None
+                && !self.body.swimming(&self.world);
             let trig_down = can_act && binds::down(Action::Fire);
             // also catch very quick clicks (press + release within one frame)
             let trig_pressed =

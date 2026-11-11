@@ -23,6 +23,7 @@ pub mod terrain;
 pub mod tuning;
 pub mod vehicles;
 pub mod weapons;
+pub mod weather;
 
 pub use glam::{vec2, vec3, Vec2, Vec3};
 use lang::t;

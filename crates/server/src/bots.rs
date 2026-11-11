@@ -367,6 +367,12 @@ impl Game {
             .map(|(w, s)| Ballistics::of(w.id).engage * (1.0 + 0.08 * s as f32))
             .fold(ballistic.engage, f32::max);
         let sight = sk.max_sight.max(reach * lerp(0.7, 1.0, skill));
+        // (rain and fog hide what is far away from bots too)
+        let sight = if self.mode == Mode::Br {
+            sight * self.br.weather.visibility()
+        } else {
+            sight
+        };
 
         let clouds = self.smoke_clouds();
         // ---- perception: enemies are noticed gradually, only inside the field of view

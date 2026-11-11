@@ -428,6 +428,20 @@ pub const FREEFALL_SPEED: f32 = 48.0;
 pub const FREEFALL_GLIDE: f32 = 16.0;
 pub const CHUTE_SINK: f32 = 5.5;
 pub const CHUTE_GLIDE: f32 = 9.0;
+/// Water deeper than this is swum, not waded.
+pub const SWIM_DEPTH: f32 = 1.4;
+/// A swimmer's feet hang this far under the surface (the head is just above it).
+pub const SWIM_SINK: f32 = 1.3;
+/// Swimming is this much slower than walking.
+pub const SWIM_SPEED_MULT: f32 = 0.5;
+
+/// Is `pos` in water too deep to stand in (and at its surface, not on a bridge above it)?
+pub fn in_deep_water(world: &World, pos: Vec3) -> bool {
+    let Some(t) = &world.terrain else {
+        return false;
+    };
+    pos.y < t.water - SWIM_SINK + 0.25 && t.height(pos.x, pos.z) < t.water - SWIM_DEPTH
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MoveInput {
@@ -463,6 +477,11 @@ impl Body {
     /// Returns and clears the accumulated vertical snap.
     pub fn take_snap(&mut self) -> f32 {
         std::mem::take(&mut self.snap)
+    }
+
+    /// Swimming (in deep water at the surface): slow, no shooting, no crouching.
+    pub fn swimming(&self, world: &World) -> bool {
+        self.chute == Chute::None && in_deep_water(world, self.pos)
     }
 
     pub fn is_sprinting(&self, inp: &MoveInput) -> bool {
@@ -527,6 +546,10 @@ impl Body {
         if self.climb(world, inp, t, dt) {
             return;
         }
+        if self.swimming(world) {
+            self.swim(world, inp, t, dt);
+            return;
+        }
         let start = self.pos;
         let was_grounded = self.on_ground;
         self.step_in_world(world, inp, t, dt, wish);
@@ -580,7 +603,9 @@ impl Body {
         self.pos.x = self.pos.x.clamp(x0 + 0.5, x1 - 0.5);
         self.pos.z = self.pos.z.clamp(z0 + 0.5, z1 - 0.5);
         self.stand_on_ground(world, start, false);
-        if self.on_ground {
+        // (or splashes down in deep water)
+        if self.on_ground || in_deep_water(world, self.pos) {
+            self.on_ground = true;
             self.chute = Chute::None;
             self.vel = Vec3::ZERO;
         }
@@ -609,6 +634,49 @@ impl Body {
         }
         self.on_ground = true;
         self.vel.y = self.vel.y.max(0.0);
+    }
+
+    /// Swimming: the water holds you at its surface; the keys paddle you along slowly.
+    fn swim(&mut self, world: &World, inp: &MoveInput, t: &MoveTuning, dt: f32) {
+        let Some(w) = world.terrain.as_ref().map(|t| t.water) else {
+            return;
+        };
+        self.stance = Stance::Stand;
+        let (fwd, right) = yaw_basis(inp.yaw);
+        let mut wish = fwd * inp.forward + right * inp.right;
+        if wish.length() > 1.0 {
+            wish = wish.normalize();
+        }
+        let wish = wish * t.walk_speed * SWIM_SPEED_MULT;
+        let hv = approach(vec3(self.vel.x, 0.0, self.vel.z), wish, 8.0 * dt);
+        // (jumping in: the water brakes the fall, then lifts you back up)
+        let surface = w - SWIM_SINK;
+        let vy = if self.pos.y < surface - 0.02 {
+            ((surface - self.pos.y) * 4.0).min(2.0)
+        } else {
+            0.0
+        };
+        self.vel = vec3(hv.x, vy, hv.z);
+        let delta = self.vel * dt;
+        let steps = (delta.abs().max_element() / 0.2).ceil().max(1.0) as u32;
+        let sub = delta / steps as f32;
+        for _ in 0..steps {
+            self.move_axis(world, 0, sub.x, true);
+            self.move_axis(world, 2, sub.z, true);
+            self.move_axis(world, 1, sub.y, true);
+        }
+        if self.pos.y > surface {
+            self.pos.y = surface;
+        }
+        self.on_ground = true;
+        self.climbing = false;
+        // the shore: the ground rising under you puts you back on your feet
+        if let Some(tr) = &world.terrain {
+            let g = tr.height(self.pos.x, self.pos.z);
+            if g > self.pos.y {
+                self.pos.y = g;
+            }
+        }
     }
 
     fn step_in_world(

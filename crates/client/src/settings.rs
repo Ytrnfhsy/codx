@@ -28,6 +28,13 @@ pub struct HostSettings {
     pub br_bots: usize,
     /// Players per battle royale squad (1 = everyone on their own).
     pub br_squad: u8,
+    /// Battle royale weather: "random" or a weather's name.
+    #[serde(default = "random_weather")]
+    pub br_weather: String,
+}
+
+fn random_weather() -> String {
+    "random".into()
 }
 
 impl Default for HostSettings {
@@ -45,6 +52,7 @@ impl Default for HostSettings {
             br_max_players: 50,
             br_bots: 50,
             br_squad: 1,
+            br_weather: random_weather(),
         }
     }
 }
