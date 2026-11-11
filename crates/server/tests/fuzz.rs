@@ -107,6 +107,102 @@ fn random_msg(rng: &mut Rng, life: u16, seq: &mut u32) -> C2S {
     }
 }
 
+/// The battle royale's own messages, aimed at real things on the map as often as not.
+fn random_br_msg(rng: &mut Rng, g: &Game) -> C2S {
+    use toon_shared::inventory::AmmoType;
+    use toon_shared::protocol::{BoxCmd, CarCmd, Item, ItemAction};
+    let any = |rng: &mut Rng, real: Vec<u16>| {
+        if real.is_empty() || rng.chance(0.3) {
+            rng.below(65536) as u16
+        } else {
+            real[rng.below(real.len())]
+        }
+    };
+    let loot: Vec<u16> = g.br.loot.iter().map(|l| l.id).take(400).collect();
+    let cars: Vec<u16> = g.cars.iter().map(|c| c.id).collect();
+    let boxes: Vec<u16> = g.br.boxes.iter().map(|b| b.id).collect();
+    let small = |rng: &mut Rng| {
+        if rng.chance(0.7) {
+            rng.below(6) as u8
+        } else {
+            rng.below(256) as u8
+        }
+    };
+    let ammo = [
+        AmmoType::Pistol,
+        AmmoType::Smg,
+        AmmoType::Rifle,
+        AmmoType::Shotgun,
+        AmmoType::Sniper,
+        AmmoType::Lmg,
+    ][rng.below(6)];
+    match rng.below(22) {
+        0 => C2S::UseMedkit,
+        1 => C2S::UseBandage,
+        2 => C2S::UseDrink,
+        3 => C2S::Throw {
+            origin: wild_v3(rng),
+            dir: wild_v3(rng),
+            kind: small(rng),
+        },
+        4 => C2S::Ready(rng.chance(0.5)),
+        5 => C2S::Marker(rng.chance(0.8).then(|| [wild_f32(rng), wild_f32(rng)])),
+        6 => C2S::Car(CarCmd::Enter(any(rng, cars))),
+        7 => C2S::Car(CarCmd::Exit),
+        8 => C2S::Car(CarCmd::Drive {
+            throttle: rng.below(256) as u8 as i8,
+            steer: rng.below(256) as u8 as i8,
+            brake: rng.chance(0.3),
+        }),
+        9 => C2S::Box(BoxCmd::Open(any(rng, boxes))),
+        10 => C2S::Box(BoxCmd::Take(any(rng, boxes), rng.below(256) as u8)),
+        11 => C2S::Box(BoxCmd::TakeAll(any(rng, boxes))),
+        12 => C2S::Box(BoxCmd::Close),
+        13 => C2S::Spectate(small(rng)),
+        14 => C2S::Door(if rng.chance(0.7) {
+            rng.below(g.world.doors.len().max(1)) as u16
+        } else {
+            rng.below(65536) as u16
+        }),
+        15 => C2S::SetSkin(rng.below(256) as u8),
+        16 => C2S::PickUp(any(rng, loot)),
+        17 => C2S::Item(ItemAction::AttachSight {
+            level: small(rng),
+            slot: small(rng),
+        }),
+        18 => C2S::Item(ItemAction::AttachMod {
+            kind: small(rng),
+            slot: small(rng),
+        }),
+        19 => C2S::Item(if rng.chance(0.5) {
+            ItemAction::DetachMods(small(rng))
+        } else {
+            ItemAction::DetachSight(small(rng))
+        }),
+        _ => C2S::Item(ItemAction::Drop(
+            match rng.below(12) {
+                0 => Item::Ammo(ammo),
+                1 => Item::Medkit,
+                2 => Item::Armor,
+                3 => Item::Helmet,
+                4 => Item::Backpack,
+                5 => Item::Sight(small(rng)),
+                6 => Item::Mod(small(rng)),
+                7 => Item::Bandages,
+                8 => Item::Drinks,
+                9 => Item::Molotovs,
+                10 => Item::Flashes,
+                _ => Item::Weapon(small(rng)),
+            },
+            if rng.chance(0.5) {
+                rng.below(5) as u16
+            } else {
+                rng.below(65536) as u16
+            },
+        )),
+    }
+}
+
 fn run(map: MapId, mode: Mode, seed: u64) {
     let cfg = ServerConfig {
         // (tests start straight away: nobody presses «Ready»)
@@ -142,8 +238,51 @@ fn run(map: MapId, mode: Mode, seed: u64) {
             let life = g.p(id).map(|p| p.life).unwrap_or(0);
             for _ in 0..rng.below(6) {
                 let t0 = std::time::Instant::now();
-                g.handle(id, random_msg(&mut rng, life, &mut seq));
+                let msg = if mode == Mode::Br && rng.chance(0.5) {
+                    random_br_msg(&mut rng, &g)
+                } else {
+                    random_msg(&mut rng, life, &mut seq)
+                };
+                g.handle(id, msg);
                 worst = worst.max(t0.elapsed());
+            }
+        }
+        // battle royale: now and then a player is put on the ground by some loot with a
+        // full backpack, or loses a fight, so that the messages have something to work on
+        if mode == Mode::Br && g.br.running && tick % 40 == 0 {
+            let id = ids[rng.below(ids.len())];
+            let spot = (!g.br.loot.is_empty()).then(|| g.br.loot[rng.below(g.br.loot.len())].pos);
+            if let (Some(at), Some(p)) = (spot, g.pm(id)) {
+                if p.alive || p.in_plane {
+                    p.in_plane = false;
+                    p.alive = true;
+                    p.body.chute = toon_shared::physics::Chute::None;
+                    p.body.pos = at;
+                    p.inv.medkits = 3;
+                    p.inv.bandages = 5;
+                    p.inv.drinks = 2;
+                    p.inv.molotovs = 2;
+                    p.inv.flashes = 2;
+                    p.inv.spare_sights = [1, 1, 1, 1];
+                    p.inv.spare_mods = [1, 1, 1, 1];
+                }
+            }
+            if rng.chance(0.3) {
+                let victims: Vec<u8> = g
+                    .players
+                    .iter()
+                    .flatten()
+                    .filter(|p| p.alive && p.is_bot())
+                    .map(|p| p.id)
+                    .collect();
+                if !victims.is_empty() {
+                    g.kill(
+                        victims[rng.below(victims.len())],
+                        Some(id),
+                        toon_shared::weapons::Cause::World,
+                        false,
+                    );
+                }
             }
         }
         let t0 = std::time::Instant::now();

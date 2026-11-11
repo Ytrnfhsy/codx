@@ -12,7 +12,7 @@ use toon_shared::map::{Map, MapId, Spawn};
 use toon_shared::physics::{body_box, Body, Stance, World};
 use toon_shared::protocol::*;
 use toon_shared::rng::Rng;
-use toon_shared::weapons::{Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
+use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
 use toon_shared::{maps, tr, Mode, Team};
 
 pub const PREROUND_FIRST: f64 = 8.0;
@@ -116,6 +116,13 @@ pub struct Player {
     pub progress: f32,
     pub joined_at: f64,
     pub chat_budget: f32,
+    /// The height of the last place they stood on, and the highest point of the fall
+    /// they are in (None: not falling, or it does not count — a parachute, a car).
+    pub support_y: f32,
+    pub fall_top: Option<f32>,
+    fall_life: u16,
+    /// Backpack actions left (refills; nobody needs to drop things a hundred times a second).
+    pub item_budget: f32,
     /// Battle royale: still riding the plane.
     pub in_plane: bool,
     /// Battle royale: everything carried besides the guns.
@@ -254,6 +261,10 @@ impl Player {
             progress: 0.0,
             joined_at: now,
             chat_budget: 5.0,
+            support_y: f32::MAX,
+            fall_top: None,
+            fall_life: 0,
+            item_budget: 12.0,
             in_plane: false,
             inv: Default::default(),
             ammo_seen: [0; 2],
@@ -317,6 +328,12 @@ pub enum Dest {
     Team(Team),
     One(u8),
 }
+
+/// In the air nobody gets higher than this above where they last stood (a jump is 1.1 m).
+const MAX_AIR_RISE: f32 = 2.2;
+/// Falls up to this many metres do not hurt; each metre more costs this much health.
+pub const SAFE_FALL: f32 = 6.5;
+pub const FALL_DAMAGE: f32 = 11.0;
 
 pub struct Grenade {
     pub id: u16,
@@ -413,6 +430,7 @@ pub struct Game {
     pub pickups: Vec<crate::pickups::Pickup>,
     pub blasts: Vec<PendingBlast>,
     pub next_ent: u16,
+    ent_wrapped: bool,
     pub uav_until: [f64; 2],
     /// Enemies bots have just spotted: (where, when, the team that saw them) — what a
     /// bot shares with the teammates around it.
@@ -508,6 +526,7 @@ impl Game {
             pickups: Vec::new(),
             blasts: Vec::new(),
             next_ent: 1,
+            ent_wrapped: false,
             uav_until: [0.0; 2],
             intel: Vec::new(),
             sab,
@@ -621,8 +640,29 @@ impl Game {
     }
 
     pub fn new_ent_id(&mut self) -> u16 {
-        self.next_ent = self.next_ent.wrapping_add(1).max(1);
-        self.next_ent
+        loop {
+            self.next_ent = self.next_ent.wrapping_add(1);
+            if self.next_ent == 0 {
+                self.next_ent = 1;
+                self.ent_wrapped = true;
+            }
+            // (once the numbers have gone round, some are still on the map)
+            if !self.ent_wrapped || !self.ent_in_use(self.next_ent) {
+                return self.next_ent;
+            }
+        }
+    }
+
+    /// Something that stays around for a while (loot, guns, cars, boxes, crates) has
+    /// this id.
+    fn ent_in_use(&self, id: u16) -> bool {
+        self.pickups.iter().any(|p| p.id == id)
+            || self.br.loot.iter().any(|l| l.id == id)
+            || self.cars.iter().any(|c| c.id == id)
+            || self.br.boxes.iter().any(|b| b.id == id)
+            || self.br.drops.iter().any(|d| d.id == id)
+            || self.fires.iter().any(|f| f.id == id)
+            || self.grenades.iter().any(|g| g.id == id)
     }
 
     // ---------------------------------------------------------------- connections
@@ -1452,12 +1492,20 @@ impl Game {
         if !p.alive || inp.life != p.life {
             return;
         }
+        if p.fall_life != p.life {
+            // a new life starts on its feet, wherever it is
+            p.fall_life = p.life;
+            p.support_y = f32::MAX;
+            p.fall_top = None;
+        }
         p.flags = inp.flags & (flags::SPRINT | flags::ADS | flags::ON_GROUND | flags::USE);
         if p.flags & flags::SPRINT != 0 {
             p.last_sprint = self.time;
         }
         if seated {
             p.flags &= !flags::SPRINT;
+            p.support_y = f32::MAX;
+            p.fall_top = None;
             return;
         }
         let new = Vec3::from_array(inp.pos);
@@ -1473,6 +1521,16 @@ impl Game {
         if frozen && dh > 0.05 {
             ok = false;
         }
+        // standing on something (a floor, the ground, a ladder, the water)?
+        let supported = toon_shared::physics::in_deep_water(world, new)
+            || world.ladder_at(new).is_some()
+            || world.ground(new.x, new.z).is_some_and(|g| new.y - g < 0.6)
+            || world.floor_below(new + vec3(0.0, 0.1, 0.0), 0.7).is_some();
+        // nobody rises higher than a jump above where they last stood
+        if ok && !skydiving && !supported && new.y > p.support_y + MAX_AIR_RISE {
+            ok = false;
+        }
+        let mut fell = 0.0;
         if ok {
             let mut bb = body_box(new, stance.height());
             bb.min += Vec3::splat(0.03);
@@ -1487,6 +1545,25 @@ impl Game {
             p.body.vel = Vec3::from_array(inp.vel);
             p.body.stance = stance;
             p.body.on_ground = inp.flags & flags::ON_GROUND != 0;
+            // falls: from the highest point since the feet left the ground
+            if skydiving {
+                p.fall_top = None;
+                p.support_y = f32::MAX;
+            } else if supported {
+                let soft = toon_shared::physics::in_deep_water(world, new)
+                    || world.ladder_at(new).is_some();
+                if let Some(top) = p.fall_top.take().filter(|_| !soft) {
+                    fell = top - new.y;
+                }
+                p.support_y = new.y;
+            } else {
+                let from = if p.support_y == f32::MAX {
+                    new.y
+                } else {
+                    p.support_y
+                };
+                p.fall_top = Some(p.fall_top.unwrap_or(from).max(new.y));
+            }
             if p.body.on_ground {
                 p.body.chute = toon_shared::physics::Chute::None;
             } else if skydiving && p.body.vel.y > -12.0 {
@@ -1498,6 +1575,17 @@ impl Game {
             let pos = p.body.pos.to_array();
             self.outbox
                 .push((Dest::One(id), S2C::Correction { pos, life }, true));
+        }
+        if fell > SAFE_FALL {
+            let at = Vec3::from_array(inp.pos);
+            self.damage(
+                id,
+                None,
+                (fell - SAFE_FALL) * FALL_DAMAGE,
+                Cause::Fall,
+                false,
+                at,
+            );
         }
     }
 
@@ -1927,6 +2015,7 @@ impl Game {
             };
             p.move_budget = (p.move_budget + speed * dt).min(3.0);
             p.chat_budget = (p.chat_budget + dt * 0.5).min(5.0);
+            p.item_budget = (p.item_budget + dt * 6.0).min(12.0);
             if !p.alive {
                 if p.team.is_playing() && p.has_loadout {
                     let wait = if p.is_bot() { 0.0 } else { 3.0 };

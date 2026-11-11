@@ -1526,9 +1526,10 @@ impl Game {
         let Some(p) = self.players[id as usize].as_mut() else {
             return;
         };
-        if !p.alive || p.in_plane {
+        if !p.alive || p.in_plane || p.item_budget < 1.0 {
             return;
         }
+        p.item_budget -= 1.0;
         p.br_sync_ammo();
         // things land a step in front
         let at = p.body.pos + look_dir(p.yaw, 0.0) * 0.9;
@@ -1735,12 +1736,34 @@ impl Game {
             .floor_below(pos + vec3(0.0, 0.3, 0.0), 3.0)
             .or_else(|| self.world.ground(pos.x, pos.z))
             .unwrap_or(pos.y);
+        let pos = vec3(pos.x, floor, pos.z);
+        // the same thing already lying right here: one pile, not a hundred
+        let stacks = matches!(
+            kind,
+            LootKind::Ammo(_)
+                | LootKind::Medkit
+                | LootKind::Bandages
+                | LootKind::Drink
+                | LootKind::Molotov
+                | LootKind::Flash
+        );
+        if stacks {
+            if let Some(l) = self
+                .br
+                .loot
+                .iter_mut()
+                .find(|l| l.kind == kind && l.pos.distance(pos) < 1.2)
+            {
+                l.amount = l.amount.saturating_add(amount);
+                return;
+            }
+        }
         let id = self.new_ent_id();
         self.br.loot.push(Loot {
             id,
             kind,
             amount,
-            pos: vec3(pos.x, floor, pos.z),
+            pos,
         });
     }
 
