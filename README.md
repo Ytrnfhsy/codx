@@ -442,6 +442,16 @@ _drop_radius/_drop_damage`; НРК — `nrk_time/_health/_speed/_damage/_fire_in
 ./toon-server --map cargo --mode sab
 ```
 
+Linux-сервер у релізах зібрано **статично** (musl): це один файл без залежностей, що
+запускається на будь-якому дистрибутиві. Якщо збираєш сам на новішій системі, ніж сервер,
+і бачиш `version 'GLIBC_2.xx' not found` — збери так само:
+
+```sh
+sudo apt install musl-tools && rustup target add x86_64-unknown-linux-musl
+cargo build --release -p toon_server --target x86_64-unknown-linux-musl
+# файл: target/x86_64-unknown-linux-musl/release/toon-server
+```
+
 Сервер використовує **один номер порту**: **UDP** для гри та **TCP** для веб-панелі
 (`http://<сервер>:27015/` — публічна сторінка зі статусом, `/admin` — адмінка).
 Для гри через інтернет відкрийте/пробросьте на роутері **UDP і TCP 27015**

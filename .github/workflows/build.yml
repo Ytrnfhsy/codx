@@ -22,7 +22,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # the oldest runner: the game then needs no newer glibc than that system's
+          # (a binary built on a new one refuses to start on an older one)
+          - os: ubuntu-22.04
             name: linux-x64
             ext: ""
           - os: windows-latest
@@ -36,7 +38,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libx11-dev libxi-dev libgl1-mesa-dev
+        run: |
+          sudo apt-get update && sudo apt-get install -y libasound2-dev libx11-dev libxi-dev libgl1-mesa-dev musl-tools
+          rustup target add x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
       - name: Build
         shell: bash
@@ -48,6 +52,12 @@ jobs:
             export TW_UPDATE_REPO="$GITHUB_REPOSITORY"
           fi
           cargo build --release
+          # the Linux server is linked statically (musl): one file that runs on any
+          # distribution, whatever its glibc
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            cargo build --release -p toon_server --target x86_64-unknown-linux-musl
+            cp target/x86_64-unknown-linux-musl/release/toon-server target/release/toon-server
+          fi
       - name: Package
         shell: bash
         run: |
