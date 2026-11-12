@@ -63,7 +63,7 @@ jobs:
         run: |
           mkdir -p dist/toon-warfare-${{ matrix.name }} release
           cp target/release/toon-warfare${{ matrix.ext }} target/release/toon-server${{ matrix.ext }} dist/toon-warfare-${{ matrix.name }}/
-          cp README.md server.example.json dist/toon-warfare-${{ matrix.name }}/
+          cp README.md docs/GUIDE.md server.example.json dist/toon-warfare-${{ matrix.name }}/
           # the bare binaries are what the built-in updater downloads
           cp target/release/toon-warfare${{ matrix.ext }} release/toon-warfare-${{ matrix.name }}${{ matrix.ext }}
           cp target/release/toon-server${{ matrix.ext }} release/toon-server-${{ matrix.name }}${{ matrix.ext }}
