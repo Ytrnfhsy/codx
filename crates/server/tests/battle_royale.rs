@@ -1717,3 +1717,55 @@ fn lying_things_are_sent_as_changes() {
     assert_eq!(known.len(), near.len());
     assert!(near.iter().all(|e| known.contains_key(&e.id())));
 }
+
+/// A real player who only watches does not start a battle royale round: one would end at
+/// once (no real player in it) and start again, over and over. They join, it starts and
+/// runs; they go back to watching during the countdown, it waits again.
+#[test]
+fn a_spectator_does_not_start_rounds_over_and_over() {
+    let mut cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir()
+            .join("tw-br-spec")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 8;
+    cfg.br.max_players = 8;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Market, Mode::Br);
+    let v = toon_shared::consts::PROTOCOL_VERSION;
+    let me = g
+        .connect("127.0.0.1:5701".parse().unwrap(), "Глядач", "", v)
+        .unwrap();
+    g.handle(me, C2S::JoinTeam(Some(Team::Spectator)));
+    let mut ends = 0;
+    let run = |g: &mut Game, secs: f32, ends: &mut usize| {
+        for _ in 0..(secs / TICK_DT) as usize {
+            g.tick(TICK_DT);
+            *ends += g
+                .outbox
+                .iter()
+                .filter(|m| matches!(m.1, S2C::MatchEnd { .. }))
+                .count();
+            g.outbox.clear();
+            g.shots.clear();
+        }
+    };
+    run(&mut g, 60.0, &mut ends);
+    assert_eq!(ends, 0, "the round started and ended with nobody in it");
+    assert_eq!(g.state, MatchState::Warmup);
+    assert!(!g.br.running);
+    // joining starts it, and it keeps going
+    g.handle(me, C2S::JoinTeam(None));
+    run(&mut g, 20.0, &mut ends);
+    assert!(
+        g.br.running,
+        "did not start once a player joined ({:?})",
+        g.state
+    );
+    run(&mut g, 10.0, &mut ends);
+    assert_eq!(ends, 0);
+    assert_eq!(g.state, MatchState::Playing);
+}

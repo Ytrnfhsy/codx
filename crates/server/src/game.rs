@@ -1705,11 +1705,27 @@ impl Game {
             .flatten()
             .filter(|p| p.team.is_playing())
             .count();
+        // a battle royale round ends as soon as no real player is in it, so one only
+        // starts with a real player on board (bots alone, or bots watched by a spectator,
+        // would start and end it over and over); other modes run for whoever watches
+        let humans = if self.mode == Mode::Br {
+            self.humans_playing()
+        } else {
+            self.players.iter().flatten().any(|p| !p.is_bot())
+        };
         playing >= self.cfg.min_players
             && (self.mode.solo()
                 || self.team_count(Team::Allies) > 0 && self.team_count(Team::Axis) > 0)
-            && self.players.iter().flatten().any(|p| !p.is_bot())
+            && humans
             && (!self.cfg.ready_check || self.unready() == 0)
+    }
+
+    /// A real player has joined a side (not just watching).
+    pub fn humans_playing(&self) -> bool {
+        self.players
+            .iter()
+            .flatten()
+            .any(|p| !p.is_bot() && p.team.is_playing())
     }
 
     /// On the same side: the same team, or in the battle royale the same squad.
@@ -1955,7 +1971,12 @@ impl Game {
                 }
             }
             MatchState::PreRound => {
-                if self.time >= self.state_end {
+                // (the last real player went to watch during the countdown: back to the
+                // warm-up instead of a round with nobody to play it)
+                if self.mode == Mode::Br && !self.humans_playing() {
+                    self.state = MatchState::Warmup;
+                    self.match_started = false;
+                } else if self.time >= self.state_end {
                     self.state = MatchState::Playing;
                     let limit = match self.mode {
                         Mode::Tdm => self.cfg.tdm.time_limit,
