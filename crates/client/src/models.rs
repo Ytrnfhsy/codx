@@ -889,6 +889,22 @@ pub fn add_nrk(
 const NRK_GUN_LOCAL_Y: f32 = toon_shared::vehicles::NRK_GUN_Y - 0.72;
 
 /// Battle royale supplies on the ground: a medkit, an ammo box, a vest or a grenade crate.
+/// A bright ring on the ground round the thing the use key would pick up.
+pub fn add_pick_ring(m: &mut ToonMesh, pos: Vec3, t: f32) {
+    let (r0, r1) = (0.42, 0.5 + 0.03 * (t * 5.0).sin());
+    let n = 20;
+    let y = pos.y + 0.03;
+    for k in 0..n {
+        let a0 = k as f32 / n as f32 * std::f32::consts::TAU;
+        let a1 = (k + 1) as f32 / n as f32 * std::f32::consts::TAU;
+        let p = |a: f32, r: f32| vec3(pos.x + a.cos() * r, y, pos.z + a.sin() * r);
+        m.fill.add_quad(
+            [p(a0, r0), p(a0, r1), p(a1, r1), p(a1, r0)],
+            [255, 214, 90, 255],
+        );
+    }
+}
+
 pub fn add_loot(m: &mut ToonMesh, pos: Vec3, kind: toon_shared::protocol::LootKind, t: f32) {
     use toon_shared::protocol::LootKind;
     // a slow bob and turn so they catch the eye

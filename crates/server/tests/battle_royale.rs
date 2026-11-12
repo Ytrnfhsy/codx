@@ -912,6 +912,11 @@ fn jeeps_drive_carry_and_blow_up() {
     let c = g.cars.iter().find(|c| c.id == car_id).unwrap();
     let d = g.p(me).unwrap().body.pos.distance(c.state.pos);
     assert!((1.0..4.0).contains(&d), "got out {d:.1} m away");
+    assert_eq!(
+        g.p(me).unwrap().body.stance,
+        toon_shared::physics::Stance::Stand,
+        "still sitting after getting out"
+    );
 
     // shot to pieces: it blows up and the passenger is hurt
     let i = g.cars.iter().position(|c| c.id == car_id).unwrap();
@@ -1522,6 +1527,27 @@ fn doors_open_shut_and_block() {
     g.time += 1.0;
     g.handle(me, C2S::Door(0));
     assert!(!g.world.door_open[0], "opened from 10 m away");
+    // somebody inside, standing where it swings in: it opens out of the room instead
+    let ob = g.world.door_box(0, 1).unwrap();
+    let inside = (ob.min + ob.max) * 0.5;
+    let inside = glam::vec3(inside.x, d.shut[0].y, inside.z);
+    g.pm(me).unwrap().body.pos = inside;
+    g.time += 1.0;
+    g.handle(me, C2S::Door(0));
+    assert!(
+        g.world.door_open[0],
+        "could not open the door from beside its hinge"
+    );
+    assert_eq!(g.world.door_state(0), 2, "it should have swung outwards");
+    assert!(
+        !g.world
+            .overlaps(&toon_shared::physics::body_box(inside, 1.8)),
+        "the door swung through the one who opened it"
+    );
+    g.time += 1.0;
+    g.handle(me, C2S::Door(0));
+    assert!(!g.world.door_open[0]);
+    g.time += 1.0;
     // a bot walking up to it opens it
     let bot = g
         .players

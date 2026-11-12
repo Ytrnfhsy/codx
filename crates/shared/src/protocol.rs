@@ -639,10 +639,11 @@ pub enum S2C {
     },
     /// A flashbang went off in front of us: how hard (0..1).
     Flashed(f32),
-    /// The doors that stand open (all the others are shut).
-    Doors(Vec<u16>),
-    /// One door opened or shut.
-    Door(u16, bool),
+    /// The doors that stand open and which way (1 into the room, 2 out of it); all the
+    /// others are shut.
+    Doors(Vec<(u16, u8)>),
+    /// One door opened (1 in, 2 out) or shut (0).
+    Door(u16, u8),
     /// Things lying on the ground near us: new or changed ones, and the ids of those
     /// gone (taken, or left behind).
     Ents {

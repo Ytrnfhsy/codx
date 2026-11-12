@@ -394,6 +394,8 @@ pub fn render_world(
                 Vec3::X * (open_mid.x - shut_mid.x).signum(),
             )
         };
+        // (swung out of the room: the other way round)
+        let v = if g.world.door_out[k] { -v } else { v };
         let a = t * std::f32::consts::FRAC_PI_2;
         let dir = u * a.cos() + v * a.sin();
         let rot = Mat4::from_rotation_y((-dir.z).atan2(dir.x));
@@ -494,12 +496,18 @@ pub fn render_world(
             EntSnap::AirDrop { pos, landed, .. } => {
                 models::add_airdrop(&mut m, Vec3::from_array(*pos), *landed, now as f32)
             }
-            EntSnap::Loot { id, kind, pos, .. } => models::add_loot(
-                &mut m,
-                Vec3::from_array(*pos),
-                *kind,
-                now as f32 + *id as f32,
-            ),
+            EntSnap::Loot { id, kind, pos, .. } => {
+                models::add_loot(
+                    &mut m,
+                    Vec3::from_array(*pos),
+                    *kind,
+                    now as f32 + *id as f32,
+                );
+                // the one the use key would take: a ring on the ground round it
+                if g.pickup_target.map(|t| t.0) == Some(*id) && kc.is_none() {
+                    models::add_pick_ring(&mut m, Vec3::from_array(*pos), now as f32);
+                }
+            }
         }
     }
     // jeeps and boats

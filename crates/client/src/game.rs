@@ -93,6 +93,9 @@ impl CarView {
     }
 }
 
+/// How far (along the ground) guns and supplies can be picked up from.
+pub const PICK_REACH: f32 = 2.3;
+
 pub struct KillLine {
     pub killer: String,
     pub victim: String,
@@ -210,6 +213,8 @@ pub struct GameClient {
     pub loadout: Loadout,
     seq: u32,
     pub want_stance: Stance,
+    /// Sat in a car last frame (getting out stands us up).
+    was_seated: bool,
     pub weapons: [(WeaponId, u16, u16); 2],
     pub slot: u8,
     next_fire: f64,
@@ -252,6 +257,8 @@ pub struct GameClient {
     pub view_roll: f32,
     /// The health the HUD shows draining (catches up with the real one).
     pub hud_hp: f32,
+    /// How far each hand's variable scope is turned up (0 weakest .. 1 strongest).
+    pub scope_turn: [f32; 2],
     pub sway: Vec2,
     step_acc: f32,
     pub breath: f32,
@@ -525,6 +532,7 @@ impl GameClient {
             loadout: def,
             seq: 0,
             want_stance: Stance::Stand,
+            was_seated: false,
             weapons: [(def.primary, 0, 0), (def.secondary, 0, 0)],
             slot: 0,
             next_fire: 0.0,
@@ -555,6 +563,7 @@ impl GameClient {
             walk_amount: 0.0,
             view_roll: 0.0,
             hud_hp: 0.0,
+            scope_turn: [0.0; 2],
             sway: Vec2::ZERO,
             step_acc: 0.0,
             breath: 4.0,
@@ -1022,13 +1031,14 @@ impl GameClient {
             }
             S2C::Doors(open) => {
                 for k in 0..self.world.doors.len() {
-                    self.world.set_door(k, open.contains(&(k as u16)));
+                    let state = open.iter().find(|o| o.0 as usize == k).map_or(0, |o| o.1);
+                    self.world.set_door_state(k, state);
                 }
             }
             S2C::Door(k, open) => {
                 let k = k as usize;
-                if k < self.world.doors.len() && self.world.door_open[k] != open {
-                    self.world.set_door(k, open);
+                if k < self.world.doors.len() && self.world.door_state(k) != open {
+                    self.world.set_door_state(k, open);
                     let eye = self.eye();
                     let c = self.world.doors[k].centre();
                     if let Some(a) = audio.filter(|_| c.distance(eye) < 30.0) {
@@ -1518,11 +1528,21 @@ impl GameClient {
 
     /// The closest dropped weapon in reach that we don't already carry.
     fn find_pickup(&self) -> Option<(u16, Pick)> {
+        // what we look at, within reach: the one nearest the crosshair wins (a little
+        // nearer is a little better); right at our feet anything goes
         let me = self.body.pos;
-        let near = |pos: &[f32; 3], r: f32| {
+        let eye = self.eye();
+        let look = look_dir(self.yaw, self.pitch);
+        let score = |pos: &[f32; 3], reach: f32, lift: f32| {
             let p = Vec3::from_array(*pos);
-            let d = vec2(p.x - me.x, p.z - me.z).length();
-            (d < r && (p.y - me.y).abs() < 1.8).then_some(d)
+            let flat = vec2(p.x - me.x, p.z - me.z).length();
+            if flat > reach || (p.y - me.y).abs() > 1.8 {
+                return None;
+            }
+            let to = p + vec3(0.0, lift, 0.0) - eye;
+            let angle = to.normalize_or_zero().dot(look).clamp(-1.0, 1.0).acos();
+            let cone = if flat < 0.9 { 1.4 } else { 0.55 };
+            (angle < cone).then_some(angle * 4.0 + flat * 0.25)
         };
         // (the battle royale's empty second slot holds a placeholder pistol)
         let empty_slot = self.br.as_ref().and_then(|b| b.empty_slot);
@@ -1537,7 +1557,7 @@ impl GameClient {
                         .iter()
                         .enumerate()
                         .any(|(k, w)| w.0 == *weapon && empty_slot != Some(k as u8));
-                    near(pos, 1.6)
+                    score(pos, PICK_REACH, 0.1)
                         .filter(|_| !have)
                         .map(|d| (d, *id, Pick::Weapon(*weapon)))
                 }
@@ -1546,8 +1566,10 @@ impl GameClient {
                     kind,
                     amount,
                     pos,
-                } => near(pos, 1.5).map(|d| (d, *id, Pick::Loot(*kind, *amount))),
-                EntSnap::DeathBox { id, pos } => near(pos, 2.4).map(|d| (d, *id, Pick::DeathBox)),
+                } => score(pos, PICK_REACH, 0.2).map(|d| (d, *id, Pick::Loot(*kind, *amount))),
+                EntSnap::DeathBox { id, pos } => {
+                    score(pos, 2.6, 0.3).map(|d| (d, *id, Pick::DeathBox))
+                }
                 // a car with a free seat (a little further: it is big)
                 EntSnap::Car {
                     id,
@@ -1556,7 +1578,13 @@ impl GameClient {
                     seats,
                     ..
                 } if seats.contains(&255) => {
-                    near(pos, 3.6).map(|d| (d + 1.0, *id, Pick::Car(*kind)))
+                    let p = Vec3::from_array(*pos);
+                    let d = vec2(p.x - me.x, p.z - me.z).length();
+                    (d < 3.6 && (p.y - me.y).abs() < 2.5).then_some((
+                        d + 1.5,
+                        *id,
+                        Pick::Car(*kind),
+                    ))
                 }
                 _ => None,
             })
@@ -1580,8 +1608,14 @@ impl GameClient {
             .filter_map(|(k, d)| {
                 let to = d.centre() - eye;
                 let dist = to.length();
-                (dist < 2.6 && to.normalize_or_zero().dot(look) > 0.55)
-                    .then(|| (dist + 0.6, k as u16, Pick::Door(self.world.door_open[k])))
+                let angle = to.normalize_or_zero().dot(look).clamp(-1.0, 1.0).acos();
+                (dist < 2.6 && angle < 0.9).then(|| {
+                    (
+                        angle * 4.0 + dist * 0.25 + 0.8,
+                        k as u16,
+                        Pick::Door(self.world.door_open[k]),
+                    )
+                })
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
     }
@@ -1802,11 +1836,18 @@ impl GameClient {
         )
     }
 
-    /// Magnification when aiming: the gun's own, or its sight's if that is stronger.
+    /// Magnification when aiming: the gun's own, or its sight's if that is stronger (a
+    /// variable scope at what it is turned to).
     pub fn ads_zoom(&self) -> f32 {
-        self.ws()
-            .ads_zoom
-            .max(toon_shared::inventory::sight_zoom(self.sight()))
+        self.ws().ads_zoom.max(self.sight_zoom_now())
+    }
+
+    /// What the sight on the gun in hand magnifies right now.
+    pub fn sight_zoom_now(&self) -> f32 {
+        let l = self.sight();
+        let (lo, hi) = toon_shared::inventory::sight_zoom_range(l);
+        let k = self.scope_turn[self.slot as usize & 1].clamp(0.0, 1.0);
+        lo + (hi - lo) * k
     }
 
     /// Spawn protection active (and not given up yet).
@@ -2298,6 +2339,11 @@ impl GameClient {
             let seat = self
                 .seat()
                 .map(|(c, k)| (c.seat_pos(k), c.state.velocity(), k));
+            if seat.is_none() && self.was_seated {
+                // out of the car: back on our feet
+                self.want_stance = Stance::Stand;
+            }
+            self.was_seated = seat.is_some();
             if let Some((at, vel, k)) = seat {
                 // in a car: it carries us (and the driver drives it)
                 self.body.pos = at;
@@ -2394,7 +2440,16 @@ impl GameClient {
                 self.switch_to(1);
             }
             let wheel = mouse_wheel().1;
-            if can_act && wheel.abs() > 0.1 {
+            let variable = toon_shared::inventory::sight_variable(self.sight());
+            if can_act && wheel.abs() > 0.1 && variable && self.ads_t > 0.5 {
+                // aiming through a variable scope: the wheel turns its magnification
+                // (five steps from the weakest to the strongest)
+                let k = &mut self.scope_turn[self.slot as usize & 1];
+                *k = (*k + wheel.signum() * 0.25).clamp(0.0, 1.0);
+                if let Some(a) = audio {
+                    a.play(Sfx::Click, 0.35);
+                }
+            } else if can_act && wheel.abs() > 0.1 {
                 let s = 1 - self.slot;
                 self.switch_to(s);
             }

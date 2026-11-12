@@ -3,7 +3,7 @@
 use crate::bots::Bot;
 use crate::config::ServerConfig;
 use crate::nav::Nav;
-use glam::{vec3, Vec3};
+use glam::{vec2, vec3, Vec3};
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use toon_shared::consts::*;
@@ -482,6 +482,12 @@ pub struct Game {
     pub shots: Vec<ShotFx>,
     /// Battle royale lobby: spots around the spawn points (worked out on first use).
     lobby_spots: Option<Vec<Spawn>>,
+    /// The same rings round each team's base spawns (a team can outnumber its spawn
+    /// points: nobody should start inside a teammate).
+    base_spots: [Option<Vec<Spawn>>; 2],
+    /// Dice for picking spawn spots (their own: how many spots there are to weigh does
+    /// not shift the rest of the game's randomness).
+    spawn_rng: Rng,
     pub bullets: Vec<crate::combat::Bullet>,
     pub shot_serial: u32,
     pub log: VecDeque<String>,
@@ -575,6 +581,8 @@ impl Game {
             outbox: Vec::new(),
             shots: Vec::new(),
             lobby_spots: None,
+            base_spots: [None, None],
+            spawn_rng: Rng::new(0x5a3d),
             bullets: Vec::new(),
             shot_serial: 0,
             log: VecDeque::new(),
@@ -1095,11 +1103,21 @@ impl Game {
                         continue;
                     };
                     let at = vec3(at.x, y, at.z);
-                    if toon_shared::physics::fits(
-                        &self.world,
-                        at + vec3(0.0, 0.05, 0.0),
-                        Stance::Stand,
-                    ) {
+                    // on the same level as the spawn, inside the map, with nothing in
+                    // between (not over a railing, behind a wall or down on the quay)
+                    let [x0, z0, x1, z1] = self.world.bounds;
+                    let inside =
+                        at.x > x0 + 1.0 && at.x < x1 - 1.0 && at.z > z0 + 1.0 && at.z < z1 - 1.0;
+                    let chest = vec3(0.0, 1.0, 0.0);
+                    if inside
+                        && (y - s.pos.y).abs() < 0.6
+                        && self.world.line_of_sight(s.pos + chest, at + chest)
+                        && toon_shared::physics::fits(
+                            &self.world,
+                            at + vec3(0.0, 0.05, 0.0),
+                            Stance::Stand,
+                        )
+                    {
                         out.push(Spawn {
                             pos: at,
                             yaw: s.yaw,
@@ -1132,6 +1150,12 @@ impl Game {
                 self.lobby_spots = Some(self.ring_spots(&cands));
             }
             cands.extend(self.lobby_spots.iter().flatten().copied());
+        } else if base && team.is_playing() && !self.mode.solo() {
+            let k = team.index();
+            if self.base_spots[k].is_none() {
+                self.base_spots[k] = Some(self.ring_spots(&cands));
+            }
+            cands.extend(self.base_spots[k].iter().flatten().copied());
         }
         if !base {
             let centre = self.map.center();
@@ -1158,9 +1182,22 @@ impl Game {
                 cands.push(Spawn { pos: p, yaw });
             }
         }
+        // never inside somebody: spots where a living player stands are out, as long as
+        // any other is left
+        let taken = |s: &Spawn| {
+            self.players.iter().flatten().any(|p| {
+                p.alive
+                    && p.id != id
+                    && vec2(p.body.pos.x - s.pos.x, p.body.pos.z - s.pos.z).length() < 1.1
+                    && (p.body.pos.y - s.pos.y).abs() < 2.0
+            })
+        };
+        if cands.iter().any(|s| !taken(s)) {
+            cands.retain(|s| !taken(s));
+        }
         let mut best = (f32::NEG_INFINITY, cands[0]);
         for s in &cands {
-            let mut score = self.rng.range(0.0, 6.0);
+            let mut score = self.spawn_rng.range(0.0, 6.0);
             let mut min_enemy = 60.0f32;
             let mut min_friend = 60.0f32;
             for p in self.players.iter().flatten() {
@@ -1778,6 +1815,7 @@ impl Game {
         self.fires.clear();
         self.bullets.clear();
         self.lobby_spots = None;
+        self.base_spots = [None, None];
         self.smokes.clear();
         self.vehicles.clear();
         self.cars.clear();

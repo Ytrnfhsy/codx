@@ -121,13 +121,14 @@ fn rest_at(world: &World, kind: CarKind, s: &CarState, p: Vec3) -> Option<f32> {
             Some(w - 0.15)
         }
         CarKind::Jeep => {
-            // not into deep water
+            let floor = world.floor_below(p + vec3(0.0, 1.0, 0.0), 6.0)?;
+            // not into deep water (a bridge over it is fine: what counts is what the wheels
+            // stand on, not the river bed under the deck)
             if let (Some(g), Some(w)) = (ground, water(world)) {
-                if g < w - 0.45 {
+                if g < w - 0.45 && floor < w + 0.2 {
                     return None;
                 }
             }
-            let floor = world.floor_below(p + vec3(0.0, 1.0, 0.0), 6.0)?;
             // a kerb is fine, a wall is not
             if floor > s.pos.y + 0.8 {
                 return None;

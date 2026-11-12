@@ -125,9 +125,27 @@ pub fn level_name(level: u8) -> &'static str {
 /// Sights found as loot: 0 iron sights, 1 red dot, 2 a 2× scope, 3 a 4× scope, 4 an 8× scope.
 pub const MAX_SIGHT: u8 = 4;
 
-/// How much a sight magnifies.
+/// How much a sight magnifies at most.
 pub fn sight_zoom(level: u8) -> f32 {
-    [1.0, 1.5, 2.0, 4.0, 8.0][level.min(MAX_SIGHT) as usize]
+    sight_zoom_range(level).1
+}
+
+/// The magnification a sight can be set to: the two strongest scopes are variable (the
+/// mouse wheel turns them while aiming), the others fixed.
+pub fn sight_zoom_range(level: u8) -> (f32, f32) {
+    match level.min(MAX_SIGHT) {
+        0 => (1.0, 1.0),
+        1 => (1.5, 1.5),
+        2 => (2.0, 2.0),
+        3 => (2.0, 4.0),
+        _ => (3.0, 8.0),
+    }
+}
+
+/// The magnification can be turned.
+pub fn sight_variable(level: u8) -> bool {
+    let (a, b) = sight_zoom_range(level);
+    b > a
 }
 
 /// A scope you look through (a black ring round it), not just a dot over the iron sights.
@@ -140,8 +158,8 @@ pub fn sight_name(level: u8) -> &'static str {
         0 => t("Мушка", "Iron sights"),
         1 => t("Коліматор", "Red dot"),
         2 => t("Приціл 2×", "2× scope"),
-        3 => t("Приціл 4×", "4× scope"),
-        _ => t("Приціл 8×", "8× scope"),
+        3 => t("Приціл 2–4×", "2–4× scope"),
+        _ => t("Приціл 3–8×", "3–8× scope"),
     }
 }
 
@@ -151,17 +169,35 @@ pub fn sight_short(level: u8) -> &'static str {
         0 => "—",
         1 => t("КОЛ", "DOT"),
         2 => "2×",
-        3 => "4×",
-        _ => "8×",
+        3 => "2-4×",
+        _ => "3-8×",
     }
 }
 
-/// Which sights go on which gun: pistols take only a red dot, shotguns up to a 2× scope.
+/// Which sights go on which gun (0, iron sights, always does):
+/// pistols take only a red dot; shotguns up to a 2× scope; SMGs and machine guns up to
+/// the 2–4×; assault rifles anything; sniper rifles only scopes (no red dot).
 pub fn sight_fits(level: u8, w: WeaponId) -> bool {
+    if level == 0 {
+        return true;
+    }
     match w.def().class {
         WeaponClass::Pistol => level <= 1,
         WeaponClass::Shotgun => level <= 2,
-        _ => true,
+        WeaponClass::Smg | WeaponClass::Lmg => level <= 3,
+        WeaponClass::Rifle => true,
+        WeaponClass::Sniper => level >= 2,
+    }
+}
+
+/// What sights a gun takes, for the inventory screen ("red dot", "up to 2–4×"…).
+pub fn sight_rule(w: WeaponId) -> &'static str {
+    match w.def().class {
+        WeaponClass::Pistol => t("лише коліматор", "red dot only"),
+        WeaponClass::Shotgun => t("коліматор або 2×", "red dot or 2×"),
+        WeaponClass::Smg | WeaponClass::Lmg => t("до 2–4×", "up to 2–4×"),
+        WeaponClass::Rifle => t("будь-який", "any"),
+        WeaponClass::Sniper => t("лише оптика", "scopes only"),
     }
 }
 
@@ -410,7 +446,15 @@ mod tests {
         assert!(sight_fits(4, WeaponId::M40) && sight_fits(3, WeaponId::M4));
         assert!(sight_fits(1, WeaponId::M9) && !sight_fits(2, WeaponId::M9));
         assert!(sight_fits(2, WeaponId::W1200) && !sight_fits(3, WeaponId::W1200));
+        assert!(sight_fits(3, WeaponId::Mp5) && !sight_fits(4, WeaponId::Mp5));
+        assert!(sight_fits(3, WeaponId::M249) && !sight_fits(4, WeaponId::Rpd));
+        assert!(sight_fits(4, WeaponId::Ak47) && sight_fits(1, WeaponId::M4));
+        assert!(!sight_fits(1, WeaponId::M40) && sight_fits(2, WeaponId::R700));
+        assert!(!sight_fits(2, WeaponId::Deagle) && !sight_fits(4, WeaponId::Usp));
+        assert!((0..=MAX_SIGHT).all(|l| sight_fits(0, WeaponId::all().nth(l as usize).unwrap())));
         assert!(sight_zoom(4) > sight_zoom(3) && !sight_magnifies(1));
+        assert!(sight_variable(4) && sight_variable(3) && !sight_variable(2));
+        assert_eq!(sight_zoom_range(4), (3.0, 8.0));
         // spares: as many as the backpack holds, the best fitting one comes out first
         let mut inv = Inventory::default();
         assert!(inv.stash_sight(4) && inv.stash_sight(1) && !inv.stash_sight(2));

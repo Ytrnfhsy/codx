@@ -11,7 +11,7 @@ pub const PICKUP_LIFETIME: f64 = 40.0;
 /// Most dropped weapons on the map at once (oldest disappear first).
 pub const MAX_PICKUPS: usize = 32;
 /// How close you must be to pick one up.
-pub const PICKUP_RADIUS: f32 = 1.7;
+pub const PICKUP_RADIUS: f32 = 2.3;
 /// Walking this close to a gun of the same type takes its ammo.
 const AMMO_RADIUS: f32 = 1.1;
 

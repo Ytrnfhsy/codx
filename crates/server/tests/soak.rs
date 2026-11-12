@@ -10,7 +10,7 @@ use toon_server::config::ServerConfig;
 use toon_server::game::Game;
 use toon_shared::consts::TICK_DT;
 use toon_shared::map::MapId;
-use toon_shared::physics::{fits, Chute};
+use toon_shared::physics::Chute;
 use toon_shared::protocol::{MatchState, C2S, S2C};
 use toon_shared::weapons::DEFAULT_CLASSES;
 use toon_shared::{Mode, Team};
@@ -129,7 +129,12 @@ fn soak(map: MapId, mode: Mode, bots: usize, squad: u8, secs: f32) -> Report {
             // (on a ladder the climber may touch the roof's edge)
             if p.body.chute == Chute::None
                 && !p.body.climbing
-                && !fits(&g.world, pos + Vec3::Y * 0.02, p.body.stance)
+                // (a few centimetres of give at the top: a head brushing the underside of a
+                // bridge deck is not being inside it)
+                && g.world.overlaps(&toon_shared::physics::body_box(
+                    pos + Vec3::Y * 0.02,
+                    p.body.stance.height() - 0.06,
+                ))
             {
                 let since = *inside.entry(p.id).or_insert(time);
                 if time - since > 1.0 {
@@ -147,6 +152,15 @@ fn soak(map: MapId, mode: Mode, bots: usize, squad: u8, secs: f32) -> Report {
             }
             // (a bot holding a spot stands still on purpose)
             // (a bot holding a spot, or trading shots from cover, stands still on purpose)
+            if let Ok(name) = std::env::var("SOAK_TRACE") {
+                if p.name.contains(&name) && (time * 2.0).fract() < TICK_DT as f64 * 2.0 {
+                    eprintln!(
+                        "TRACE {} t{time:.1} {pos:.2} alive {} hp {:.0} using {} healing {:.1} box {:?} seat {:?} downed {} chute {:?} vel {:.2} | {}",
+                        p.name, p.alive, p.hp, p.inv.using, p.inv.healing, p.open_box, g.seat_of(p.id), p.downed, p.body.chute, p.body.vel,
+                        p.bot.as_ref().map(|b| b.describe()).unwrap_or_default()
+                    );
+                }
+            }
             let busy = p
                 .bot
                 .as_ref()

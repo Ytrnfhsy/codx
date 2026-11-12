@@ -132,6 +132,7 @@ impl Game {
         if let Some(p) = self.pm(id) {
             p.body.pos = at;
             p.body.vel = vel * 0.5;
+            p.body.stance = toon_shared::physics::Stance::Stand;
             p.move_budget = 3.0;
         }
         self.send(

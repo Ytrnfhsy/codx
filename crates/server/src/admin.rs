@@ -260,7 +260,8 @@ pub fn exec(g: &mut Game, line: &str) -> String {
         }
         "map" => {
             let Some(m) = args.next().and_then(MapId::parse) else {
-                return "Використання: map <wreck|site|depot|market|cargo|island> [tdm|sab|br]".into();
+                return "Використання: map <wreck|site|depot|market|cargo|island> [tdm|sab|br]"
+                    .into();
             };
             let mode = args.next().and_then(Mode::parse).unwrap_or(g.mode);
             g.change_map(m, mode);

@@ -48,6 +48,20 @@ impl GameClient {
 
         if self.scoped() && self.alive {
             self.draw_scope();
+            // a variable scope says what it is set to, and how to turn it
+            if toon_shared::inventory::sight_variable(self.sight()) {
+                let (w, h) = (screen_width(), screen_height());
+                let z = self.sight_zoom_now();
+                let label = format!("{z:.1}×");
+                ui.centered(&label, w / 2.0 + h * 0.3, h / 2.0 + h * 0.36, 22, ACCENT);
+                ui.centered(
+                    t("колесо — кратність", "wheel — zoom"),
+                    w / 2.0 + h * 0.3,
+                    h / 2.0 + h * 0.36 + 20.0,
+                    13,
+                    MUTED,
+                );
+            }
         }
         // blinded by a flashbang: white, fading
         if now < self.flashed.0 {
@@ -1664,8 +1678,9 @@ impl GameClient {
                     MUTED,
                 );
             } else {
+                let title = format!("{}. {}", k + 1, wid.def().name);
                 ui.bold(
-                    &format!("{}. {}", k + 1, wid.def().name),
+                    &title,
                     lx + 12.0,
                     ly + 24.0,
                     18,
@@ -1674,6 +1689,18 @@ impl GameClient {
                     } else {
                         TEXT
                     },
+                );
+                // which sights this gun takes
+                ui.text(
+                    &tr!(
+                        "приціли: {}",
+                        "sights: {}",
+                        toon_shared::inventory::sight_rule(wid)
+                    ),
+                    lx + 24.0 + ui.width(&title, 18, true),
+                    ly + 23.0,
+                    13,
+                    MUTED,
                 );
                 let mut what = vec![if inv.sights[k] > 0 {
                     sight_name(inv.sights[k]).to_string()
@@ -2754,6 +2781,69 @@ impl GameClient {
         let (w, h) = (screen_width(), screen_height());
         match self.overlay {
             Overlay::None => None,
+            // the battle royale has no teams: you play (alone or in a squad) or you watch
+            Overlay::Team if self.mode == Mode::Br => {
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                let pw = 520.0;
+                let (x, y) = ((w - pw) / 2.0, h * 0.2);
+                ui.panel(x, y, pw, 300.0);
+                ui.bold(
+                    t("Королівська битва", "Battle royale"),
+                    x + 24.0,
+                    y + 44.0,
+                    28,
+                    ACCENT,
+                );
+                ui.text(
+                    &format!("{} · {}", self.server_name, self.map.id.name()),
+                    x + 24.0,
+                    y + 72.0,
+                    15,
+                    MUTED,
+                );
+                let playing = self.team.is_playing();
+                if ui.button(
+                    if playing {
+                        t("Грати далі", "Keep playing")
+                    } else {
+                        t("ГРАТИ", "PLAY")
+                    },
+                    x + 24.0,
+                    y + 100.0,
+                    pw - 48.0,
+                    56.0,
+                ) {
+                    if playing {
+                        self.overlay = Overlay::None;
+                    } else {
+                        self.join_team(None);
+                    }
+                }
+                if ui.button2(
+                    if playing {
+                        t("Вийти в глядачі", "Go and watch")
+                    } else {
+                        t("Лише дивитися", "Just watch")
+                    },
+                    x + 24.0,
+                    y + 168.0,
+                    pw - 48.0,
+                    46.0,
+                ) {
+                    self.join_team(Some(Team::Spectator));
+                    self.overlay = Overlay::None;
+                }
+                if ui.button2(
+                    t("Відключитися", "Disconnect"),
+                    x + 24.0,
+                    y + 230.0,
+                    pw - 48.0,
+                    44.0,
+                ) {
+                    return Some(HudAction::Leave);
+                }
+                None
+            }
             Overlay::Team => {
                 crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 520.0;
@@ -3128,15 +3218,14 @@ impl GameClient {
                 ) {
                     self.overlay = Overlay::Class;
                 }
-                if self.mode != Mode::Br
-                    && ui.button2(
-                        t("Змінити команду", "Change team"),
-                        x + 24.0,
-                        y + 202.0,
-                        bw,
-                        46.0,
-                    )
-                {
+                let team_label = if self.mode != Mode::Br {
+                    t("Змінити команду", "Change team")
+                } else if self.team.is_playing() {
+                    t("Грати / дивитися", "Play / watch")
+                } else {
+                    t("Грати", "Play")
+                };
+                if ui.button2(team_label, x + 24.0, y + 202.0, bw, 46.0) {
                     self.overlay = Overlay::Team;
                 }
                 if ui.button2(t("Налаштування", "Settings"), x + 24.0, y + 258.0, bw, 46.0)

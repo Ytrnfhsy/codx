@@ -1256,7 +1256,7 @@ impl Game {
         let d = l.pos - p.body.pos;
         if !p.alive
             || p.downed
-            || vec3(d.x, 0.0, d.z).length() > LOOT_RADIUS + 0.6
+            || vec3(d.x, 0.0, d.z).length() > crate::pickups::PICKUP_RADIUS + 0.3
             || d.y.abs() > 2.0
         {
             return true;

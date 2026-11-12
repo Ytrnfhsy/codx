@@ -849,14 +849,14 @@ fn bridge(b: &mut MapBuilder, br: &Bridge) {
         b.wood(x0, DECK, z0, x0 + 0.2, DECK + 1.0, z1, shade(wood, 0.85));
         b.wood(x1 - 0.2, DECK, z0, x1, DECK + 1.0, z1, shade(wood, 0.85));
     }
-    // piers in the water
+    // piers in the water, up to the deck's underside (the roadway stays clear)
     for k in [-0.5f32, 0.0, 0.5] {
         let (px, pz) = if br.along_x {
             (br.c.x + k * br.half, br.c.y)
         } else {
             (br.c.x, br.c.y + k * br.half)
         };
-        b.cbox(px, pz, 1.0, 1.0, -2.0, DECK + 1.5, pal::CONCRETE_DARK);
+        b.cbox(px, pz, 1.0, 1.0, -2.0, DECK - 0.3 + 2.0, pal::CONCRETE_DARK);
     }
 }
 
@@ -1191,5 +1191,64 @@ mod swim_tests {
         }
         assert!(out, "never got out of the water: {}", b.pos);
         assert!(b.pos.y >= tr.height(b.pos.x, b.pos.z) - 0.01);
+    }
+}
+
+#[cfg(test)]
+mod bridge_tests {
+    use super::*;
+    use crate::cars::{car_step, CarInput, CarKind, CarState};
+    use crate::physics::World;
+
+    /// A jeep drives over every bridge from one bank to the other.
+    #[test]
+    fn jeeps_cross_the_bridges() {
+        let map = island();
+        let world = World::from_map(&map);
+        let tr = world.terrain.as_ref().unwrap();
+        let brs = bridges();
+        assert!(!brs.is_empty());
+        for br in brs {
+            let dir = if br.along_x {
+                vec2(1.0, 0.0)
+            } else {
+                vec2(0.0, 1.0)
+            };
+            for sign in [1.0f32, -1.0] {
+                let start = br.c - dir * sign * (br.half + 14.0);
+                let goal = br.c + dir * sign * (br.half + 10.0);
+                let y = world
+                    .floor_below(
+                        vec3(start.x, tr.height(start.x, start.y) + 3.0, start.y),
+                        6.0,
+                    )
+                    .unwrap();
+                let mut s = CarState {
+                    pos: vec3(start.x, y, start.y),
+                    yaw: crate::yaw_of(vec3(dir.x * sign, 0.0, dir.y * sign)),
+                    ..Default::default()
+                };
+                let go = CarInput {
+                    throttle: 0.6,
+                    steer: 0.0,
+                    brake: false,
+                };
+                let mut crossed = false;
+                for _ in 0..30 * 30 {
+                    car_step(&world, CarKind::Jeep, &mut s, go, 1.0 / 30.0);
+                    let at = vec2(s.pos.x, s.pos.z);
+                    if (at - start).dot(dir * sign) >= (goal - start).dot(dir * sign) {
+                        crossed = true;
+                        break;
+                    }
+                }
+                assert!(
+                    crossed,
+                    "stuck on the bridge at {:?} (going {sign}): at {}",
+                    br.c, s.pos
+                );
+                assert!(s.pos.y > WATER - 0.3, "drove into the river: {}", s.pos);
+            }
+        }
     }
 }

@@ -194,6 +194,35 @@ impl Door {
             self.shut
         }
     }
+
+    /// The panel swung the other way, out of the room (when somebody stands where it
+    /// would swing in).
+    pub fn open_out(&self) -> [Vec3; 2] {
+        let c = self.centre();
+        let size = self.shut[1] - self.shut[0];
+        let [a, b] = self.open;
+        if size.x > size.z {
+            // the wall runs along x: mirror across its line in z
+            [
+                Vec3::new(a.x, a.y, 2.0 * c.z - b.z),
+                Vec3::new(b.x, b.y, 2.0 * c.z - a.z),
+            ]
+        } else {
+            [
+                Vec3::new(2.0 * c.x - b.x, a.y, a.z),
+                Vec3::new(2.0 * c.x - a.x, b.y, b.z),
+            ]
+        }
+    }
+
+    /// The panel's box in a state: 0 shut, 1 open into the room, 2 open out of it.
+    pub fn panel_in(&self, state: u8) -> [Vec3; 2] {
+        match state {
+            0 => self.shut,
+            2 => self.open_out(),
+            _ => self.open,
+        }
+    }
 }
 
 impl Map {

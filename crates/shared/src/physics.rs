@@ -52,6 +52,8 @@ pub struct World {
     pub doors: Vec<crate::map::Door>,
     pub door_base: usize,
     pub door_open: Vec<bool>,
+    /// Open doors that swung out of the room instead of into it.
+    pub door_out: Vec<bool>,
 }
 
 impl World {
@@ -93,11 +95,18 @@ impl World {
             doors: map.doors.clone(),
             door_base,
             door_open: vec![true; map.doors.len()],
+            door_out: vec![false; map.doors.len()],
         };
         for (i, b) in w.boxes.iter().enumerate() {
             // (a door's cells cover it both shut and open)
             let (lo, hi) = match i.checked_sub(door_base).and_then(|k| w.doors.get(k)) {
-                Some(d) => (d.shut[0].min(d.open[0]), d.shut[1].max(d.open[1])),
+                Some(d) => {
+                    let out = d.open_out();
+                    (
+                        d.shut[0].min(d.open[0]).min(out[0]),
+                        d.shut[1].max(d.open[1]).max(out[1]),
+                    )
+                }
                 None => (b.min, b.max),
             };
             let (x0, z0) = w.cell_of(lo.x, lo.z);
@@ -112,17 +121,32 @@ impl World {
         w
     }
 
-    /// Opens or shuts door `k`.
+    /// Opens (into the room) or shuts door `k`.
     pub fn set_door(&mut self, k: usize, open: bool) {
-        let Some(d) = self.doors.get(k) else { return };
-        let [min, max] = d.panel(open);
-        self.boxes[self.door_base + k] = Aabb { min, max };
-        self.door_open[k] = open;
+        self.set_door_state(k, open as u8);
     }
 
-    /// The box door `k` would take up.
-    pub fn door_box(&self, k: usize, open: bool) -> Option<Aabb> {
-        let [min, max] = self.doors.get(k)?.panel(open);
+    /// Puts door `k` in a state: 0 shut, 1 open into the room, 2 open out of it.
+    pub fn set_door_state(&mut self, k: usize, state: u8) {
+        let Some(d) = self.doors.get(k) else { return };
+        let [min, max] = d.panel_in(state);
+        self.boxes[self.door_base + k] = Aabb { min, max };
+        self.door_open[k] = state != 0;
+        self.door_out[k] = state == 2;
+    }
+
+    /// Door `k`'s state: 0 shut, 1 open into the room, 2 open out of it.
+    pub fn door_state(&self, k: usize) -> u8 {
+        match (self.door_open[k], self.door_out[k]) {
+            (false, _) => 0,
+            (true, false) => 1,
+            (true, true) => 2,
+        }
+    }
+
+    /// The box door `k` would take up in a state.
+    pub fn door_box(&self, k: usize, state: u8) -> Option<Aabb> {
+        let [min, max] = self.doors.get(k)?.panel_in(state);
         Some(Aabb { min, max })
     }
 

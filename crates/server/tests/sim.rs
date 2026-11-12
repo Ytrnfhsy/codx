@@ -402,3 +402,55 @@ fn respawns_are_spread_out_and_away_from_enemies() {
         );
     }
 }
+
+/// A full team deathmatch on a small map starts again and again: nobody ever appears
+/// inside somebody else (teams outnumber their base spawn points).
+#[test]
+fn nobody_spawns_inside_another_player() {
+    let cfg = ServerConfig {
+        ready_check: false,
+        bots: 18,
+        max_players: 18,
+        data_dir: std::env::temp_dir()
+            .join("tw-spawn")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    let mut g = Game::new(cfg);
+    g.rng = toon_shared::rng::Rng::new(77);
+    for map in [MapId::Depot, MapId::Wreck, MapId::Cargo] {
+        g.change_map(map, Mode::Tdm);
+        // (the bots come in over the first ticks)
+        for _ in 0..120 {
+            g.tick(TICK_DT);
+        }
+        for _ in 0..3 {
+            g.start_match();
+            let alive: Vec<_> = g
+                .players
+                .iter()
+                .flatten()
+                .filter(|p| p.alive)
+                .map(|p| (p.name.clone(), p.body.pos))
+                .collect();
+            assert!(alive.len() >= 16, "{} alive", alive.len());
+            for (i, a) in alive.iter().enumerate() {
+                for b in &alive[i + 1..] {
+                    let flat = glam::vec2(a.1.x - b.1.x, a.1.z - b.1.z).length();
+                    assert!(
+                        flat > 0.9 || (a.1.y - b.1.y).abs() > 2.0,
+                        "{map:?}: {} and {} spawned {flat:.2} m apart",
+                        a.0,
+                        b.0
+                    );
+                }
+            }
+            for _ in 0..30 {
+                g.tick(TICK_DT);
+                g.outbox.clear();
+                g.shots.clear();
+            }
+        }
+    }
+}

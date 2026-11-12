@@ -14,12 +14,9 @@ impl Game {
     /// Which doors stand open, for the clients.
     pub fn doors_msg(&self) -> S2C {
         S2C::Doors(
-            self.world
-                .door_open
-                .iter()
-                .enumerate()
-                .filter(|(_, o)| **o)
-                .map(|(k, _)| k as u16)
+            (0..self.world.doors.len())
+                .filter(|k| self.world.door_open[*k])
+                .map(|k| (k as u16, self.world.door_state(k)))
                 .collect(),
         )
     }
@@ -62,21 +59,28 @@ impl Game {
         {
             return false;
         }
-        // it does not swing through anybody
-        let Some(panel) = self.world.door_box(k, want) else {
-            return false;
+        // it does not swing through anybody: into the room if it can, otherwise out of it
+        // (somebody standing inside by the hinge must still get out)
+        let clear = |state: u8| {
+            self.world.door_box(k, state).is_some_and(|panel| {
+                !self.players.iter().flatten().any(|q| {
+                    q.alive && panel.overlaps(&body_box(q.body.pos, q.body.stance.height()))
+                })
+            })
         };
-        if self
-            .players
-            .iter()
-            .flatten()
-            .any(|q| q.alive && panel.overlaps(&body_box(q.body.pos, q.body.stance.height())))
-        {
+        let state = if !want {
+            0
+        } else if clear(1) {
+            1
+        } else {
+            2
+        };
+        if !clear(state) {
             return false;
         }
-        self.world.set_door(k, want);
+        self.world.set_door_state(k, state);
         self.door_used.insert(k as u16, self.time);
-        self.broadcast(S2C::Door(k as u16, want));
+        self.broadcast(S2C::Door(k as u16, state));
         true
     }
 
