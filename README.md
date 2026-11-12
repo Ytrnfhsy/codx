@@ -473,8 +473,11 @@ sudo ufw allow 27015/tcp
 | `max_players` | максимум гравців (до 32) |
 | `password` | пароль для входу (порожньо — відкритий сервер) |
 | `rcon_password` | пароль адміністратора (порожньо — веб-адмінка і `/rcon` вимкнені) |
-| `rotation` | список `{ "map": "wreck|site|depot|market|cargo", "mode": "tdm|sab" }` |
+| `rotation` | список `{ "map": "wreck|site|depot|market|cargo|island", "mode": "tdm|sab|br" }` |
 | `tdm.score_limit`, `tdm.time_limit` | ліміт вбивств і час (хв) для Командного бою |
+| `br.max_players`, `br.bots` | королівська битва: максимум гравців і скільки місць заповнювати ботами |
+| `br.squad` | гравців у загоні: 1 (кожен сам за себе), 2 або 4 |
+| `br.weather` | погода раунду: `random` або `clear`, `evening`, `overcast`, `rain`, `fog`, `night` |
 | `sab.time_limit`, `sab.rounds_to_win`, `sab.bomb_timer`, `sab.plant_time`, `sab.defuse_time`, `sab.overtime_limit` | налаштування Саботажу |
 | `friendly_fire`, `auto_balance` | вогонь по своїх, автобаланс команд |
 | `bots`, `bot_skill` | заповнювати ботами до N гравців; складність 0..1 (0.1 легкі, 0.4 звичайні, 0.7 важкі, 1 ветерани) |
@@ -482,8 +485,23 @@ sudo ufw allow 27015/tcp
 | `min_players` | скільки гравців потрібно, щоб почався матч (до того — розминка) |
 | `http_enabled` | вмикає веб-сторінку та адмінку |
 | `require_same_version` | пускати лише гравців з тією ж версією гри, що й сервер (`true`; див. [Оновлення](#оновлення)) |
-| `data_dir` | де зберігати `bans.json` |
+| `data_dir` | де зберігати `bans.json` і `br_stats.json` |
 | `tuning` | рух і параметри кожної зброї (див. [Фізика зброї](#фізика-зброї-та-тонке-налаштування)) |
+
+### Сервер лише з королівською битвою
+
+У `server.json` залиш у ротації один пункт і налаштуй `br`:
+
+```json
+"rotation": [ { "map": "island", "mode": "br" } ],
+"br": { "max_players": 50, "bots": 30, "squad": 1, "weather": "random" },
+"min_players": 1
+```
+
+Раунд стартує, коли на сервері є хоч один гравець, що обрав грати (не глядач); боти
+доповнюють решту. Спробувати без правки файлу: `./toon-server --map island --mode br --bots 30`
+(після першого раунду сервер піде далі по `rotation`). Змінити на ходу — адмін-командою
+`map island br`.
 
 ### Docker
 

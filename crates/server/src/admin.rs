@@ -61,8 +61,8 @@ pub const HELP: &str = "Команди:
   ban <id|ім'я> [причина]    — заблокувати за IP
   unban <ip>                 — розблокувати
   banlist                    — список банів
-  map <wreck|site|depot|market|cargo> [tdm|sab] — змінити карту (і режим)
-  mode <tdm|sab>             — змінити режим на поточній карті
+  map <wreck|site|depot|market|cargo|island> [tdm|sab|br] — змінити карту (і режим)
+  mode <tdm|sab|br>             — змінити режим на поточній карті
   nextmap                    — наступна карта з ротації
   rotation                   — показати ротацію
   restart                    — перезапустити матч
@@ -260,7 +260,7 @@ pub fn exec(g: &mut Game, line: &str) -> String {
         }
         "map" => {
             let Some(m) = args.next().and_then(MapId::parse) else {
-                return "Використання: map <wreck|site|depot|market|cargo> [tdm|sab]".into();
+                return "Використання: map <wreck|site|depot|market|cargo|island> [tdm|sab|br]".into();
             };
             let mode = args.next().and_then(Mode::parse).unwrap_or(g.mode);
             g.change_map(m, mode);
@@ -268,7 +268,7 @@ pub fn exec(g: &mut Game, line: &str) -> String {
         }
         "mode" => {
             let Some(mode) = args.next().and_then(Mode::parse) else {
-                return "Використання: mode <tdm|sab>".into();
+                return "Використання: mode <tdm|sab|br>".into();
             };
             let m = g.map.id;
             g.change_map(m, mode);

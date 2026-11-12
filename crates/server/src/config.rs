@@ -61,7 +61,7 @@ pub struct BrConfig {
     /// Players per squad: 1 (everyone on their own), 2 or 4.
     pub squad: u8,
     /// Weather each round: "random", or one of "clear", "evening", "overcast", "rain",
-    /// "fog".
+    /// "fog", "night".
     pub weather: String,
 }
 
