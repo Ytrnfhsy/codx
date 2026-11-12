@@ -250,6 +250,8 @@ pub struct GameClient {
     pub walk_amount: f32,
     /// How far the view leans sideways right now (radians).
     pub view_roll: f32,
+    /// The health the HUD shows draining (catches up with the real one).
+    pub hud_hp: f32,
     pub sway: Vec2,
     step_acc: f32,
     pub breath: f32,
@@ -552,6 +554,7 @@ impl GameClient {
             bob_phase: 0.0,
             walk_amount: 0.0,
             view_roll: 0.0,
+            hud_hp: 0.0,
             sway: Vec2::ZERO,
             step_acc: 0.0,
             breath: 4.0,
@@ -2010,6 +2013,11 @@ impl GameClient {
         self.now = get_time();
         let now = self.now;
         // while a replay plays, the live game is silent
+        self.hud_hp = if self.me.hp < self.hud_hp {
+            (self.hud_hp - dt * 45.0).max(self.me.hp)
+        } else {
+            self.me.hp
+        };
         // doors swing to where they stand (a new map: straight there)
         if self.door_swing.len() != self.world.doors.len() {
             self.door_swing = self

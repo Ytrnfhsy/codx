@@ -191,7 +191,7 @@ impl GameClient {
             let kmh = c.state.speed.abs() * 3.6;
             let x = w / 2.0 - 110.0;
             let y = h - 92.0;
-            draw_rectangle(x, y, 220.0, 64.0, Color::new(0.0, 0.0, 0.0, 0.5));
+            crate::ui::soft_rect(x, y, 220.0, 64.0, Color::new(0.0, 0.0, 0.0, 0.5));
             ui.bold(
                 &format!("{kmh:.0} {}", t("км/год", "km/h")),
                 x + 12.0,
@@ -201,7 +201,7 @@ impl GameClient {
             );
             ui.text(c.kind.name(), x + 140.0, y + 26.0, 15, MUTED);
             let f = c.hp as f32 / 100.0;
-            draw_rectangle(
+            crate::ui::soft_rect(
                 x + 12.0,
                 y + 40.0,
                 196.0,
@@ -501,7 +501,7 @@ impl GameClient {
             let (fw, pw) = (ui.width(&fps_s, 20, true), ui.width(&ping_s, 16, true));
             let bw = fw + pw + 20.0;
             let bx = (w - bw) / 2.0;
-            draw_rectangle(bx, 6.0, bw, 30.0, Color::new(0.0, 0.0, 0.0, 0.55));
+            crate::ui::soft_rect(bx, 6.0, bw, 30.0, Color::new(0.0, 0.0, 0.0, 0.55));
             draw_rectangle_lines(
                 bx,
                 6.0,
@@ -681,7 +681,7 @@ impl GameClient {
                 )
                 .into(),
             };
-            draw_rectangle(0.0, h - 40.0, w, 40.0, Color::new(0.0, 0.0, 0.0, 0.45));
+            crate::ui::soft_rect(0.0, h - 40.0, w, 40.0, Color::new(0.0, 0.0, 0.0, 0.45));
             ui.centered(&line, w / 2.0, h - 14.0, 16, TEXT);
         }
         // the round in numbers (once out, or when it is over)
@@ -693,7 +693,7 @@ impl GameClient {
         }
         let pw = 520.0f32.min(w - 20.0);
         let (x, y) = ((w - pw) / 2.0, 150.0);
-        draw_rectangle(x, y, pw, 96.0, Color::new(0.0, 0.0, 0.0, 0.55));
+        crate::ui::soft_rect(x, y, pw, 96.0, Color::new(0.0, 0.0, 0.0, 0.55));
         let title = if s.place == 1 {
             t("ПЕРЕМОГА!", "WINNER!").to_string()
         } else {
@@ -739,7 +739,7 @@ impl GameClient {
         let mut y = screen_height() * 0.5 - 20.0;
         for m in &br.squad {
             let c = self.mate_color(m.id);
-            draw_rectangle(x, y, 190.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.45));
+            crate::ui::soft_rect(x, y, 190.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.45));
             draw_rectangle(x, y, 5.0, 30.0, c);
             let name: String = m.name.chars().take(16).collect();
             ui.text(
@@ -756,7 +756,7 @@ impl GameClient {
             } else {
                 (m.hp / MAX_HEALTH, GOOD)
             };
-            draw_rectangle(
+            crate::ui::soft_rect(
                 x + 12.0,
                 y + 20.0,
                 168.0,
@@ -831,7 +831,7 @@ impl GameClient {
             );
             let bw = 260.0;
             let (bx, by) = ((w - bw) / 2.0, h * 0.62 + 40.0);
-            draw_rectangle(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
+            crate::ui::soft_rect(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
             draw_rectangle(bx, by, bw * (self.me.hp / 100.0).clamp(0.0, 1.0), 8.0, BAD);
             if self.me.progress > 0.0 {
                 draw_rectangle(
@@ -867,7 +867,7 @@ impl GameClient {
                 if self.me.progress > 0.0 {
                     let bw = 220.0;
                     let (bx, by) = ((w - bw) / 2.0, h * 0.62 + 12.0);
-                    draw_rectangle(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
+                    crate::ui::soft_rect(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
                     draw_rectangle(bx, by, bw * self.me.progress.clamp(0.0, 1.0), 8.0, GOOD);
                 }
             }
@@ -956,7 +956,7 @@ impl GameClient {
         let (w, h) = (screen_width(), screen_height());
         if self.me.progress > 0.0 {
             let bw = 300.0;
-            draw_rectangle(
+            crate::ui::soft_rect(
                 w / 2.0 - bw / 2.0 - 3.0,
                 h * 0.7 - 3.0,
                 bw + 6.0,
@@ -1026,7 +1026,7 @@ impl GameClient {
         // pixels per metre: big maps show a wider area
         let scale = size / if self.level.terrain { 200.0 } else { 55.0 };
         let c = vec2(x0 + size / 2.0, y0 + size / 2.0);
-        draw_rectangle(
+        crate::ui::soft_rect(
             x0 - 4.0,
             y0 - 4.0,
             size + 8.0,
@@ -1319,7 +1319,7 @@ impl GameClient {
         let (x, y) = (16.0, 16.0 + size + 12.0);
         let w = size;
         let panel_h = if self.alive { 112.0 } else { 60.0 };
-        draw_rectangle(
+        crate::ui::soft_rect(
             x - 4.0,
             y - 4.0,
             w + 8.0,
@@ -1360,11 +1360,37 @@ impl GameClient {
         // health and armour
         if self.alive {
             let bar = |yy: f32, k: f32, c: Color| {
-                draw_rectangle(x + 4.0, yy, w - 8.0, 10.0, Color::new(0.0, 0.0, 0.0, 0.5));
-                draw_rectangle(x + 4.0, yy, (w - 8.0) * k.clamp(0.0, 1.0), 10.0, c);
+                crate::ui::round_rect(
+                    x + 4.0,
+                    yy,
+                    w - 8.0,
+                    10.0,
+                    5.0,
+                    Color::new(0.0, 0.0, 0.0, 0.5),
+                );
+                let fill = (w - 8.0) * k.clamp(0.0, 1.0);
+                if fill > 1.0 {
+                    crate::ui::round_rect(x + 4.0, yy, fill, 10.0, 5.0, c);
+                }
             };
             ui.shadowed(t("Здоров'я", "Health"), x + 4.0, y + 66.0, 12, MUTED);
-            bar(y + 70.0, self.me.hp / toon_shared::consts::MAX_HEALTH, GOOD);
+            // (health just lost lingers in white for a moment, then drains away)
+            let hp = self.me.hp / toon_shared::consts::MAX_HEALTH;
+            let was = self.hud_hp / toon_shared::consts::MAX_HEALTH;
+            if was > hp + 0.005 {
+                bar(y + 70.0, was, Color::new(1.0, 1.0, 1.0, 0.75));
+            }
+            let low = hp < 0.3;
+            let pulse = 0.75 + 0.25 * ((self.now * 6.0).sin() as f32);
+            bar(
+                y + 70.0,
+                hp,
+                if low {
+                    Color::new(BAD.r, BAD.g, BAD.b, pulse)
+                } else {
+                    GOOD
+                },
+            );
             ui.shadowed(t("Броня", "Armour"), x + 4.0, y + 94.0, 12, MUTED);
             let vest = toon_shared::inventory::armor_durability(br.inv.armor);
             bar(
@@ -1395,7 +1421,7 @@ impl GameClient {
         let s = 60.0;
         let tile = |k: usize, label: &str, value: &str, fill: f32, c: Color, on: bool| {
             let x = x0 + k as f32 * (s + 6.0);
-            draw_rectangle(
+            crate::ui::soft_rect(
                 x,
                 y0,
                 s,
@@ -1536,7 +1562,7 @@ impl GameClient {
             // the energy drink's boost: a thin yellow bar along the panel
             if inv.boost > 0.0 {
                 let bw = 4.0 * s + 18.0;
-                draw_rectangle(x0, y0 - 8.0, bw, 4.0, Color::new(0.0, 0.0, 0.0, 0.5));
+                crate::ui::soft_rect(x0, y0 - 8.0, bw, 4.0, Color::new(0.0, 0.0, 0.0, 0.5));
                 draw_rectangle(
                     x0,
                     y0 - 8.0,
@@ -1556,7 +1582,7 @@ impl GameClient {
             };
             let k = 1.0 - inv.healing / total;
             let bw = 220.0;
-            draw_rectangle(
+            crate::ui::soft_rect(
                 (w - bw) / 2.0,
                 hh * 0.66,
                 bw,
@@ -1596,7 +1622,7 @@ impl GameClient {
         }
         let inv = br.inv;
         let (w, h) = (screen_width(), screen_height());
-        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         let pw = 820.0f32.min(w - 20.0);
         let ph = 560.0f32.min(h - 20.0);
         let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
@@ -1628,7 +1654,7 @@ impl GameClient {
         for k in 0..2usize {
             let (wid, mag, res) = self.weapons[k];
             let empty = br.empty_slot == Some(k as u8);
-            draw_rectangle(lx, ly, cw, 84.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            crate::ui::soft_rect(lx, ly, cw, 84.0, Color::new(0.0, 0.0, 0.0, 0.3));
             if empty {
                 ui.text(
                     t("— порожньо —", "— empty —"),
@@ -1720,7 +1746,7 @@ impl GameClient {
                 continue;
             }
             any = true;
-            draw_rectangle(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            crate::ui::soft_rect(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
             let label = if n > 1 {
                 format!("{} ×{n}", sight_name(level))
             } else {
@@ -1752,7 +1778,7 @@ impl GameClient {
                 continue;
             }
             any = true;
-            draw_rectangle(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            crate::ui::soft_rect(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
             let name = toon_shared::inventory::mod_name(kind);
             let label = if n > 1 {
                 format!("{name} ×{n}")
@@ -1789,7 +1815,7 @@ impl GameClient {
         ui.bold(t("Спорядження", "Gear"), rx, ry, 18, TEXT);
         ry += 12.0;
         let row = |ui: &mut Ui, label: &str, on: bool, ry: f32| {
-            draw_rectangle(rx, ry, cw, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            crate::ui::soft_rect(rx, ry, cw, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
             ui.text(
                 label,
                 rx + 12.0,
@@ -1931,7 +1957,7 @@ impl GameClient {
             return;
         };
         let (w, h) = (screen_width(), screen_height());
-        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
         let rows = v.items.len() + v.guns.len();
         let pw = 460.0f32.min(w - 20.0);
         let ph = (130.0 + rows as f32 * 38.0).min(h - 20.0);
@@ -2099,7 +2125,7 @@ impl GameClient {
         };
         let (w, h) = (screen_width(), screen_height());
         let (x0, y0, side) = big_map_rect();
-        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         draw_texture_ex(
             &img.tex,
             x0,
@@ -2242,7 +2268,7 @@ impl GameClient {
             Mode::Sab => self.gs.rounds_to_win as i32,
         };
         let bw = size;
-        draw_rectangle(
+        crate::ui::soft_rect(
             x - 4.0,
             y - 4.0,
             bw + 8.0,
@@ -2301,7 +2327,7 @@ impl GameClient {
             let dw = dist.as_ref().map_or(0.0, |d| ui.width(d, 13, false) + gap);
             let total = kw + vw + icon_w + dw + gap * if suicide { 1.0 } else { 2.0 };
             let mut x = w - 20.0 - total;
-            draw_rectangle(
+            crate::ui::soft_rect(
                 x - 6.0,
                 y - 17.0,
                 total + 12.0,
@@ -2450,7 +2476,7 @@ impl GameClient {
             } else {
                 t("Всім: ", "All: ")
             };
-            draw_rectangle(10.0, h - 176.0, 560.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.6));
+            crate::ui::soft_rect(10.0, h - 176.0, 560.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.6));
             let cursor = if (self.now * 2.0).fract() < 0.5 {
                 "_"
             } else {
@@ -2473,7 +2499,7 @@ impl GameClient {
         let (w, h) = (screen_width(), screen_height());
         let (s, x, y) = (84.0, w - 310.0 - 84.0 - 12.0, h - 130.0);
         let pulse = 0.5 + 0.5 * (self.now * 4.0).sin() as f32;
-        draw_rectangle(x, y, s, s + 22.0, Color::new(0.0, 0.0, 0.0, 0.45));
+        crate::ui::soft_rect(x, y, s, s + 22.0, Color::new(0.0, 0.0, 0.0, 0.45));
         draw_rectangle_lines(
             x,
             y,
@@ -2523,7 +2549,7 @@ impl GameClient {
         let def = wid.def();
         let x = w - 300.0;
         let y = h - 120.0;
-        draw_rectangle(
+        crate::ui::soft_rect(
             x - 10.0,
             y - 10.0,
             300.0,
@@ -2604,7 +2630,7 @@ impl GameClient {
         if let Some(r) = self.me.rewards.last() {
             let t = format!("[{}] {}", key(Action::Killstreak), r.name());
             let tw = ui.width(&t, 18, true);
-            draw_rectangle(
+            crate::ui::soft_rect(
                 w - tw - 30.0,
                 y - 48.0,
                 tw + 16.0,
@@ -2729,7 +2755,7 @@ impl GameClient {
         match self.overlay {
             Overlay::None => None,
             Overlay::Team => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 520.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.2);
                 ui.panel(x, y, pw, 360.0);
@@ -2804,7 +2830,7 @@ impl GameClient {
                 None
             }
             Overlay::Class => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let classes = settings.classes();
                 let pw = 860.0f32.min(w - 40.0);
                 let ph = 520.0;
@@ -2902,7 +2928,7 @@ impl GameClient {
                 for (k, (label, v)) in stats.iter().enumerate() {
                     let sy = y + 408.0 + k as f32 * 18.0;
                     ui.text(label, dx, sy, 14, MUTED);
-                    draw_rectangle(
+                    crate::ui::soft_rect(
                         dx + 140.0,
                         sy - 10.0,
                         200.0,
@@ -2956,7 +2982,7 @@ impl GameClient {
                 None
             }
             Overlay::Edit(i) => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 620.0;
                 let ph = 520.0;
                 let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
@@ -3068,7 +3094,7 @@ impl GameClient {
                 None
             }
             Overlay::Pause => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 420.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.22);
                 ui.panel(x, y, pw, 460.0);
@@ -3146,7 +3172,7 @@ impl GameClient {
                 None
             }
             Overlay::RobotMode => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 460.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.28);
                 ui.panel(x, y, pw, 250.0);
@@ -3196,7 +3222,7 @@ impl GameClient {
                 None
             }
             Overlay::Settings => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 560.0f32.min(w - 20.0);
                 let ph = crate::menu::SETTINGS_H + 110.0;
                 let (x, y) = ((w - pw) / 2.0, ((h - ph) / 2.0).max(0.0));
@@ -3223,7 +3249,7 @@ impl GameClient {
                 None
             }
             Overlay::Video => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 600.0f32.min(w - 20.0);
                 let (x, y) = ((w - pw) / 2.0, (h - crate::menu::VIDEO_H).max(0.0) / 2.0);
                 if crate::menu::video_page(ui, settings, x, y, pw) {
@@ -3240,7 +3266,7 @@ impl GameClient {
                 None
             }
             Overlay::Skin => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 440.0f32.min(w - 20.0);
                 let ph = 520.0f32.min(h - 20.0);
                 let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
@@ -3297,7 +3323,7 @@ impl GameClient {
                 None
             }
             Overlay::Controls => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 760.0f32.min(w - 20.0);
                 let (x, y) = ((w - pw) / 2.0, (h - crate::menu::CONTROLS_H).max(0.0) / 2.0);
                 if crate::menu::controls_page(ui, &mut self.binds_editor, settings, x, y, pw) {
@@ -3306,7 +3332,7 @@ impl GameClient {
                 None
             }
             Overlay::Airstrike => {
-                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
                 let size = (h - 160.0).min(w - 80.0);
                 let (x0, y0) = ((w - size) / 2.0, 90.0);
                 let what = match self.me.rewards.last() {
@@ -3647,7 +3673,7 @@ fn draw_headshot_icon(cx: f32, cy: f32, h: f32, a: f32) {
 fn draw_bomb_icon(x: f32, y: f32, scale: f32, pulse: f32) {
     let (w, h) = (30.0 * scale, 22.0 * scale);
     let (x0, y0) = (x - w / 2.0, y - h / 2.0);
-    draw_rectangle(
+    crate::ui::soft_rect(
         x0 - 4.0,
         y0 - 4.0,
         w + 8.0,

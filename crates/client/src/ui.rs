@@ -11,6 +11,48 @@ pub const BAD: Color = Color::new(1.0, 0.42, 0.37, 1.0);
 pub const GOOD: Color = Color::new(0.37, 0.83, 0.55, 1.0);
 pub const SHADOW: Color = Color::new(0.0, 0.0, 0.0, 0.45);
 
+/// A filled rectangle with rounded corners (one fan of triangles, so that translucent
+/// colours do not double up anywhere).
+pub fn round_rect(x: f32, y: f32, w: f32, h: f32, r: f32, color: Color) {
+    let r = r.min(w * 0.5).min(h * 0.5).max(0.0);
+    if r < 1.0 {
+        draw_rectangle(x, y, w, h, color);
+        return;
+    }
+    const STEPS: usize = 4;
+    let c = vec2(x + w * 0.5, y + h * 0.5);
+    let mut rim: Vec<Vec2> = Vec::with_capacity(4 * (STEPS + 1));
+    // corner centres clockwise from the top-right, each with the angle its arc starts at
+    for (k, (cx, cy)) in [
+        (x + w - r, y + r),
+        (x + w - r, y + h - r),
+        (x + r, y + h - r),
+        (x + r, y + r),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let a0 = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::FRAC_PI_2;
+        for s in 0..=STEPS {
+            let a = a0 + s as f32 / STEPS as f32 * std::f32::consts::FRAC_PI_2;
+            rim.push(vec2(cx + a.cos() * r, cy + a.sin() * r));
+        }
+    }
+    for i in 0..rim.len() {
+        draw_triangle(c, rim[i], rim[(i + 1) % rim.len()], color);
+    }
+}
+
+/// A translucent backing for a piece of the HUD: softly rounded (bars across the whole
+/// screen stay square).
+pub fn soft_rect(x: f32, y: f32, w: f32, h: f32, color: Color) {
+    if w >= screen_width() - 1.0 || h >= screen_height() - 1.0 {
+        draw_rectangle(x, y, w, h, color);
+    } else {
+        round_rect(x, y, w, h, 7.0, color);
+    }
+}
+
 pub struct Fonts {
     pub regular: Font,
     pub bold: Font,
@@ -121,9 +163,16 @@ impl<'a> Ui<'a> {
     }
 
     pub fn panel(&self, x: f32, y: f32, w: f32, h: f32) {
-        draw_rectangle(x + 5.0, y + 6.0, w, h, SHADOW);
-        draw_rectangle(x, y, w, h, PANEL);
-        draw_rectangle_lines(x, y, w, h, 3.0, Color::new(0.0, 0.0, 0.0, 0.6));
+        round_rect(x + 5.0, y + 7.0, w, h, 14.0, SHADOW);
+        round_rect(
+            x - 2.0,
+            y - 2.0,
+            w + 4.0,
+            h + 4.0,
+            14.0,
+            Color::new(0.04, 0.05, 0.09, 0.9),
+        );
+        round_rect(x, y, w, h, 12.0, PANEL);
     }
 
     fn inside(&self, x: f32, y: f32, w: f32, h: f32) -> bool {
@@ -142,7 +191,7 @@ impl<'a> Ui<'a> {
         let hover = self.inside(x, y, w, h);
         let press = hover && self.down;
         let off = if press { 3.0 } else { 0.0 };
-        draw_rectangle(x + 4.0, y + 5.0, w, h, SHADOW);
+        round_rect(x + 3.0, y + 5.0, w, h, 9.0, SHADOW);
         let c = if hover {
             Color::new(
                 (color.r + 0.08).min(1.0),
@@ -153,8 +202,24 @@ impl<'a> Ui<'a> {
         } else {
             color
         };
-        draw_rectangle(x + off, y + off, w, h, c);
-        draw_rectangle_lines(x + off, y + off, w, h, 3.0, Color::new(0.0, 0.0, 0.0, 0.7));
+        round_rect(
+            x + off - 2.0,
+            y + off - 2.0,
+            w + 4.0,
+            h + 4.0,
+            10.0,
+            Color::new(0.04, 0.05, 0.09, 0.85),
+        );
+        round_rect(x + off, y + off, w, h, 8.0, c);
+        // (a lighter band along the top: the button catches the light)
+        round_rect(
+            x + off + 3.0,
+            y + off + 2.0,
+            w - 6.0,
+            h * 0.42,
+            6.0,
+            Color::new(1.0, 1.0, 1.0, 0.07),
+        );
         let size = (h * 0.42).clamp(14.0, 26.0) as u16;
         let tw = self.width(label, size, true);
         let dark = color.r + color.g + color.b > 1.8;
