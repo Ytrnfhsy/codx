@@ -537,6 +537,7 @@ impl Level {
         }
     }
 
+    #[allow(clippy::map_entry)]
     /// Draws the grass near the camera, building a chunk or two per frame as they come
     /// into range. `density`: 0 none, 1 some, 2 thick.
     pub fn draw_grass(

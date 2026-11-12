@@ -171,6 +171,7 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
     // the FPV camera banks with the drone
     let roll = match (&g.piloting, &g.killcam) {
         (Some(p), None) if g.alive && p.kind == VehicleKind::Fpv => p.roll,
+        (None, None) if g.alive && g.me.seat.is_none() => g.view_roll,
         _ => 0.0,
     };
     // the near plane as far out as it can be without the screen's corners dipping into a

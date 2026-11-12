@@ -32,7 +32,28 @@ struct Tracer {
     t: f32,
 }
 
+/// What a bullet hit (how it looks when it does).
+#[derive(Clone, Copy, PartialEq)]
+pub enum Surface {
+    /// Earth, grass, sand: clods fly up.
+    Dirt,
+    /// Walls, concrete, metal: dust, chips and sparks.
+    Hard,
+}
+
+/// A bullet mark left on a surface for a while.
+struct Mark {
+    pos: Vec3,
+    normal: Vec3,
+    age: f32,
+    size: f32,
+}
+
+const MARK_LIFE: f32 = 18.0;
+const MAX_MARKS: usize = 120;
+
 pub struct Effects {
+    marks: std::collections::VecDeque<Mark>,
     /// Most particles at once (the effects setting).
     pub cap: usize,
     parts: Vec<Particle>,
@@ -44,6 +65,7 @@ impl Effects {
     pub fn new() -> Effects {
         Effects {
             cap: 1500,
+            marks: Default::default(),
             parts: Vec::new(),
             tracers: Vec::new(),
             rng: Rng::new(99),
@@ -68,6 +90,72 @@ impl Effects {
         if self.tracers.len() < 200 {
             self.tracers.push(Tracer { a, b, t: 0.0 });
         }
+    }
+
+    /// A bullet striking the world at `pos` on a surface facing `normal`: what flies off
+    /// depends on what it hit, and a mark stays behind for a while.
+    pub fn hit(&mut self, pos: Vec3, normal: Vec3, surface: Surface) {
+        match surface {
+            Surface::Dirt => {
+                // clods thrown up and a low puff of dust, no sparks
+                for _ in 0..5 {
+                    let v = self.rv(1.4) + normal * self.rng.range(2.0, 4.0);
+                    let c = self.rng.range(0.8, 1.1);
+                    let (max, size) = (self.rng.range(0.35, 0.6), self.rng.range(0.03, 0.06));
+                    self.push(Particle {
+                        pos,
+                        vel: v,
+                        life: 0.0,
+                        max,
+                        size,
+                        grow: 0.0,
+                        color: [(112.0 * c) as u8, (90.0 * c) as u8, (60.0 * c) as u8],
+                        kind: Kind::Spark,
+                        grav: 11.0,
+                    });
+                }
+                let v = self.rv(0.5) + normal * 0.9;
+                self.push(Particle {
+                    pos,
+                    vel: v,
+                    life: 0.0,
+                    max: 0.6,
+                    size: 0.1,
+                    grow: 0.5,
+                    color: [176, 158, 122],
+                    kind: Kind::Puff,
+                    grav: 0.6,
+                });
+            }
+            Surface::Hard => {
+                self.impact(pos);
+                // chips of the wall bounce off it
+                for _ in 0..3 {
+                    let v = self.rv(1.6) + normal * self.rng.range(1.5, 3.5);
+                    let (max, size) = (self.rng.range(0.3, 0.5), self.rng.range(0.02, 0.04));
+                    self.push(Particle {
+                        pos,
+                        vel: v,
+                        life: 0.0,
+                        max,
+                        size,
+                        grow: 0.0,
+                        color: [150, 146, 138],
+                        kind: Kind::Spark,
+                        grav: 10.0,
+                    });
+                }
+            }
+        }
+        if self.marks.len() >= MAX_MARKS {
+            self.marks.pop_front();
+        }
+        self.marks.push_back(Mark {
+            pos: pos + normal * 0.012,
+            normal,
+            age: 0.0,
+            size: self.rng.range(0.035, 0.06) * if surface == Surface::Dirt { 1.5 } else { 1.0 },
+        });
     }
 
     /// A raindrop hitting the ground: a small pale splash.
@@ -178,6 +266,21 @@ impl Effects {
             kind: Kind::Flash,
             grav: 0.0,
         });
+        // a wisp of smoke drifting up from the barrel
+        if self.parts.len() < self.cap / 2 {
+            let v = self.rv(0.15) + vec3(0.0, 0.5, 0.0);
+            self.push(Particle {
+                pos,
+                vel: v,
+                life: 0.0,
+                max: 0.55,
+                size: 0.05,
+                grow: 0.35,
+                color: [196, 196, 200],
+                kind: Kind::Smoke,
+                grav: 0.0,
+            });
+        }
     }
 
     pub fn explosion(&mut self, pos: Vec3, radius: f32) {
@@ -300,6 +403,12 @@ impl Effects {
             p.size += p.grow * dt;
         }
         self.parts.retain(|p| p.life < p.max);
+        for m in &mut self.marks {
+            m.age += dt;
+        }
+        while self.marks.front().is_some_and(|m| m.age > MARK_LIFE) {
+            self.marks.pop_front();
+        }
         for t in &mut self.tracers {
             t.t += dt;
         }
@@ -308,6 +417,24 @@ impl Effects {
 
     /// Adds particles to an (alpha-blended) mesh.
     pub fn build(&self, m: &mut MeshBuilder, cam: Vec3) {
+        // bullet marks: dark spots lying on what was hit, fading at the end
+        for k in &self.marks {
+            if k.pos.distance_squared(cam) > 60.0 * 60.0 {
+                continue;
+            }
+            let side = if k.normal.y.abs() > 0.9 {
+                Vec3::X
+            } else {
+                Vec3::Y
+            };
+            let t = k.normal.cross(side).normalize_or_zero() * k.size;
+            let b = k.normal.cross(t);
+            let a = ((MARK_LIFE - k.age) / 3.0).clamp(0.0, 1.0);
+            m.add_quad(
+                [k.pos - t - b, k.pos + t - b, k.pos + t + b, k.pos - t + b],
+                [26, 22, 20, (a * 210.0) as u8],
+            );
+        }
         for p in &self.parts {
             let k = p.life / p.max;
             let alpha = match p.kind {

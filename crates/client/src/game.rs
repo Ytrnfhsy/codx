@@ -248,6 +248,8 @@ pub struct GameClient {
     pub recoil_vis: f32,
     pub bob_phase: f32,
     pub walk_amount: f32,
+    /// How far the view leans sideways right now (radians).
+    pub view_roll: f32,
     pub sway: Vec2,
     step_acc: f32,
     pub breath: f32,
@@ -549,6 +551,7 @@ impl GameClient {
             recoil_vis: 0.0,
             bob_phase: 0.0,
             walk_amount: 0.0,
+            view_roll: 0.0,
             sway: Vec2::ZERO,
             step_acc: 0.0,
             breath: 4.0,
@@ -680,6 +683,29 @@ impl GameClient {
 
     pub fn center_msg(&mut self, text: impl Into<String>, secs: f64, color: Color) {
         self.center = Some((text.into(), self.now + secs, color));
+    }
+
+    /// A bullet flying along `dir` struck the world at `at`: dust, chips and a mark, by
+    /// what it hit.
+    fn bullet_hit(&mut self, at: Vec3, dir: Vec3) {
+        use crate::effects::Surface;
+        let normal = self
+            .world
+            .raycast(at - dir * 0.3, dir, 0.6)
+            .map_or(-dir, |h| h.1);
+        // the bare ground of a big map is earth; everything else is hard
+        let earth = self.map.terrain.is_some()
+            && normal.y > 0.5
+            && self
+                .map
+                .terrain
+                .as_ref()
+                .is_some_and(|t| (t.height(at.x, at.z) - at.y).abs() < 0.12);
+        self.fx.hit(
+            at,
+            normal,
+            if earth { Surface::Dirt } else { Surface::Hard },
+        );
     }
 
     /// Sky, fog and light colours in the current weather.
@@ -1380,8 +1406,8 @@ impl GameClient {
             }
             if shot.flesh {
                 self.fx.flesh(to);
-            } else {
-                self.fx.impact(to);
+            } else if len > 0.1 {
+                self.bullet_hit(to, path / len);
             }
             // (a suppressor: no flash, and hardly heard)
             if shot.id != 255 && !shot.quiet {
@@ -1885,7 +1911,8 @@ impl GameClient {
             if flesh {
                 self.fx.flesh(hit);
             } else if path.hit_world {
-                self.fx.impact(hit);
+                let d = (hit - muzzle).normalize_or_zero();
+                self.bullet_hit(hit, d);
             }
         }
         self.muzzle_flash = now;
@@ -2311,6 +2338,11 @@ impl GameClient {
             }
             // footsteps & bob
             let hs = vec2(self.body.vel.x, self.body.vel.z).length();
+            // the view leans a little into a strafe
+            let (_, right) = yaw_basis(self.yaw);
+            let side = self.body.vel.dot(right) / self.tuning.movement.walk_speed.max(0.1);
+            let lean = side.clamp(-1.2, 1.2) * 0.02 * (1.0 - self.ads_t);
+            self.view_roll += (lean - self.view_roll) * (dt * 8.0).min(1.0);
             self.walk_amount += ((hs / self.tuning.movement.walk_speed).min(1.5)
                 - self.walk_amount)
                 * (dt * 8.0).min(1.0);
@@ -3146,8 +3178,14 @@ impl GameClient {
         }
         if self.alive {
             let s = self.sway_offset();
+            // (a slight bob with each step, less when aiming)
+            let bob = (self.bob_phase * 2.0).sin()
+                * 0.014
+                * self.walk_amount
+                * (1.0 - self.ads_t)
+                * self.tuning.movement.view_bob;
             return (
-                self.eye() + self.cam_smooth,
+                self.eye() + self.cam_smooth + vec3(0.0, bob, 0.0),
                 self.yaw + s.x + shake.x,
                 self.pitch + s.y + shake.y,
             );
