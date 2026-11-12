@@ -760,13 +760,55 @@ void main() {
 "#;
 
 const POST_FS: &str = r#"#version 100
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
+#endif
 varying mediump vec2 uv;
 uniform sampler2D Texture;
 // x: contrast curve, y: saturation, z: vignette, w: warm/cool split
 uniform vec4 Grade;
+// xy: size of a pixel of the picture, z: smooth jagged edges (FXAA), w: glow strength
+uniform vec4 Fx;
+
+float luma(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
 void main() {
     vec3 c = texture2D(Texture, uv).rgb;
+    if (Fx.z > 0.5) {
+        // a small FXAA: where the brightness jumps, blend along the edge
+        vec3 nw = texture2D(Texture, uv + vec2(-1.0, -1.0) * Fx.xy).rgb;
+        vec3 ne = texture2D(Texture, uv + vec2(1.0, -1.0) * Fx.xy).rgb;
+        vec3 sw = texture2D(Texture, uv + vec2(-1.0, 1.0) * Fx.xy).rgb;
+        vec3 se = texture2D(Texture, uv + vec2(1.0, 1.0) * Fx.xy).rgb;
+        float lnw = luma(nw), lne = luma(ne), lsw = luma(sw), lse = luma(se), lm = luma(c);
+        float lmin = min(lm, min(min(lnw, lne), min(lsw, lse)));
+        float lmax = max(lm, max(max(lnw, lne), max(lsw, lse)));
+        vec2 dir = vec2(-((lnw + lne) - (lsw + lse)), (lnw + lsw) - (lne + lse));
+        float reduce = max((lnw + lne + lsw + lse) * 0.03125, 0.0078125);
+        float inv = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
+        dir = clamp(dir * inv, vec2(-8.0), vec2(8.0)) * Fx.xy;
+        vec3 a = 0.5 * (texture2D(Texture, uv + dir * (1.0 / 3.0 - 0.5)).rgb
+            + texture2D(Texture, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+        vec3 b = a * 0.5 + 0.25 * (texture2D(Texture, uv - dir * 0.5).rgb
+            + texture2D(Texture, uv + dir * 0.5).rgb);
+        float lb = luma(b);
+        c = (lb < lmin || lb > lmax) ? a : b;
+    }
+    if (Fx.w > 0.0) {
+        // glow: what is very bright around here spills over a little
+        vec3 g = vec3(0.0);
+        for (int i = 0; i < 8; i++) {
+            float an = float(i) * 0.7854;
+            vec2 o = vec2(cos(an), sin(an)) * Fx.xy * (i - (i / 2) * 2 == 0 ? 5.0 : 11.0);
+            vec3 s = texture2D(Texture, uv + o).rgb;
+            g += max(s - vec3(0.9), vec3(0.0));
+        }
+        c += g * (Fx.w / 8.0) * 1.6;
+    }
     c = mix(c, c * c * (3.0 - 2.0 * c), Grade.x);
     float l = dot(c, vec3(0.299, 0.587, 0.114));
     c = mix(vec3(l), c, Grade.y);
@@ -948,7 +990,10 @@ impl Materials {
                     fragment: POST_FS,
                 },
                 MaterialParams {
-                    uniforms: vec![UniformDesc::new("Grade", UniformType::Float4)],
+                    uniforms: vec![
+                        UniformDesc::new("Grade", UniformType::Float4),
+                        UniformDesc::new("Fx", UniformType::Float4),
+                    ],
                     ..Default::default()
                 },
             )

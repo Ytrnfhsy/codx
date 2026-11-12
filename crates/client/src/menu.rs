@@ -126,7 +126,7 @@ pub fn settings_widgets(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, w: f32) {
 pub const SETTINGS_H: f32 = 300.0;
 
 /// Height of the Video panel.
-pub const VIDEO_H: f32 = 640.0;
+pub const VIDEO_H: f32 = 672.0;
 
 /// The Video page in a panel at (x, y), `pw` wide (its height is `VIDEO_H`): everything
 /// that trades looks for speed, with presets for a quick start. Returns true when done.
@@ -229,9 +229,21 @@ pub fn video_page(ui: &mut Ui, s: &mut Settings, x: f32, y: f32, pw: f32) -> boo
         x0,
         row(3),
     );
+    ui.toggle(
+        t("Згладжування FXAA", "FXAA smoothing"),
+        &mut s.fxaa,
+        col2,
+        row(3),
+    );
+    ui.toggle(
+        t("Світіння яскравого", "Glow of bright things"),
+        &mut s.bloom,
+        x0,
+        row(4),
+    );
 
     // steppers
-    let y2 = row(4) + 30.0;
+    let y2 = row(5) + 30.0;
     let sw = w * 0.48;
     if s.shadows {
         let names = [

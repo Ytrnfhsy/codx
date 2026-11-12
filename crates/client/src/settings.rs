@@ -93,6 +93,12 @@ pub struct Settings {
     /// Colour grading of the finished picture (contrast, richer colours, darker corners).
     #[serde(default = "yes")]
     pub color_grade: bool,
+    /// Quick edge smoothing on the finished picture (cheaper than multisampling).
+    #[serde(default)]
+    pub fxaa: bool,
+    /// Very bright things (the sun, fire, flashes) glow.
+    #[serde(default)]
+    pub bloom: bool,
     /// FPS cap when vsync is off (0 = unlimited).
     pub fps_limit: u32,
     /// Sharpness of sun shadows: 1 low, 2 medium, 3 high.
@@ -152,6 +158,8 @@ impl Settings {
             vsync: true,
             msaa: true,
             color_grade: true,
+            fxaa: false,
+            bloom: false,
             skin: 0,
             fps_limit: 144,
             shadow_quality: 2,
@@ -320,6 +328,9 @@ impl Settings {
             Preset::High => (1.0, true, 2, true, true, true, 1.0, 1),
             Preset::Ultra => (1.0, true, 3, true, true, true, 1.0, 2),
         };
+        // (without multisampling the quick smoothing takes over; glow from High up)
+        self.fxaa = matches!(p, Preset::Medium);
+        self.bloom = matches!(p, Preset::High | Preset::Ultra);
         self.grass = match p {
             Preset::Low => 0,
             Preset::Medium | Preset::High => 1,
@@ -349,6 +360,8 @@ impl Settings {
                 && (s.view_distance - self.view_distance).abs() < 0.01
                 && s.effects == self.effects
                 && s.grass == self.grass
+                && s.fxaa == self.fxaa
+                && s.bloom == self.bloom
         })
     }
 

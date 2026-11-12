@@ -760,18 +760,31 @@ async fn amain(args: Args) {
                 set_default_camera();
                 if let Some(rt) = &target {
                     clear_background(BLACK);
-                    if settings.color_grade {
+                    if settings.color_grade || settings.fxaa || settings.bloom {
                         // evenings are warmer, rain and fog flatter
                         use toon_shared::weather::Weather;
-                        let grade = match g.weather {
-                            Weather::Clear => vec4(0.3, 1.14, 0.5, 0.03),
-                            Weather::Evening => vec4(0.35, 1.18, 0.6, 0.05),
-                            Weather::Overcast => vec4(0.22, 1.04, 0.5, 0.01),
-                            Weather::Rain => vec4(0.25, 0.96, 0.7, -0.01),
-                            Weather::Fog => vec4(0.15, 0.94, 0.45, 0.0),
-                            Weather::Night => vec4(0.3, 0.9, 0.9, -0.03),
+                        let grade = if !settings.color_grade {
+                            vec4(0.0, 1.0, 0.0, 0.0)
+                        } else {
+                            match g.weather {
+                                Weather::Clear => vec4(0.3, 1.14, 0.5, 0.03),
+                                Weather::Evening => vec4(0.35, 1.18, 0.6, 0.05),
+                                Weather::Overcast => vec4(0.22, 1.04, 0.5, 0.01),
+                                Weather::Rain => vec4(0.25, 0.96, 0.7, -0.01),
+                                Weather::Fog => vec4(0.15, 0.94, 0.45, 0.0),
+                                Weather::Night => vec4(0.3, 0.9, 0.9, -0.03),
+                            }
                         };
                         mats.post.set_uniform("Grade", grade);
+                        mats.post.set_uniform(
+                            "Fx",
+                            vec4(
+                                1.0 / rt.texture.width(),
+                                1.0 / rt.texture.height(),
+                                settings.fxaa as u8 as f32,
+                                if settings.bloom { 1.0 } else { 0.0 },
+                            ),
+                        );
                         gl_use_material(&mats.post);
                     }
                     draw_texture_ex(
