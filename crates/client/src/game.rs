@@ -134,6 +134,8 @@ pub enum Overlay {
     Inventory,
     /// Battle royale: looking into a death box.
     DeathBox,
+    /// The server's leaderboards.
+    Leaders,
 }
 
 pub struct Welcome {
@@ -168,6 +170,8 @@ pub struct GameClient {
     pub br: Option<BrSnap>,
     /// Guns, supplies and boxes on the ground near us, as the server last told us.
     pub lying: HashMap<u16, EntSnap>,
+    /// The server's leaderboards, as last asked for.
+    pub leaderboards: Option<Vec<toon_shared::protocol::Board>>,
     /// How far each door has swung open (0 shut .. 1 open), for drawing.
     pub door_swing: Vec<f32>,
     /// The battle royale round's weather (clear elsewhere).
@@ -177,7 +181,7 @@ pub struct GameClient {
     /// A marker put on the big map (x, z), shown on the minimap and in the world.
     pub marker: Option<Vec2>,
     /// Before the match: (players ready, players, am I ready).
-    pub ready: Option<(u8, u8, bool)>,
+    pub ready: Option<(u8, u8, bool, u16)>,
     /// Battle royale squad (0 = on our own).
     pub squad: u8,
     /// Jeeps and boats around.
@@ -500,6 +504,7 @@ impl GameClient {
             weather: Weather::Clear,
             br: None,
             lying: HashMap::new(),
+            leaderboards: None,
             door_swing: Vec::new(),
             big_map: false,
             marker: None,
@@ -1034,6 +1039,9 @@ impl GameClient {
                     let state = open.iter().find(|o| o.0 as usize == k).map_or(0, |o| o.1);
                     self.world.set_door_state(k, state);
                 }
+            }
+            S2C::Leaderboards(boards) => {
+                self.leaderboards = Some(boards);
             }
             S2C::Door(k, open) => {
                 let k = k as usize;
@@ -2665,7 +2673,7 @@ impl GameClient {
                     self.next_pickup = now + 0.6;
                 }
             }
-            if let Some((_, _, me)) = self.ready {
+            if let Some((_, _, me, _)) = self.ready {
                 if pressed(Action::Ready) {
                     self.net.send(C2S::Ready(!me));
                 }

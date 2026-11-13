@@ -325,7 +325,7 @@ impl GameClient {
                     22,
                     MUTED,
                 );
-                if let Some((n, of, me)) = self.ready {
+                if let Some((n, of, me, left)) = self.ready {
                     let (text, c) = if me {
                         (
                             tr!(
@@ -346,6 +346,18 @@ impl GameClient {
                         )
                     };
                     ui.centered(&text, cx, 142.0, 26, c);
+                    if left > 0 {
+                        ui.centered(
+                            &tr!(
+                                "Матч почнеться за {left} с, навіть якщо не всі готові",
+                                "The match starts in {left} s even if not everyone is ready",
+                            ),
+                            cx,
+                            170.0,
+                            16,
+                            MUTED,
+                        );
+                    }
                 }
             }
             MatchState::PreRound => {
@@ -411,7 +423,9 @@ impl GameClient {
 
         // death screen
         let br_round = self.mode == Mode::Br && self.state == MatchState::Playing;
-        if br_round && !self.alive && !self.br.as_ref().is_some_and(|b| b.in_plane) {
+        // (once the round's summary is up, it says who got us)
+        let summary_up = self.br.as_ref().is_some_and(|b| b.summary.is_some()) && self.br_out();
+        if br_round && !self.alive && !summary_up && !self.br.as_ref().is_some_and(|b| b.in_plane) {
             if let Some((killer, cause, _)) = &self.death_info {
                 let text = if killer.is_empty() {
                     tr!("Ти вибув ({})", "You are out ({})", cause.name())
@@ -705,9 +719,30 @@ impl GameClient {
         if !(self.br_out() || self.match_end.is_some()) || self.killcam.is_some() {
             return;
         }
-        let pw = 520.0f32.min(w - 20.0);
-        let (x, y) = ((w - pw) / 2.0, 150.0);
-        crate::ui::soft_rect(x, y, pw, 96.0, Color::new(0.0, 0.0, 0.0, 0.55));
+        let pw = 620.0f32.min(w - 20.0);
+        let (x, y0) = ((w - pw) / 2.0, h * 0.12);
+        // who got us, above the rest
+        let killer = self
+            .death_info
+            .as_ref()
+            .filter(|_| s.place != 1)
+            .map(|(killer, cause, _)| {
+                if killer.is_empty() {
+                    tr!("Ти вибув ({})", "You are out ({})", cause.name())
+                } else {
+                    tr!(
+                        "Тебе вибив {killer} — {}",
+                        "Knocked out by {killer} — {}",
+                        cause.name()
+                    )
+                }
+            });
+        let extra = if killer.is_some() { 28.0 } else { 0.0 };
+        crate::ui::soft_rect(x, y0, pw, 100.0 + extra, Color::new(0.0, 0.0, 0.0, 0.55));
+        if let Some(k) = &killer {
+            ui.centered(k, w / 2.0, y0 + 26.0, 17, MUTED);
+        }
+        let y = y0 + extra;
         let title = if s.place == 1 {
             t("ПЕРЕМОГА!", "WINNER!").to_string()
         } else {
@@ -2692,6 +2727,9 @@ impl GameClient {
     }
 
     fn draw_scoreboard(&self, ui: &Ui, top: f32) {
+        if self.mode == Mode::Br {
+            return self.draw_br_scoreboard(ui, top);
+        }
         let w = screen_width();
         let pw = (w - 80.0).min(980.0);
         let x0 = (w - pw) / 2.0;
@@ -2771,6 +2809,106 @@ impl GameClient {
                 &tr!("Глядачі: {}", "Spectators: {}", specs.join(", ")),
                 x0 + 16.0,
                 top + 80.0 + rows_per * 24.0,
+                14,
+                MUTED,
+            );
+        }
+    }
+
+    /// The battle royale's table: no teams, everybody by place (those still in first, by
+    /// kills), in as many columns as it takes to fit the screen.
+    fn draw_br_scoreboard(&self, ui: &Ui, top: f32) {
+        let (w, h) = (screen_width(), screen_height());
+        let mut rows: Vec<_> = self
+            .scoreboard
+            .iter()
+            .filter(|r| r.team.is_playing())
+            .collect();
+        rows.sort_by_key(|r| {
+            (
+                if r.place == 0 { 0 } else { r.place },
+                std::cmp::Reverse(r.kills),
+            )
+        });
+        let row_h = 22.0;
+        let room = (h - top - 110.0).max(row_h * 4.0);
+        let per_col = ((room / row_h).floor() as usize).max(4);
+        let cols = rows.len().div_ceil(per_col).clamp(1, 4);
+        let per_col = rows.len().div_ceil(cols).max(1);
+        let pw = (w - 40.0).min(330.0 * cols as f32 + 32.0);
+        let x0 = (w - pw) / 2.0;
+        let ph = 96.0 + per_col as f32 * row_h;
+        ui.panel(x0, top, pw, ph);
+        ui.bold(&self.server_name, x0 + 16.0, top + 30.0, 20, ACCENT);
+        let alive = rows.iter().filter(|r| r.place == 0).count();
+        ui.text(
+            &tr!(
+                "{} · {} · живих {} з {}",
+                "{} · {} · {} of {} still in",
+                self.map.id.name(),
+                self.mode.name(),
+                alive,
+                rows.len()
+            ),
+            x0 + 16.0,
+            top + 52.0,
+            15,
+            MUTED,
+        );
+        let col_w = (pw - 32.0) / cols as f32;
+        for c in 0..cols {
+            let x = x0 + 16.0 + c as f32 * col_w;
+            ui.text(t("#   Гравець", "#   Player"), x, top + 80.0, 13, MUTED);
+            ui.text(t("Вб.", "K"), x + col_w - 40.0, top + 80.0, 13, MUTED);
+        }
+        for (i, r) in rows.iter().enumerate() {
+            let (c, k) = (i / per_col, i % per_col);
+            let x = x0 + 16.0 + c as f32 * col_w;
+            let yy = top + 100.0 + k as f32 * row_h;
+            if r.id == self.my_id {
+                draw_rectangle(
+                    x - 4.0,
+                    yy - 16.0,
+                    col_w - 8.0,
+                    20.0,
+                    Color::new(1.0, 1.0, 1.0, 0.1),
+                );
+            }
+            let place = if r.place == 0 {
+                "—".to_string()
+            } else {
+                r.place.to_string()
+            };
+            let colour = if r.place == 1 {
+                ACCENT
+            } else if r.place == 0 {
+                TEXT
+            } else {
+                MUTED
+            };
+            ui.text(&place, x, yy, 14, colour);
+            // (names cut to the column)
+            let mut name = r.name.clone();
+            if r.squad != 0 && self.br.as_ref().is_some_and(|b| b.squad.len() > 1) {
+                name = format!("{name} ·{}", r.squad);
+            }
+            while name.chars().count() > 3 && ui.width(&name, 15, false) > col_w - 80.0 {
+                name.pop();
+            }
+            ui.text(&name, x + 30.0, yy, 15, colour);
+            ui.text(&r.kills.to_string(), x + col_w - 40.0, yy, 15, colour);
+        }
+        let specs: Vec<String> = self
+            .scoreboard
+            .iter()
+            .filter(|r| r.team == Team::Spectator)
+            .map(|r| r.name.clone())
+            .collect();
+        if !specs.is_empty() {
+            ui.text(
+                &tr!("Глядачі: {}", "Spectators: {}", specs.join(", ")),
+                x0 + 16.0,
+                top + ph - 10.0,
                 14,
                 MUTED,
             );
@@ -3228,12 +3366,29 @@ impl GameClient {
                 if ui.button2(team_label, x + 24.0, y + 202.0, bw, 46.0) {
                     self.overlay = Overlay::Team;
                 }
-                if ui.button2(t("Налаштування", "Settings"), x + 24.0, y + 258.0, bw, 46.0)
-                {
+                let half = (bw - 12.0) / 2.0;
+                if ui.button2(
+                    t("Налаштування", "Settings"),
+                    x + 24.0,
+                    y + 258.0,
+                    half,
+                    46.0,
+                ) {
                     self.overlay = Overlay::Settings;
                 }
+                if ui.button2(
+                    t("Рейтинг", "Leaderboards"),
+                    x + 36.0 + half,
+                    y + 258.0,
+                    half,
+                    46.0,
+                ) {
+                    self.leaderboards = None;
+                    self.net.send(toon_shared::protocol::C2S::Leaderboards);
+                    self.overlay = Overlay::Leaders;
+                }
                 // before the match: ready or taking a break
-                if let Some((_, _, me)) = self.ready {
+                if let Some((_, _, me, _)) = self.ready {
                     let label = if me {
                         t("Не готовий (перерва)", "Not ready (a break)")
                     } else {
@@ -3257,6 +3412,81 @@ impl GameClient {
                     BAD,
                 ) {
                     return Some(HudAction::Leave);
+                }
+                None
+            }
+            Overlay::Leaders => {
+                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+                let pw = (w - 40.0).min(1040.0);
+                let ph = (h - 40.0).min(640.0);
+                let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
+                ui.panel(x, y, pw, ph);
+                ui.bold(
+                    t("Рейтинг сервера", "Server leaderboards"),
+                    x + 24.0,
+                    y + 42.0,
+                    26,
+                    ACCENT,
+                );
+                ui.text(
+                    t(
+                        "Рахуються всі режими; K/D — після 5 матчів. Esc — назад",
+                        "Every mode counts; K/D after 5 matches. Esc — back",
+                    ),
+                    x + 24.0,
+                    y + 66.0,
+                    14,
+                    MUTED,
+                );
+                match &self.leaderboards {
+                    None => {
+                        ui.centered(t("Завантаження…", "Loading…"), w / 2.0, h / 2.0, 18, MUTED)
+                    }
+                    Some(boards) => {
+                        let cols = if pw > 900.0 { 3 } else { 2 };
+                        let rows = boards.len().div_ceil(cols);
+                        let cw = (pw - 48.0 - (cols - 1) as f32 * 16.0) / cols as f32;
+                        let ch = (ph - 100.0 - (rows - 1) as f32 * 14.0) / rows as f32;
+                        let line = ((ch - 52.0) / 11.0).clamp(14.0, 20.0);
+                        for (i, b) in boards.iter().enumerate() {
+                            let bx = x + 24.0 + (i % cols) as f32 * (cw + 16.0);
+                            let by = y + 86.0 + (i / cols) as f32 * (ch + 14.0);
+                            crate::ui::soft_rect(bx, by, cw, ch, Color::new(0.0, 0.0, 0.0, 0.3));
+                            ui.bold(b.kind.name(), bx + 12.0, by + 22.0, 16, ACCENT);
+                            if b.rows.is_empty() {
+                                ui.text(
+                                    t("поки нікого", "nobody yet"),
+                                    bx + 12.0,
+                                    by + 46.0,
+                                    14,
+                                    MUTED,
+                                );
+                            }
+                            let shown = (((ch - 52.0) / line).floor() as usize).min(b.rows.len());
+                            for (k, (name, v)) in b.rows.iter().take(shown).enumerate() {
+                                let ly = by + 44.0 + k as f32 * line;
+                                let c = if k == 0 { ACCENT } else { TEXT };
+                                let mut nm = format!("{}. {name}", k + 1);
+                                let vs = b.kind.format(*v);
+                                let vw = ui.width(&vs, 14, false);
+                                while nm.chars().count() > 4
+                                    && ui.width(&nm, 14, false) > cw - vw - 34.0
+                                {
+                                    nm.pop();
+                                }
+                                ui.text(&nm, bx + 12.0, ly, 14, c);
+                                ui.text(&vs, bx + cw - 12.0 - vw, ly, 14, c);
+                            }
+                            if let Some((place, v)) = b.mine {
+                                let me = tr!(
+                                    "Ти: #{place} ({})",
+                                    "You: #{place} ({})",
+                                    b.kind.format(v)
+                                );
+                                ui.text(&me, bx + 12.0, by + ch - 10.0, 13, GOOD);
+                            }
+                        }
+                    }
                 }
                 None
             }

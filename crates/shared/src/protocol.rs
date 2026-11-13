@@ -131,6 +131,8 @@ pub enum C2S {
     Spectate(u8),
     /// Open or shut door `k` (standing next to it).
     Door(u16),
+    /// Ask for the server's leaderboards.
+    Leaderboards,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -477,6 +479,58 @@ pub struct BrSnap {
     pub open_box: Option<BoxView>,
 }
 
+/// A leaderboard of the server's records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BoardKind {
+    Kills,
+    Wins,
+    Longest,
+    KillDeath,
+    Damage,
+    Matches,
+}
+
+impl BoardKind {
+    pub const ALL: [BoardKind; 6] = [
+        BoardKind::Kills,
+        BoardKind::Wins,
+        BoardKind::Longest,
+        BoardKind::KillDeath,
+        BoardKind::Damage,
+        BoardKind::Matches,
+    ];
+
+    pub fn name(self) -> &'static str {
+        use crate::lang::t;
+        match self {
+            BoardKind::Kills => t("Найбільше вбивств", "Most kills"),
+            BoardKind::Wins => t("Найбільше перемог", "Most wins"),
+            BoardKind::Longest => t("Найдальше вбивство", "Longest kill"),
+            BoardKind::KillDeath => t("Вбивства / смерті", "Kills / deaths"),
+            BoardKind::Damage => t("Найбільше урону (BR)", "Most damage (BR)"),
+            BoardKind::Matches => t("Найбільше матчів", "Most matches"),
+        }
+    }
+
+    /// A value on this board as it is shown.
+    pub fn format(self, v: f32) -> String {
+        match self {
+            BoardKind::Longest => crate::tr!("{:.0} м", "{:.0} m", v),
+            BoardKind::KillDeath => format!("{v:.2}"),
+            _ => format!("{v:.0}"),
+        }
+    }
+}
+
+/// One leaderboard: the best ten (name, value), and where the asking player stands.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Board {
+    pub kind: BoardKind,
+    pub rows: Vec<(String, f32)>,
+    /// (place, value) of the one who asked, if they are on it at all.
+    pub mine: Option<(u16, f32)>,
+}
+
 /// How our battle royale round went, and our records on this server.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct BrSummary {
@@ -554,8 +608,9 @@ pub struct Snapshot {
     pub shots: Vec<ShotFx>,
     /// Battle royale only.
     pub br: Option<BrSnap>,
-    /// Before the match starts: (players ready, players in total, am I ready).
-    pub ready: Option<(u8, u8, bool)>,
+    /// Before the match starts: (players ready, players in total, am I ready, seconds
+    /// until it starts anyway — 0: no countdown).
+    pub ready: Option<(u8, u8, bool, u16)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -570,6 +625,9 @@ pub struct ScoreRow {
     pub ping: u16,
     pub bot: bool,
     pub alive: bool,
+    /// Battle royale: place once out (0 still in), and squad (0 none).
+    pub place: u16,
+    pub squad: u8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -644,6 +702,8 @@ pub enum S2C {
     Doors(Vec<(u16, u8)>),
     /// One door opened (1 in, 2 out) or shut (0).
     Door(u16, u8),
+    /// The server's leaderboards (the answer to `C2S::Leaderboards`).
+    Leaderboards(Vec<Board>),
     /// Things lying on the ground near us: new or changed ones, and the ids of those
     /// gone (taken, or left behind).
     Ents {

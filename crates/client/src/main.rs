@@ -657,7 +657,7 @@ async fn amain(args: Args) {
                     if is_key_pressed(KeyCode::Escape) && !binds::capturing() {
                         g.overlay = match g.overlay {
                             Overlay::Edit(_) => Overlay::Class,
-                            Overlay::Settings => Overlay::Pause,
+                            Overlay::Settings | Overlay::Leaders => Overlay::Pause,
                             Overlay::Video => {
                                 settings.save();
                                 Overlay::Settings

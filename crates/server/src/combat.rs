@@ -567,6 +567,18 @@ impl Game {
             if let Some(k) = self.pm(a) {
                 k.br_longest = k.br_longest.max(far);
             }
+            // a new longest kill on this server: everybody hears of it at once
+            let human = self.p(a).is_some_and(|k| !k.is_bot());
+            if human && far >= 60.0 && far > self.record_longest {
+                self.record_longest = far;
+                let name = self.p(a).map(|k| k.name.clone()).unwrap_or_default();
+                self.announce(vec![crate::stats::News(tr!(
+                    "★ Новий рекорд сервера: {} — вбивство з {:.0} м",
+                    "★ New server record: {} — a kill from {:.0} m",
+                    name,
+                    far
+                ))]);
+            }
         }
         let Some(v) = self.pm(victim) else { return };
         let vname = v.name.clone();

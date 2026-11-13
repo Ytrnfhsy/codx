@@ -488,6 +488,10 @@ pub struct Game {
     /// Dice for picking spawn spots (their own: how many spots there are to weigh does
     /// not shift the rest of the game's randomness).
     spawn_rng: Rng,
+    /// The match starts at this time even if not everybody is ready.
+    ready_deadline: Option<f64>,
+    /// The longest kill on record here (a longer one is announced).
+    pub record_longest: f32,
     pub bullets: Vec<crate::combat::Bullet>,
     pub shot_serial: u32,
     pub log: VecDeque<String>,
@@ -583,6 +587,8 @@ impl Game {
             lobby_spots: None,
             base_spots: [None, None],
             spawn_rng: Rng::new(0x5a3d),
+            ready_deadline: None,
+            record_longest: br_stats.longest_ever(),
             bullets: Vec::new(),
             shot_serial: 0,
             log: VecDeque::new(),
@@ -1404,6 +1410,18 @@ impl Game {
                 self.throw_special(id, Vec3::from_array(origin), Vec3::from_array(dir), kind)
             }
             C2S::Item(a) => self.br_item(id, a),
+            C2S::Leaderboards => {
+                // (not more often than the backpack's budget allows)
+                let key = match self.pm(id) {
+                    Some(p) if p.item_budget >= 1.0 => {
+                        p.item_budget -= 1.0;
+                        p.stats_key()
+                    }
+                    _ => return,
+                };
+                let boards = self.br_stats.boards(Some(&key));
+                self.send(id, S2C::Leaderboards(boards));
+            }
             C2S::Door(k) => {
                 self.use_door(id, k, None);
             }
@@ -1750,11 +1768,57 @@ impl Game {
         } else {
             self.players.iter().flatten().any(|p| !p.is_bot())
         };
+        self.can_start(playing, humans)
+            && (!self.cfg.ready_check
+                || self.unready() == 0
+                || self.ready_deadline.is_some_and(|t| self.time >= t))
+    }
+
+    fn can_start(&self, playing: usize, humans: bool) -> bool {
         playing >= self.cfg.min_players
             && (self.mode.solo()
                 || self.team_count(Team::Allies) > 0 && self.team_count(Team::Axis) > 0)
             && humans
-            && (!self.cfg.ready_check || self.unready() == 0)
+    }
+
+    /// When the match starts whether or not everybody pressed «Ready»: the countdown
+    /// begins once the match could start, shorter as soon as somebody is ready.
+    fn update_ready_deadline(&mut self) {
+        let timeout = self.cfg.ready_timeout as f64;
+        if self.state != MatchState::Warmup || !self.cfg.ready_check || timeout <= 0.0 {
+            self.ready_deadline = None;
+            return;
+        }
+        let playing = self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| p.team.is_playing())
+            .count();
+        let humans = if self.mode == Mode::Br {
+            self.humans_playing()
+        } else {
+            self.players.iter().flatten().any(|p| !p.is_bot())
+        };
+        if !self.can_start(playing, humans) {
+            self.ready_deadline = None;
+            return;
+        }
+        let someone_ready = self
+            .players
+            .iter()
+            .flatten()
+            .any(|p| !p.is_bot() && p.team.is_playing() && p.ready);
+        let wait = if someone_ready {
+            timeout
+        } else {
+            timeout * 2.0
+        };
+        let latest = self.time + wait;
+        self.ready_deadline = Some(match self.ready_deadline {
+            Some(t) => t.min(latest),
+            None => latest,
+        });
     }
 
     /// A real player has joined a side (not just watching).
@@ -1796,6 +1860,7 @@ impl Game {
         self.round = 0;
         self.match_started = true;
         for p in self.players.iter_mut().flatten() {
+            p.br_longest = 0.0;
             p.kills = 0;
             p.deaths = 0;
             p.assists = 0;
@@ -1892,6 +1957,45 @@ impl Game {
             winner,
             text: text(),
         });
+        // the match goes into everybody's records (the battle royale records its own, as
+        // each player is out)
+        if self.mode != Mode::Br {
+            let rows: Vec<(String, String, bool, u32, u32, f32)> = self
+                .players
+                .iter()
+                .flatten()
+                .filter(|p| !p.is_bot() && p.team.is_playing())
+                .map(|p| {
+                    (
+                        p.stats_key(),
+                        p.name.clone(),
+                        winner == Some(p.team),
+                        p.kills as u32,
+                        p.deaths as u32,
+                        p.br_longest,
+                    )
+                })
+                .collect();
+            for (key, name, won, kills, deaths, longest) in rows {
+                let news = self
+                    .br_stats
+                    .record_match(&key, &name, won, kills, deaths, longest);
+                self.announce(news);
+            }
+        }
+    }
+
+    /// Leaderboard news in everybody's chat.
+    pub fn announce(&mut self, news: Vec<crate::stats::News>) {
+        for n in news {
+            self.logf(n.0.clone());
+            self.say(Dest::All, || S2C::Chat {
+                from: String::new(),
+                team: Team::Spectator,
+                text: n.0.clone(),
+                team_only: false,
+            });
+        }
     }
 
     pub fn round_win(&mut self, winner: Option<Team>, reason: Text) {
@@ -2004,6 +2108,7 @@ impl Game {
     fn update_state(&mut self, dt: f32) {
         match self.state {
             MatchState::Warmup => {
+                self.update_ready_deadline();
                 if self.ready_to_start() {
                     self.start_match();
                 }
@@ -2217,6 +2322,8 @@ impl Game {
                 },
                 bot: p.is_bot(),
                 alive: p.alive,
+                place: p.br_place,
+                squad: p.squad,
             })
             .collect()
     }
@@ -2546,7 +2653,10 @@ impl Game {
                     .filter(|p| !p.is_bot() && p.team.is_playing())
                     .count();
                 let me = self.p(id).is_some_and(|p| p.ready);
-                ((humans - self.unready()) as u8, humans as u8, me)
+                let left = self
+                    .ready_deadline
+                    .map_or(0, |t| (t - self.time).max(0.0).ceil() as u16);
+                ((humans - self.unready()) as u8, humans as u8, me, left)
             }),
         }
     }

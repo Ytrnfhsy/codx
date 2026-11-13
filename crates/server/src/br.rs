@@ -497,9 +497,17 @@ impl Game {
         if p.is_bot() {
             return;
         }
-        let (key, kills, dmg, longest) = (p.stats_key(), p.kills as u32, p.br_dmg, p.br_longest);
-        self.br_stats
-            .record(&key, place as u32, kills, dmg, longest);
+        let (key, name, kills, dmg, longest) = (
+            p.stats_key(),
+            p.name.clone(),
+            p.kills as u32,
+            p.br_dmg,
+            p.br_longest,
+        );
+        let news = self
+            .br_stats
+            .record(&key, &name, place as u32, kills, dmg, longest);
+        self.announce(news);
     }
 
     /// Sides still in the round: squads, and players on their own.

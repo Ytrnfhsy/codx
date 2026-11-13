@@ -220,6 +220,20 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                 AdminMsg::Info(reply) => {
                     let _ = reply.send(info_json(&game));
                 }
+                AdminMsg::Top(reply) => {
+                    let boards: Vec<serde_json::Value> = game
+                        .br_stats
+                        .boards(None)
+                        .iter()
+                        .map(|b| {
+                            json!({
+                                "title": b.kind.name(),
+                                "rows": b.rows.iter().map(|(n, v)| json!([n, b.kind.format(*v)])).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect();
+                    let _ = reply.send(json!(boards));
+                }
                 AdminMsg::CheckRcon(pass, reply) => {
                     let _ = reply
                         .send(!game.cfg.rcon_password.is_empty() && pass == game.cfg.rcon_password);

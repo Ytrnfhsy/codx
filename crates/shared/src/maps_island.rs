@@ -740,8 +740,8 @@ fn settle(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
             } else {
                 (pl.z + street + 2.0, bb.y - 2.0)
             };
-            let lot_w = if pl.kind == Kind::Town { 15.0 } else { 14.0 };
-            let lot_d = if pl.kind == Kind::Town { 14.0 } else { 13.0 };
+            let lot_w = if pl.kind == Kind::Town { 17.0 } else { 16.0 };
+            let lot_d = if pl.kind == Kind::Town { 15.5 } else { 14.5 };
             let nx = ((x1 - x0) / lot_w).floor().max(1.0) as i32;
             let nz = ((z1 - z0) / lot_d).floor().max(1.0) as i32;
             for iz in 0..nz {
@@ -755,10 +755,12 @@ fn settle(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
                     }
                     let lx = x0 + ix as f32 * lot_w;
                     let lz = z0 + iz as f32 * lot_d;
-                    let w = lot_w - rng.range(3.0, 5.0);
-                    let d = lot_d - rng.range(2.6, 3.4);
-                    let ox = lx + rng.range(0.0, lot_w - w);
-                    let oz = lz + rng.range(0.0, lot_d - d);
+                    // near the middle of its lot: neighbours keep a yard of 3 m or more
+                    // between them (not a doorway opening onto the next house's wall)
+                    let w = lot_w - rng.range(4.6, 6.0);
+                    let d = lot_d - rng.range(3.6, 4.6);
+                    let ox = lx + (lot_w - w) * rng.range(0.35, 0.65);
+                    let oz = lz + (lot_d - d) * rng.range(0.35, 0.65);
                     let wall = WALLS[rng.below(WALLS.len())];
                     let roof = ROOFS[rng.below(ROOFS.len())];
                     let r = rng.f32();
@@ -1066,6 +1068,50 @@ pub fn island() -> Map {
 mod tests {
     use super::*;
     use crate::terrain::MAX_WALK_SLOPE;
+
+    /// Houses in the towns and villages keep a yard between them.
+    #[test]
+    fn houses_are_not_squeezed_together() {
+        let map = island();
+        // walls: tall, thin, solid boxes standing on the ground of a settlement
+        let walls: Vec<_> = map
+            .boxes
+            .iter()
+            .filter(|b| {
+                let s = b.max - b.min;
+                b.solid
+                    && s.y > 2.0
+                    && s.y < 4.0
+                    && s.x.min(s.z) < 0.4
+                    && s.x.max(s.z) > 1.5
+                    && PLACES
+                        .iter()
+                        .any(|p| p.kind != Kind::Base && p.dist(b.min.x, b.min.z) <= 0.0)
+            })
+            .collect();
+        assert!(walls.len() > 200, "only {} walls", walls.len());
+        let mut close = 0;
+        for (i, a) in walls.iter().enumerate() {
+            for b in &walls[i + 1..] {
+                // parallel walls facing each other across a narrow gap, at the same level
+                let gap_x = (b.min.x - a.max.x).max(a.min.x - b.max.x);
+                let gap_z = (b.min.z - a.max.z).max(a.min.z - b.max.z);
+                let overlap_x = gap_x < -1.0;
+                let overlap_z = gap_z < -1.0;
+                let same_level = (a.min.y - b.min.y).abs() < 1.0;
+                if same_level
+                    && ((overlap_z && gap_x > 0.05 && gap_x < 1.8)
+                        || (overlap_x && gap_z > 0.05 && gap_z < 1.8))
+                {
+                    close += 1;
+                }
+            }
+        }
+        assert!(
+            close < 4,
+            "{close} pairs of walls of different houses less than 1.8 m apart"
+        );
+    }
 
     #[test]
     fn island_is_playable() {

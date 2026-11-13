@@ -32,6 +32,8 @@ pub enum AdminMsg {
     Cmd(String, Sender<String>),
     State(Sender<serde_json::Value>),
     Info(Sender<serde_json::Value>),
+    /// The leaderboards, for the public page.
+    Top(Sender<serde_json::Value>),
     CheckRcon(String, Sender<bool>),
 }
 

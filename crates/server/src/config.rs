@@ -134,6 +134,9 @@ pub struct ServerConfig {
     pub min_players: usize,
     /// The match waits until every player has pressed «Ready».
     pub ready_check: bool,
+    /// ...but not for ever: once somebody is ready, the rest get this many seconds (and
+    /// with nobody ready, twice as long), then it starts anyway (0 = wait for everyone).
+    pub ready_timeout: f32,
     pub http_enabled: bool,
     /// Only let in clients of exactly the server's game version (a server updated to a
     /// new release then asks every player to update too).
@@ -196,6 +199,7 @@ impl Default for ServerConfig {
             spawn_protection: 3.0,
             min_players: 2,
             ready_check: true,
+            ready_timeout: 30.0,
             http_enabled: true,
             require_same_version: true,
             data_dir: "data".into(),

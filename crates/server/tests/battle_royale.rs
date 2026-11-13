@@ -618,10 +618,68 @@ fn the_match_waits_for_ready_players() {
     };
     run(&mut g, 20.0);
     assert_eq!(g.state, MatchState::Warmup, "started without anyone ready");
-    assert_eq!(g.snapshot_for(me).ready, Some((0, 1, false)));
+    let r = g.snapshot_for(me).ready.unwrap();
+    assert_eq!((r.0, r.1, r.2), (0, 1, false));
+    assert!(
+        (38..=41).contains(&r.3),
+        "countdown {} s with nobody ready",
+        r.3
+    );
     g.handle(me, C2S::Ready(true));
     run(&mut g, 2.0);
     assert_ne!(g.state, MatchState::Warmup, "ready, but nothing started");
+}
+
+/// One player never presses «Ready»: the others do not wait for ever. Once somebody is
+/// ready the match starts after `ready_timeout` seconds anyway (twice that with nobody
+/// ready at all).
+#[test]
+fn the_match_does_not_wait_for_ever() {
+    let mut cfg = ServerConfig {
+        data_dir: std::env::temp_dir()
+            .join("tw-ready")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    cfg.ready_timeout = 10.0;
+    cfg.br.bots = 4;
+    cfg.br.max_players = 8;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Market, Mode::Br);
+    let v = toon_shared::consts::PROTOCOL_VERSION;
+    let a = g
+        .connect("127.0.0.1:5801".parse().unwrap(), "Готовий", "", v)
+        .unwrap();
+    let b = g
+        .connect("127.0.0.1:5802".parse().unwrap(), "Сонько", "", v)
+        .unwrap();
+    g.handle(a, C2S::JoinTeam(None));
+    g.handle(b, C2S::JoinTeam(None));
+    let run = |g: &mut Game, secs: f32| {
+        for _ in 0..(secs / TICK_DT) as usize {
+            g.tick(TICK_DT);
+            g.outbox.clear();
+            g.shots.clear();
+        }
+    };
+    run(&mut g, 2.0);
+    g.handle(a, C2S::Ready(true));
+    run(&mut g, 1.0);
+    let left = g.snapshot_for(b).ready.unwrap().3;
+    assert!((8..=10).contains(&left), "{left} s left");
+    run(&mut g, 6.0);
+    assert_eq!(
+        g.state,
+        MatchState::Warmup,
+        "started before the time was up"
+    );
+    run(&mut g, 4.0);
+    assert_ne!(
+        g.state,
+        MatchState::Warmup,
+        "still waiting for the one not ready"
+    );
 }
 
 /// Squads of two: squadmates do not hurt each other; a lethal hit knocks you down while a

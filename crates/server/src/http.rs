@@ -78,6 +78,10 @@ fn handle(ctx: &mut Ctx, mut req: Request) {
         (Method::Get, "/admin") | (Method::Get, "/admin/") => {
             respond(req, 200, "text/html; charset=utf-8", ADMIN_HTML.to_string())
         }
+        (Method::Get, "/api/top") => match ask(ctx, AdminMsg::Top) {
+            Some(v) => json_resp(req, 200, v),
+            None => json_resp(req, 503, json!({"error": "server busy"})),
+        },
         (Method::Get, "/api/info") => match ask(ctx, AdminMsg::Info) {
             Some(v) => json_resp(req, 200, v),
             None => json_resp(req, 503, json!({"error": "server busy"})),

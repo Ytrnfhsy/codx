@@ -312,8 +312,8 @@ fn island_upper_floors_are_walkable() {
     );
     // start outside the town, on the road to the west
     let start = nav.snap(glam::vec3(-210.0, 20.0, -70.0)).unwrap();
-    let mut reached = 0;
-    for (k, &goal) in upstairs.iter().enumerate().take(10) {
+    let (mut reached, mut tried) = (0, 0);
+    for (k, &goal) in upstairs.iter().enumerate() {
         let Some(g) = nav.snap(goal) else { continue };
         if (g.y - goal.y).abs() > 0.8 {
             continue;
@@ -323,6 +323,7 @@ fn island_upper_floors_are_walkable() {
             continue;
         };
         let _ = path;
+        tried += 1;
         let end = walk(&m, &w, &nav, start, g);
         let ok =
             glam::vec3(end.x - g.x, 0.0, end.z - g.z).length() < 1.5 && (end.y - g.y).abs() < 0.6;
@@ -332,5 +333,16 @@ fn island_upper_floors_are_walkable() {
         );
         reached += ok as usize;
     }
-    assert!(reached >= 7, "bodies reached only {reached} upper floors");
+    // (every upper floor of the town's houses: some roofs have no way up)
+    assert!(
+        reached >= 12 && reached as f32 >= 0.45 * upstairs.len() as f32,
+        "bodies reached only {reached} of {} upper floors ({tried} with a route)",
+        upstairs.len()
+    );
+    // and a route the bots find leads where it says
+    assert!(
+        tried - reached <= 1,
+        "{} of {tried} routes up did not get there",
+        tried - reached
+    );
 }
