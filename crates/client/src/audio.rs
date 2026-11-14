@@ -68,6 +68,11 @@ pub enum Sfx {
     Drone,
     /// Rain falling all around (looped).
     Rain,
+    /// A footstep on earth, grass or sand (recordings only; `Step` otherwise).
+    StepSoft,
+    /// A door opening / shutting (recordings only; a click otherwise).
+    Door,
+    DoorShut,
     /// A weapon's own reload sounds, where recordings exist (`mag_out_ak47`, …); the
     /// generic `MagOut`/`MagIn`/`Bolt` play for the rest.
     MagOutOf(WeaponId),
@@ -97,6 +102,8 @@ impl Sfx {
             Sfx::MagOutOf(_) => Some(Sfx::MagOut),
             Sfx::MagInOf(_) => Some(Sfx::MagIn),
             Sfx::BoltOf(_) => Some(Sfx::Bolt),
+            Sfx::StepSoft => Some(Sfx::Step),
+            Sfx::Door | Sfx::DoorShut => Some(Sfx::Click),
             _ => None,
         }
     }
@@ -109,6 +116,8 @@ impl Sfx {
             Sfx::MagInOf(w) => format!("mag_in_{}", weapon_stem(w)),
             Sfx::BoltOf(w) => format!("bolt_{}", weapon_stem(w)),
             Sfx::HeliGun => "heli_gun".into(),
+            Sfx::StepSoft => "step_soft".into(),
+            Sfx::DoorShut => "door_shut".into(),
             Sfx::HitHead => "hit_head".into(),
             Sfx::MagOut => "mag_out".into(),
             Sfx::MagIn => "mag_in".into(),
@@ -127,6 +136,9 @@ impl Sfx {
                 | Sfx::Far
                 | Sfx::Explosion
                 | Sfx::Step
+                | Sfx::StepSoft
+                | Sfx::Door
+                | Sfx::DoorShut
                 | Sfx::Flesh
                 | Sfx::Knife
                 | Sfx::Beep
@@ -1062,6 +1074,8 @@ impl Synth {
         match s {
             // recordings only (never asked for: they have no synthesized variants)
             Sfx::MagOutOf(_) => self.make(Sfx::MagOut, variant),
+            Sfx::StepSoft => self.make(Sfx::Step, variant),
+            Sfx::Door | Sfx::DoorShut => self.make(Sfx::Click, variant),
             Sfx::MagInOf(_) => self.make(Sfx::MagIn, variant),
             Sfx::BoltOf(_) => self.make(Sfx::Bolt, variant),
             Sfx::Gun(w) => self.shot(gun_params(w)),
@@ -1294,6 +1308,7 @@ fn variants(s: Sfx) -> usize {
         Sfx::Step | Sfx::Whiz | Sfx::Shell | Sfx::Flesh => 4,
         // recordings only; without one the generic sound plays
         Sfx::MagOutOf(_) | Sfx::MagInOf(_) | Sfx::BoltOf(_) => 0,
+        Sfx::StepSoft | Sfx::Door | Sfx::DoorShut => 0,
         _ => 1,
     }
 }
@@ -1332,6 +1347,9 @@ fn all() -> Vec<Sfx> {
         Sfx::Whistle,
         Sfx::Drone,
         Sfx::Rain,
+        Sfx::StepSoft,
+        Sfx::Door,
+        Sfx::DoorShut,
     ]);
     for w in WeaponId::all() {
         v.extend([Sfx::MagOutOf(w), Sfx::MagInOf(w), Sfx::BoltOf(w)]);
@@ -1423,6 +1441,57 @@ fn recordings(s: Sfx) -> Vec<(String, Vec<u8>)> {
 /// Recordings shipped inside the game (used unless a file in `assets/sounds/` replaces
 /// them): (sound name, file contents), variants of a sound in order.
 const BUNDLED: &[(&str, &[u8])] = &[
+    ("step", include_bytes!("../../../assets/sounds/step.ogg")),
+    ("step", include_bytes!("../../../assets/sounds/step_2.ogg")),
+    ("step", include_bytes!("../../../assets/sounds/step_3.ogg")),
+    ("step", include_bytes!("../../../assets/sounds/step_4.ogg")),
+    ("step", include_bytes!("../../../assets/sounds/step_5.ogg")),
+    ("step", include_bytes!("../../../assets/sounds/step_6.ogg")),
+    (
+        "step_soft",
+        include_bytes!("../../../assets/sounds/step_soft.ogg"),
+    ),
+    (
+        "step_soft",
+        include_bytes!("../../../assets/sounds/step_soft_2.ogg"),
+    ),
+    (
+        "step_soft",
+        include_bytes!("../../../assets/sounds/step_soft_3.ogg"),
+    ),
+    (
+        "step_soft",
+        include_bytes!("../../../assets/sounds/step_soft_4.ogg"),
+    ),
+    (
+        "step_soft",
+        include_bytes!("../../../assets/sounds/step_soft_5.ogg"),
+    ),
+    (
+        "step_soft",
+        include_bytes!("../../../assets/sounds/step_soft_6.ogg"),
+    ),
+    ("door", include_bytes!("../../../assets/sounds/door.ogg")),
+    ("door", include_bytes!("../../../assets/sounds/door_2.ogg")),
+    ("door", include_bytes!("../../../assets/sounds/door_3.ogg")),
+    (
+        "door_shut",
+        include_bytes!("../../../assets/sounds/door_shut.ogg"),
+    ),
+    (
+        "door_shut",
+        include_bytes!("../../../assets/sounds/door_shut_2.ogg"),
+    ),
+    (
+        "door_shut",
+        include_bytes!("../../../assets/sounds/door_shut_3.ogg"),
+    ),
+    (
+        "explosion",
+        include_bytes!("../../../assets/sounds/explosion.ogg"),
+    ),
+    ("rain", include_bytes!("../../../assets/sounds/rain.ogg")),
+    ("heli", include_bytes!("../../../assets/sounds/heli.ogg")),
     (
         "bolt_ak47",
         include_bytes!("../../../assets/sounds/bolt_ak47.ogg"),
@@ -2017,6 +2086,35 @@ mod tests {
         let out = synthesize(&jobs);
         println!("parallel synthesis: {:?}", t0.elapsed());
         assert_eq!(out.len(), jobs.len());
+    }
+
+    /// Every recording shipped in the game decodes, is not silent and does not clip.
+    #[test]
+    fn bundled_recordings_are_sound() {
+        for (name, data) in BUNDLED {
+            let pcm = decode(data).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let peak = pcm
+                .iter()
+                .fold(0.0f32, |m, v| m.max(v[0].abs()).max(v[1].abs()));
+            assert!(pcm.len() > 2000, "{name}: {} samples", pcm.len());
+            assert!(peak > 0.05 && peak < 1.3, "{name}: peak {peak}");
+        }
+        // the new ones are found under their names
+        for s in [
+            Sfx::Step,
+            Sfx::StepSoft,
+            Sfx::Door,
+            Sfx::DoorShut,
+            Sfx::Rain,
+            Sfx::Heli,
+        ] {
+            assert!(
+                BUNDLED.iter().any(|(n, _)| *n == s.file_name()),
+                "{} has no recording",
+                s.file_name()
+            );
+        }
+        assert_eq!(Sfx::StepSoft.fallback(), Some(Sfx::Step));
     }
 
     #[test]

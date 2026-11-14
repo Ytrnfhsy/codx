@@ -93,6 +93,20 @@ impl CarView {
     }
 }
 
+/// The footstep of somebody standing at `pos`: soft on the bare ground of a big map
+/// (earth, grass, sand), hard on floors, roads' kerbs, roofs and small maps.
+fn step_sfx(world: &World, pos: Vec3) -> Sfx {
+    let on_earth = world
+        .terrain
+        .as_ref()
+        .is_some_and(|t| (pos.y - t.height(pos.x, pos.z)).abs() < 0.12);
+    if on_earth {
+        Sfx::StepSoft
+    } else {
+        Sfx::Step
+    }
+}
+
 /// How far (along the ground) guns and supplies can be picked up from.
 pub const PICK_REACH: f32 = 2.3;
 
@@ -1050,7 +1064,8 @@ impl GameClient {
                     let eye = self.eye();
                     let c = self.world.doors[k].centre();
                     if let Some(a) = audio.filter(|_| c.distance(eye) < 30.0) {
-                        a.play_at(Sfx::Click, c, eye, 0.9, 30.0);
+                        let s = if open != 0 { Sfx::Door } else { Sfx::DoorShut };
+                        a.play_at(s, c, eye, 0.8, 30.0);
                     }
                 }
             }
@@ -2414,7 +2429,7 @@ impl GameClient {
                 if self.step_acc > if self.sprinting { 2.6 } else { 2.0 } {
                     self.step_acc = 0.0;
                     if let Some(a) = audio {
-                        a.play(Sfx::Step, 0.25);
+                        a.play(step_sfx(&self.world, self.body.pos), 0.25);
                     }
                 }
             }
@@ -3038,7 +3053,8 @@ impl GameClient {
                     if r.step_acc > 2.2 {
                         r.step_acc = 0.0;
                         if let Some(a) = audio {
-                            a.play_at(Sfx::Step, r.pos, listener, 0.35, 22.0);
+                            let step = step_sfx(&self.world, r.pos);
+                            a.play_at(step, r.pos, listener, 0.35, 22.0);
                         }
                     }
                 }

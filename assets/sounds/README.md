@@ -11,9 +11,12 @@ Only use recordings you are allowed to ship with the game, for example CC0 packs
 Built in (compiled into the game; files with the same names placed next to the game
 replace them): recorded shots for the M4A1 (5 takes), AK-47 (3), MP5 (5), P90 (3), M249 (2),
 RPD (3), R700 (5), M40A3 (3, the R700 takes a touch deeper), M9, USP .45 and Desert Eagle,
-and the weapons' own reload sounds listed below. The G3, AK-74u and both shotguns, and
-every other sound, are still synthesized. `tools/cut_sounds.py` rebuilds the files from the
-original pack (free recordings from Pixabay and QuickSounds.com).
+and the weapons' own reload sounds listed below; footsteps on hard floors and on soft
+ground (6 takes each), the explosion, doors opening and shutting (3 takes each), the rain
+and the helicopter. The G3, AK-74u and both shotguns, and every other sound, are still
+synthesized. `tools/cut_sounds.py` rebuilds the gun files from the original pack (free
+recordings from Pixabay and QuickSounds.com); `tools/cut_cc0_sounds.py` the rest from the
+CC0 recordings credited at the end of this file.
 
 Reload sounds can be given per weapon: `mag_out_<gun>`, `mag_in_<gun>`, `bolt_<gun>` (the
 gun names as in the `gun_*` files). A weapon without its own falls back to `mag_out`,
@@ -45,7 +48,8 @@ two magazine-in takes), P90 (all three), M249 and RPD (all three, two bolt takes
 | `hit` | hitmarker tick |
 | `hit_head` | headshot ding |
 | `kill` | kill confirmation |
-| `step` | footstep |
+| `step` | footstep on a hard floor |
+| `step_soft` | footstep on earth, grass or sand (big maps); `step` without it |
 | `land` | landing after a jump |
 | `mag_out` | magazine out |
 | `mag_in` | magazine in |
@@ -66,6 +70,22 @@ two magazine-in takes), P90 (all three), M249 and RPD (all three, two bolt takes
 | `hurt` | taking damage |
 | `bomb` | bomb planted / defused jingle |
 | `heli` | helicopter rotor (looped: must loop seamlessly) |
+| `drone` | drone rotors (looped) |
+| `rain` | rain all around (looped) |
+| `door`, `door_shut` | a door opening, shutting; a click without them |
 
 `cargo test -p toon_client dump_sounds` with `TW_SOUND_DUMP=<folder>` writes the
 synthesized versions as WAV files, handy for comparing.
+
+## Credits
+
+Recordings from [OpenGameArt](https://opengameart.org), all released as **CC0** (public
+domain) on their pages; cut and levelled by `tools/cut_cc0_sounds.py`:
+
+| Sounds | Source page |
+|---|---|
+| `step*`, `step_soft*` | `/content/fantozzis-footsteps-grasssand-stone` (Fantozzi's Footsteps, by qubodup) |
+| `door*`, `door_shut*` | `/content/door-open-door-close-set` (by qubodup) |
+| `explosion` | `/content/chunky-explosion` |
+| `rain` | `/content/amb-rain-loop-1` |
+| `heli` | `/content/helicopter-sfx` |
