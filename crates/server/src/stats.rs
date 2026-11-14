@@ -53,13 +53,40 @@ pub struct BrStats {
 impl BrStats {
     pub fn load(dir: &str) -> BrStats {
         let path = PathBuf::from(dir).join("br_stats.json");
-        let by_name = std::fs::read_to_string(&path)
+        let mut by_name: HashMap<String, BrRecord> = std::fs::read_to_string(&path)
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
+        // records from before names were kept: one kept under a name has it in its key
+        for (k, r) in by_name.iter_mut() {
+            if r.name.is_empty() && !k.starts_with('#') {
+                r.name = k.clone();
+            }
+        }
         BrStats {
             by_name,
             path: Some(path),
+        }
+    }
+
+    /// A record kept under the name alone (before installations had numbers) goes into the
+    /// record of the installation now playing under that name.
+    fn claim_old(&mut self, key: &str, name: &str) {
+        if !key.starts_with('#') || name.starts_with('#') || key == name {
+            return;
+        }
+        let Some(old) = self.by_name.remove(name) else {
+            return;
+        };
+        let r = self.by_name.entry(key.to_string()).or_default();
+        r.matches += old.matches;
+        r.wins += old.wins;
+        r.kills += old.kills;
+        r.deaths += old.deaths;
+        r.damage += old.damage;
+        r.longest = r.longest.max(old.longest);
+        if old.best != 0 && (r.best == 0 || old.best < r.best) {
+            r.best = old.best;
         }
     }
 
@@ -73,6 +100,7 @@ impl BrStats {
         damage: f32,
         longest: f32,
     ) -> Vec<News> {
+        self.claim_old(key, name);
         let before = self.leaders();
         let r = self.by_name.entry(key.to_string()).or_default();
         r.name = name.to_string();
@@ -102,6 +130,7 @@ impl BrStats {
         deaths: u32,
         longest: f32,
     ) -> Vec<News> {
+        self.claim_old(key, name);
         let before = self.leaders();
         let r = self.by_name.entry(key.to_string()).or_default();
         r.name = name.to_string();
@@ -193,7 +222,7 @@ impl BrStats {
                     rows: all
                         .iter()
                         .take(10)
-                        .map(|e| (e.1.name.clone(), e.2))
+                        .map(|e| (display_name(e.1), e.2))
                         .collect(),
                     mine,
                 }
@@ -211,6 +240,16 @@ impl BrStats {
                 eprintln!("{}: {e}", t_save());
             }
         }
+    }
+}
+
+/// The name a record shows under (one from before names were kept has none yet: it gets
+/// one the next time its player finishes a match).
+fn display_name(r: &BrRecord) -> String {
+    if r.name.is_empty() {
+        t("(без імені)", "(no name)").to_string()
+    } else {
+        r.name.clone()
     }
 }
 
@@ -265,5 +304,43 @@ mod tests {
         s.record_match("#a", "Анна", false, 1, 1, 0.0);
         assert_eq!(s.get("#a").name, "Анна");
         assert_eq!(s.get("#a").matches, 2);
+    }
+
+    #[test]
+    fn old_records_get_names_and_owners() {
+        let mut s = stats();
+        // kept under a name (before installation numbers) and without one (before names)
+        s.by_name.insert(
+            "Віра".into(),
+            BrRecord {
+                matches: 10,
+                kills: 50,
+                best: 2,
+                longest: 300.0,
+                ..Default::default()
+            },
+        );
+        s.by_name.insert(
+            "#old".into(),
+            BrRecord {
+                matches: 3,
+                kills: 9,
+                ..Default::default()
+            },
+        );
+        let kills = |s: &BrStats| {
+            s.boards(None)
+                .into_iter()
+                .find(|b| b.kind == BoardKind::Kills)
+                .unwrap()
+                .rows
+        };
+        assert!(kills(&s).iter().all(|r| !r.0.is_empty()), "{:?}", kills(&s));
+        // playing under that name again takes the old record over
+        s.record_match("#v", "Віра", true, 5, 1, 20.0);
+        let r = s.get("#v");
+        assert_eq!((r.matches, r.kills, r.best), (11, 55, 2));
+        assert_eq!(r.longest, 300.0);
+        assert!(!s.by_name.contains_key("Віра"));
     }
 }
