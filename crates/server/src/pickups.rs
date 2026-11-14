@@ -90,16 +90,18 @@ impl Game {
         {
             return;
         }
-        // an empty slot is filled first (battle royale: you start with a pistol only)
+        // an empty slot is filled first (battle royale: you land empty-handed), the one in
+        // hand before the other
         let empty = if br {
-            p.empty_slot.map(|s| s as usize)
+            let s = p.slot as usize;
+            [s, 1 - s].into_iter().find(|&k| p.is_empty(k))
         } else {
             p.weapons.iter().position(|w| w.mag == 0 && w.reserve == 0)
         };
-        if br {
-            p.empty_slot = None;
-        }
         if let Some(e) = empty {
+            if br {
+                p.empty &= !(1 << e);
+            }
             p.slot = e as u8;
         }
         let old = *p.weapon();

@@ -461,10 +461,12 @@ pub struct BrSnap {
     pub plane: Option<(V3, f32)>,
     /// We are still in the plane (jump to leave it).
     pub in_plane: bool,
+    /// How many are still in the plane (sent while we are in it too).
+    pub aboard: u8,
     /// What we carry.
     pub inv: crate::inventory::Inventory,
-    /// The hand slot without a gun yet (or after throwing one away).
-    pub empty_slot: Option<u8>,
+    /// The hand slots without a gun yet (or after throwing one away), one bit each.
+    pub empty: u8,
     /// The squad (us included), in a fixed order.
     pub squad: Vec<SquadMate>,
     /// Supply crates (for the map, wherever they are).

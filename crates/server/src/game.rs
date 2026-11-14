@@ -137,8 +137,9 @@ pub struct Player {
     /// Battle royale: each slot's reserve as last matched with the inventory (a reload
     /// takes rounds out of the reserve, and so out of the inventory).
     pub ammo_seen: [u16; 2],
-    /// Battle royale: the slot that holds no gun yet (the next one picked up goes there).
-    pub empty_slot: Option<u8>,
+    /// Battle royale: the slots that hold no gun yet, one bit each (the next gun picked up
+    /// goes in one of them).
+    pub empty: u8,
     /// Battle royale character.
     pub skin: u8,
 }
@@ -159,10 +160,16 @@ impl Player {
             .has_mod(self.slot as usize, toon_shared::inventory::MOD_SUPPRESSOR)
     }
 
+    /// Battle royale: slot `k` holds no gun.
+    pub fn is_empty(&self, k: usize) -> bool {
+        self.empty & (1 << k) != 0
+    }
+
     /// Battle royale: every gun's reserve is the inventory's ammo of its calibre.
     pub fn br_refresh_reserve(&mut self) {
+        let empty = self.empty;
         for (k, w) in self.weapons.iter_mut().enumerate() {
-            if self.empty_slot == Some(k as u8) {
+            if empty & (1 << k) != 0 {
                 w.reserve = 0;
             } else {
                 w.reserve = self.inv.ammo(toon_shared::inventory::AmmoType::of(w.id));
@@ -176,7 +183,7 @@ impl Player {
     pub fn br_sync_ammo(&mut self) {
         for k in 0..2 {
             let w = self.weapons[k];
-            if self.empty_slot == Some(k as u8) {
+            if self.is_empty(k) {
                 continue;
             }
             let used = self.ammo_seen[k].saturating_sub(w.reserve);
@@ -279,7 +286,7 @@ impl Player {
             in_plane: false,
             inv: Default::default(),
             ammo_seen: [0; 2],
-            empty_slot: None,
+            empty: 0,
             skin: 0,
         }
     }
@@ -2227,7 +2234,7 @@ impl Game {
         for p in self.players.iter_mut().flatten() {
             // gliding under a parachute is faster than running
             let speed = if p.body.chute != toon_shared::physics::Chute::None {
-                20.0
+                toon_shared::physics::FREEFALL_GLIDE * 1.3
             } else {
                 max_speed
             };
@@ -2421,6 +2428,10 @@ impl Game {
         }
     }
 
+    /// How far a player looking through a magnifying scope sees others (the client's fog
+    /// recedes up to 2.5 times when scoped).
+    const SCOPE_RANGE: f32 = 850.0;
+
     /// Builds the snapshot for one recipient.
     /// Where a player looks from (their body and whatever they steer), on big maps; None
     /// sees everything (small maps, spectators).
@@ -2460,13 +2471,30 @@ impl Game {
                     .any(|f| vec3(q.x - f.x, 0.0, q.z - f.z).length_squared() < r * r)
             })
         };
+        // looking through a magnifying scope: further along the line of sight (the fog
+        // thins out there for them too)
+        let scope = me
+            .filter(|p| {
+                p.alive
+                    && p.flags & flags::ADS != 0
+                    && (p.weapon().id.def().scoped || p.inv.sights[p.slot as usize & 1] >= 2)
+            })
+            .map(|p| (p.eye(), toon_shared::look_dir(p.yaw, p.pitch)));
+        let in_scope = |q: Vec3| {
+            scope.is_some_and(|(eye, dir)| {
+                let to = q - eye;
+                let d = to.length();
+                d < Self::SCOPE_RANGE && to.dot(dir) > d * 0.93
+            })
+        };
         let players = self
             .players
             .iter()
             .flatten()
             .filter(|p| p.team.is_playing())
             .filter(|p| {
-                p.id == id
+                in_scope(p.body.pos)
+                    || p.id == id
                     || p.team == my_team && my_team.is_playing() && !self.mode.solo()
                     || my_squad != 0 && p.squad == my_squad
                     || watched == Some(p.id)

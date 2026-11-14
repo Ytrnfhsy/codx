@@ -144,6 +144,30 @@ impl<'a> Ui<'a> {
         self.bold(s, x + 2.0, y + 2.0, size, SHADOW);
         self.bold(s, x, y, size, color);
     }
+    /// `s` cut short with «…» to fit in `max_w` pixels.
+    pub fn fit(&self, s: &str, size: u16, bold: bool, max_w: f32) -> String {
+        if self.width(s, size, bold) <= max_w {
+            return s.to_string();
+        }
+        let chars: Vec<char> = s.chars().collect();
+        let (mut lo, mut hi) = (0, chars.len());
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+            let t: String = chars[..mid].iter().collect::<String>() + "…";
+            if self.width(&t, size, bold) <= max_w {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        chars[..lo]
+            .iter()
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+            + "…"
+    }
+
     pub fn width(&self, s: &str, size: u16, bold: bool) -> f32 {
         measure_text(
             s,
@@ -220,8 +244,22 @@ impl<'a> Ui<'a> {
             6.0,
             Color::new(1.0, 1.0, 1.0, 0.07),
         );
-        let size = (h * 0.42).clamp(14.0, 26.0) as u16;
-        let tw = self.width(label, size, true);
+        // a label too long for the button: smaller letters, then cut short
+        let room = w - 16.0;
+        let mut size = (h * 0.42).clamp(14.0, 26.0) as u16;
+        let mut tw = self.width(label, size, true);
+        while tw > room && size > 12 {
+            size -= 1;
+            tw = self.width(label, size, true);
+        }
+        let short;
+        let label = if tw > room {
+            short = self.fit(label, size, true, room);
+            tw = self.width(&short, size, true);
+            short.as_str()
+        } else {
+            label
+        };
         let dark = color.r + color.g + color.b > 1.8;
         self.bold(
             label,

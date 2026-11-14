@@ -609,7 +609,7 @@ impl Game {
                     v.weapons
                         .iter()
                         .enumerate()
-                        .filter(|(k, _)| v.empty_slot != Some(*k as u8))
+                        .filter(|(k, _)| !v.is_empty(*k))
                         .map(|(_, w)| WState { reserve: 0, ..*w })
                         .collect()
                 })
@@ -625,13 +625,13 @@ impl Game {
                 let other = self
                     .p(victim)
                     .and_then(|v| v.weapons.iter().find(|w| w.id != dropped.id).copied());
-                let empty = self.p(victim).and_then(|v| v.empty_slot);
-                let other_slot = self
-                    .p(victim)
-                    .and_then(|v| v.weapons.iter().position(|w| w.id != dropped.id));
-                if let Some(w) =
-                    other.filter(|_| empty.is_none() || empty != other_slot.map(|s| s as u8))
-                {
+                let other_empty = self.p(victim).is_some_and(|v| {
+                    v.weapons
+                        .iter()
+                        .position(|w| w.id != dropped.id)
+                        .is_some_and(|k| v.is_empty(k))
+                });
+                if let Some(w) = other.filter(|_| !other_empty) {
                     self.drop_weapon(WState { reserve: 0, ..w }, vpos + vec3(0.6, 0.0, 0.3));
                 }
             }

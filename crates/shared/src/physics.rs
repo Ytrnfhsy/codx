@@ -484,9 +484,9 @@ pub enum Chute {
 /// The parachute opens by itself this high above the ground.
 pub const CHUTE_OPEN_HEIGHT: f32 = 70.0;
 pub const FREEFALL_SPEED: f32 = 48.0;
-pub const FREEFALL_GLIDE: f32 = 16.0;
+pub const FREEFALL_GLIDE: f32 = 20.0;
 pub const CHUTE_SINK: f32 = 5.5;
-pub const CHUTE_GLIDE: f32 = 9.0;
+pub const CHUTE_GLIDE: f32 = 12.0;
 /// Water deeper than this is swum, not waded.
 pub const SWIM_DEPTH: f32 = 1.4;
 /// A swimmer's feet hang this far under the surface (the head is just above it).
@@ -635,7 +635,7 @@ impl Body {
             _ => (CHUTE_GLIDE, CHUTE_SINK),
         };
         let hv = vec3(self.vel.x, 0.0, self.vel.z);
-        let hv = approach(hv, dir * glide, 14.0 * dt);
+        let hv = approach(hv, dir * glide, 22.0 * dt);
         self.vel.x = hv.x;
         self.vel.z = hv.z;
         // the canopy brakes hard; free fall speeds up to its terminal velocity

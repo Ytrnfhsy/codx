@@ -752,9 +752,16 @@ pub fn fog_range(terrain: bool, settings: &Settings, altitude: f32) -> (f32, f32
 }
 
 /// Rain and fog bring the haze closer.
+/// Looking through a magnifying scope pushes the haze back too: the narrow view is for
+/// far-away targets (two and a half times as far, at most).
 fn weather_fog(g: &GameClient, (near, far): (f32, f32)) -> (f32, f32) {
     let v = g.weather.visibility();
-    (near * v, far * v)
+    let scope = if g.killcam.is_none() && g.alive && g.scoped() {
+        (1.0 + (g.ads_zoom() - 1.0) * 0.4).clamp(1.0, 2.5)
+    } else {
+        1.0
+    };
+    (near * v * scope, far * v * scope)
 }
 
 /// How high the camera is above the ground under it.
@@ -795,6 +802,7 @@ pub fn render_viewmodel(
         Some(_) => return,
         None if g.alive
             && !g.scoped()
+            && !g.hand_empty()
             && g.piloting.is_none()
             && g.me.seat.is_none()
             && !g.body.swimming(&g.world) =>

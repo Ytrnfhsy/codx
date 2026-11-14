@@ -240,7 +240,7 @@ impl Game {
                 ..Default::default()
             };
             p.inv = Default::default();
-            p.empty_slot = None;
+            p.empty = 0;
             p.driving = None;
             p.respawn_at = f64::MAX;
             p.downed = false;
@@ -1012,22 +1012,19 @@ impl Game {
             p.z.clamp(self.map.min.y + margin, self.map.max.y - margin),
         );
         let yaw = yaw_of(self.br.plane_dir);
-        let tuning = &self.tuning;
         let Some(p) = self.players[id as usize].as_mut() else {
             return;
         };
         if !p.in_plane {
             return;
         }
-        let mag = tuning.weapon(WeaponId::M9).mag;
         p.in_plane = false;
         p.alive = true;
         p.hp = MAX_HEALTH;
         p.inv = Default::default();
-        p.inv.ammo[AmmoType::Pistol.index()] = 15;
-        // and one medkit to start with
+        // empty hands: whatever you fight with, you find (one medkit to start with)
         p.inv.medkits = 1;
-        p.empty_slot = Some(1);
+        p.empty = 0b11;
         p.body = Body {
             pos,
             vel: p.body.vel,
@@ -1040,12 +1037,11 @@ impl Game {
         p.pitch = 0.0;
         p.flags = 0;
         p.slot = 0;
-        // a pistol to start with; the second slot waits for whatever you find
         p.weapons = [
             WState {
                 id: WeaponId::M9,
-                mag,
-                reserve: mag,
+                mag: 0,
+                reserve: 0,
             },
             WState {
                 id: WeaponId::Usp,
@@ -1322,9 +1318,7 @@ impl Game {
                 let slot = p.slot as usize;
                 let fits = |k: usize| {
                     let w = p.weapons[k];
-                    (w.mag + w.reserve > 0 || Some(k as u8) != p.empty_slot)
-                        && sight_fits(lv, w.id)
-                        && lv > p.inv.sights[k]
+                    !p.is_empty(k) && sight_fits(lv, w.id) && lv > p.inv.sights[k]
                 };
                 if let Some(k) = [slot, 1 - slot].into_iter().find(|k| fits(*k)) {
                     // the old one goes in the backpack, or on the ground if it is full
@@ -1345,9 +1339,7 @@ impl Game {
                 let slot = p.slot as usize;
                 let place = mod_place(kind);
                 let fits = |k: usize| {
-                    Some(k as u8) != p.empty_slot
-                        && mod_fits(kind, p.weapons[k].id)
-                        && p.inv.mods[k][place] == 0
+                    !p.is_empty(k) && mod_fits(kind, p.weapons[k].id) && p.inv.mods[k][place] == 0
                 };
                 if let Some(k) = [slot, 1 - slot].into_iter().find(|k| fits(*k)) {
                     p.inv.mods[k][place] = kind;
@@ -1639,11 +1631,9 @@ impl Game {
                         out.push((LootKind::Mod(m), 1));
                     }
                 }
-                // a gun can go while the other hand still holds one
                 Item::Weapon(k) if k < 2 => {
                     let (k, other) = (k as usize, 1 - k as usize);
-                    let real = |j: usize| p.empty_slot != Some(j as u8);
-                    if real(k) && real(other) {
+                    if !p.is_empty(k) {
                         let w = p.weapons[k];
                         gun = Some(WState { reserve: 0, ..w });
                         p.weapons[k] = WState {
@@ -1651,7 +1641,7 @@ impl Game {
                             mag: 0,
                             reserve: 0,
                         };
-                        p.empty_slot = Some(k as u8);
+                        p.empty |= 1 << k;
                         let l = std::mem::take(&mut p.inv.sights[k]);
                         if l > 0 && !p.inv.stash_sight(l) {
                             out.push((LootKind::Sight(l), 1));
@@ -1675,7 +1665,7 @@ impl Game {
                 if k < 2
                     && (1..=MAX_SIGHT as usize).contains(&l)
                     && p.inv.spare_sights[l - 1] > 0
-                    && p.empty_slot != Some(slot)
+                    && !p.is_empty(k)
                     && sight_fits(level, p.weapons[k].id)
                 {
                     p.inv.spare_sights[l - 1] -= 1;
@@ -1690,7 +1680,7 @@ impl Game {
                 if k < 2
                     && MODS.contains(&kind)
                     && p.inv.spare_mods[kind as usize - 1] > 0
-                    && p.empty_slot != Some(slot)
+                    && !p.is_empty(k)
                     && mod_fits(kind, p.weapons[k].id)
                 {
                     let place = mod_place(kind);
@@ -1858,8 +1848,13 @@ impl Game {
                 )
             }),
             in_plane: me.is_some_and(|p| p.in_plane),
+            aboard: if me.is_some_and(|p| p.in_plane) {
+                self.players.iter().flatten().filter(|p| p.in_plane).count() as u8
+            } else {
+                0
+            },
             inv: me.map(|p| p.inv).unwrap_or_default(),
-            empty_slot: me.and_then(|p| p.empty_slot),
+            empty: me.map_or(0, |p| p.empty),
             squad: me
                 .filter(|m| m.squad != 0)
                 .map(|m| {
@@ -2023,8 +2018,16 @@ impl Game {
         let near = |q: Vec3| vec2(q.x, q.z).distance(flat);
         bot.skip.retain(|s| s.1 > time);
         let skipped: Vec<u16> = bot.skip.iter().map(|s| s.0).collect();
+        // empty-handed (as everybody lands): any gun will do for a start, a pistol too
+        let bare = have.is_empty();
         if !armed {
-            let range = if skydiving { 220.0 } else { 90.0 };
+            let range = if skydiving {
+                220.0
+            } else if bare {
+                160.0
+            } else {
+                90.0
+            };
             let mut cands: Vec<(u16, Vec3)> = self
                 .pickups
                 .iter()
@@ -2032,7 +2035,8 @@ impl Game {
                 .filter(|pk| {
                     near(pk.pos) < range
                         && zone.contains(time, pk.pos)
-                        && pk.w.id.def().class != toon_shared::weapons::WeaponClass::Pistol
+                        && (bare
+                            || pk.w.id.def().class != toon_shared::weapons::WeaponClass::Pistol)
                         && !have.contains(&pk.w.id)
                         && !skipped.contains(&pk.id)
                 })
@@ -2238,7 +2242,7 @@ impl Game {
             ..Default::default()
         };
         p.inv = Default::default();
-        p.empty_slot = None;
+        p.empty = 0;
         p.respawn_at = f64::MAX;
         p.downed = false;
         p.squad = 0;

@@ -163,6 +163,7 @@ impl GameClient {
             && !self.sprinting
             && self.overlay == Overlay::None
             && self.piloting.is_none()
+            && !self.hand_empty()
         {
             let gap = self.spread_px(view.fovy) + 4.0;
             let len = 10.0;
@@ -329,8 +330,8 @@ impl GameClient {
                     let (text, c) = if me {
                         (
                             tr!(
-                                "Ти готовий ({n}/{of}) · {} — ще ні",
-                                "You are ready ({n}/{of}) · {} — not yet",
+                                "Ти готовий ({n}/{of}) · {} — не готовий (перерва)",
+                                "You are ready ({n}/{of}) · {} — not ready (a break)",
                                 key(Action::Ready)
                             ),
                             GOOD,
@@ -562,11 +563,20 @@ impl GameClient {
                 Some(_) if self.team.is_playing() => t("ПОРАЗКА", "DEFEAT"),
                 _ => t("МАТЧ ЗАВЕРШЕНО", "MATCH OVER"),
             };
-            ui.centered(title, cx, 80.0, 48, c);
-            ui.centered(&text, cx, 118.0, 22, TEXT);
-            // the table comes after the final killcam
-            if !self.final_killcam_waiting() {
-                self.draw_scoreboard(ui, 150.0);
+            // the battle royale's round summary takes the title's place: the winner goes
+            // under it, then the table
+            if let Some(bottom) = self.br_summary_bottom() {
+                ui.centered(&text, cx, bottom + 26.0, 20, c);
+                if !self.final_killcam_waiting() {
+                    self.draw_scoreboard(ui, bottom + 42.0);
+                }
+            } else {
+                ui.centered(title, cx, 80.0, 48, c);
+                ui.centered(&text, cx, 118.0, 22, TEXT);
+                // the table comes after the final killcam
+                if !self.final_killcam_waiting() {
+                    self.draw_scoreboard(ui, 150.0);
+                }
             }
         } else if tab {
             self.draw_scoreboard(ui, 90.0);
@@ -688,6 +698,16 @@ impl GameClient {
             let a = (0.18 + 0.2 * (k * 0.913).fract()) * fade;
             draw_line(x, y, x - 4.0, y + len, 1.2, Color::new(0.8, 0.85, 0.95, a));
         }
+    }
+
+    /// Where the battle royale's round summary ends on the screen (None: not shown).
+    fn br_summary_bottom(&self) -> Option<f32> {
+        let s = self.br.as_ref()?.summary.as_ref()?;
+        if !(self.br_out() || self.match_end.is_some()) || self.killcam.is_some() {
+            return None;
+        }
+        let killer = self.death_info.is_some() && s.place != 1;
+        Some(screen_height() * 0.12 + 100.0 + if killer { 28.0 } else { 0.0 })
     }
 
     /// Out of the battle royale: whom we watch, and how the round went.
@@ -1457,9 +1477,7 @@ impl GameClient {
     /// Battle royale: what we carry, bottom left — medkits, vest, helmet, backpack,
     /// grenades and the rounds of every calibre we have.
     fn draw_br_inventory(&self, ui: &Ui) {
-        use toon_shared::inventory::{
-            armor_durability, helmet_durability, level_name, AmmoType, MEDKIT_TIME,
-        };
+        use toon_shared::inventory::{armor_durability, helmet_durability, AmmoType, MEDKIT_TIME};
         let Some(br) = &self.br else { return };
         if !self.alive || br.in_plane {
             return;
@@ -1468,8 +1486,10 @@ impl GameClient {
         let h = screen_height();
         let (x0, y0) = (16.0, h - 118.0);
         let s = 60.0;
-        let tile = |k: usize, label: &str, value: &str, fill: f32, c: Color, on: bool| {
+        // a picture and the level as pips (or a count) instead of words and numerals
+        let tile = |k: usize, icon: Icon, level: u8, value: &str, fill: f32, c: Color| {
             let x = x0 + k as f32 * (s + 6.0);
+            let on = level > 0 || !value.is_empty();
             crate::ui::soft_rect(
                 x,
                 y0,
@@ -1480,85 +1500,63 @@ impl GameClient {
             if fill > 0.0 {
                 draw_rectangle(x, y0 + s - 5.0, s * fill.clamp(0.0, 1.0), 5.0, c);
             }
-            let col = if on { TEXT } else { MUTED };
-            let lw = ui.width(label, 12, false);
-            ui.text(label, x + (s - lw) / 2.0, y0 + 15.0, 12, col);
-            let vw = ui.width(value, 20, true);
-            ui.shadowed(
-                value,
-                x + (s - vw) / 2.0,
-                y0 + 40.0,
-                20,
-                if on { c } else { MUTED },
-            );
+            let ic = if on { c } else { with_alpha(MUTED, 0.6) };
+            draw_icon(icon, x + s / 2.0, y0 + 21.0, 24.0, ic);
+            if !value.is_empty() {
+                let vw = ui.width(value, 15, true);
+                ui.shadowed(value, x + (s - vw) / 2.0, y0 + 46.0, 15, TEXT);
+            } else if k != 4 {
+                level_pips(x + s / 2.0, y0 + 44.0, level);
+            }
         };
         tile(
             0,
-            t("Аптечки", "Medkits"),
+            Icon::Medkit,
+            0,
             &format!("{}/{}", inv.medkits, inv.medkit_cap()),
             0.0,
             Color::new(1.0, 0.4, 0.4, 1.0),
-            inv.medkits > 0,
         );
         // the key that uses one
         let hint = format!("[{}]", key(Action::Heal));
-        let hw = ui.width(&hint, 12, false);
-        ui.text(&hint, x0 + (s - hw) / 2.0, y0 + s - 3.0, 12, MUTED);
+        let hw = ui.width(&hint, 11, false);
+        ui.text(&hint, x0 + (s - hw) / 2.0, y0 + s - 3.0, 11, MUTED);
         let blue = Color::new(0.45, 0.65, 1.0, 1.0);
         tile(
             1,
-            t("Броня", "Vest"),
-            if inv.armor > 0 {
-                level_name(inv.armor)
-            } else {
-                "—"
-            },
+            Icon::Vest,
+            inv.armor,
+            "",
             if inv.armor > 0 {
                 inv.armor_hp / armor_durability(inv.armor)
             } else {
                 0.0
             },
             blue,
-            inv.armor > 0,
         );
         tile(
             2,
-            t("Шолом", "Helmet"),
-            if inv.helmet > 0 {
-                level_name(inv.helmet)
-            } else {
-                "—"
-            },
+            Icon::Helmet,
+            inv.helmet,
+            "",
             if inv.helmet > 0 {
                 inv.helmet_hp / helmet_durability(inv.helmet)
             } else {
                 0.0
             },
             blue,
-            inv.helmet > 0,
         );
-        tile(
-            3,
-            t("Рюкзак", "Pack"),
-            if inv.backpack > 0 {
-                level_name(inv.backpack)
-            } else {
-                "—"
-            },
-            0.0,
-            ACCENT,
-            inv.backpack > 0,
-        );
+        tile(3, Icon::Backpack, inv.backpack, "", 0.0, ACCENT);
         {
             use toon_shared::inventory::sight_short;
             let l = self.sight();
             tile(
                 4,
-                t("Приціл", "Sight"),
-                sight_short(l),
+                if l == 1 { Icon::RedDot } else { Icon::Scope },
+                0,
+                if l > 0 { sight_short(l) } else { "" },
                 0.0,
                 Color::new(1.0, 0.45, 0.35, 1.0),
-                l > 0,
             );
         }
         // rounds of every calibre carried
@@ -1702,7 +1700,7 @@ impl GameClient {
         ly += 12.0;
         for k in 0..2usize {
             let (wid, mag, res) = self.weapons[k];
-            let empty = br.empty_slot == Some(k as u8);
+            let empty = br.empty & (1 << k) != 0;
             crate::ui::soft_rect(lx, ly, cw, 84.0, Color::new(0.0, 0.0, 0.0, 0.3));
             if empty {
                 ui.text(
@@ -1777,8 +1775,7 @@ impl GameClient {
                 {
                     act = Some(ItemAction::DetachSight(k as u8));
                 }
-                let other_real = br.empty_slot != Some(1 - k as u8);
-                if other_real && small(ui, drop_txt, lx + cw - bw - 8.0, ly + 8.0, bw) {
+                if small(ui, drop_txt, lx + cw - bw - 8.0, ly + 8.0, bw) {
                     act = Some(ItemAction::Drop(Item::Weapon(k as u8), 1));
                 }
             }
@@ -1821,7 +1818,7 @@ impl GameClient {
                 act = Some(ItemAction::Drop(Item::Sight(level), 1));
             }
             for k in (0..2usize).rev() {
-                let ok = br.empty_slot != Some(k as u8) && sight_fits(level, self.weapons[k].0);
+                let ok = br.empty & (1 << k) == 0 && sight_fits(level, self.weapons[k].0);
                 if ok {
                     bx -= 58.0;
                     if small(ui, &tr!("На {}", "On {}", k + 1), bx, ly + 4.0, 54.0) {
@@ -1853,7 +1850,7 @@ impl GameClient {
                 act = Some(ItemAction::Drop(Item::Mod(kind), 1));
             }
             for k in (0..2usize).rev() {
-                let ok = br.empty_slot != Some(k as u8)
+                let ok = br.empty & (1 << k) == 0
                     && toon_shared::inventory::mod_fits(kind, self.weapons[k].0);
                 if ok {
                     bx -= 58.0;
@@ -2021,8 +2018,20 @@ impl GameClient {
         let (w, h) = (screen_width(), screen_height());
         crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
         let rows = v.items.len() + v.guns.len();
+        // with guns in the box: which hand a gun taken replaces (the one in hand, unless
+        // the other is empty), switched here or with the usual keys
+        let hands = !v.guns.is_empty();
+        if hands {
+            if crate::binds::pressed(Action::Primary) {
+                self.switch_to(0);
+            }
+            if crate::binds::pressed(Action::Secondary) {
+                self.switch_to(1);
+            }
+        }
+        let hands_h = if hands { 52.0 } else { 0.0 };
         let pw = 460.0f32.min(w - 20.0);
-        let ph = (130.0 + rows as f32 * 38.0).min(h - 20.0);
+        let ph = (130.0 + hands_h + rows as f32 * 38.0).min(h - 20.0);
         let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
         ui.panel(x, y, pw, ph);
         ui.bold(
@@ -2041,6 +2050,41 @@ impl GameClient {
         );
         let mut act = None;
         let mut ry = y + 76.0;
+        if hands {
+            let empty = self.br.as_ref().map_or(0, |b| b.empty);
+            let half = (pw - 48.0 - 10.0) / 2.0;
+            for k in 0..2u8 {
+                let name = if empty & (1 << k) != 0 {
+                    t("порожньо", "empty").to_string()
+                } else {
+                    self.weapons[k as usize].0.def().name.to_string()
+                };
+                let label = format!("{}. {name}", k + 1);
+                let bx = x + 24.0 + k as f32 * (half + 10.0);
+                let hit = if k == self.slot {
+                    ui.button(&label, bx, ry, half, 34.0)
+                } else {
+                    ui.button2(&label, bx, ry, half, 34.0)
+                };
+                if hit {
+                    self.switch_to(k);
+                }
+            }
+            ry += 40.0;
+            ui.text(
+                &tr!(
+                    "Зброя піде в порожній слот або замінить ту, що в руках ({} / {})",
+                    "A gun goes in an empty slot or replaces the one in hand ({} / {})",
+                    key(Action::Primary),
+                    key(Action::Secondary)
+                ),
+                x + 24.0,
+                ry,
+                13,
+                MUTED,
+            );
+            ry += 12.0;
+        }
         for (k, (kind, n)) in v.items.iter().enumerate() {
             let label = match kind {
                 LootKind::Ammo(_) | LootKind::Medkit => format!("{} ×{n}", kind.name()),
@@ -2128,6 +2172,14 @@ impl GameClient {
                 h * 0.8 + 30.0,
                 18,
                 MUTED,
+            );
+            let n = br.aboard.max(1);
+            ui.centered(
+                &tr!("У літаку: {n}", "In the plane: {n}"),
+                w / 2.0,
+                h * 0.8 - 36.0,
+                20,
+                TEXT,
             );
             return;
         }
@@ -2618,18 +2670,29 @@ impl GameClient {
             110.0,
             Color::new(0.0, 0.0, 0.0, 0.35),
         );
-        let mag_max = self.mag_cap();
-        let mag_c = if mag == 0 {
-            BAD
-        } else if (mag as f32) < mag_max as f32 * 0.3 {
-            ACCENT
+        if self.hand_empty() {
+            ui.shadowed(t("Без зброї", "Unarmed"), x, y + 36.0, 30, MUTED);
+            ui.shadowed(
+                t("знайдіть зброю в будинках", "find a gun in the houses"),
+                x,
+                y + 66.0,
+                16,
+                MUTED,
+            );
         } else {
-            TEXT
-        };
-        ui.shadowed(&format!("{mag}"), x, y + 42.0, 46, mag_c);
-        let mw = ui.width(&format!("{mag}"), 46, true);
-        ui.shadowed(&format!("/ {res}"), x + mw + 8.0, y + 42.0, 24, MUTED);
-        ui.shadowed(def.name, x, y + 70.0, 18, TEXT);
+            let mag_max = self.mag_cap();
+            let mag_c = if mag == 0 {
+                BAD
+            } else if (mag as f32) < mag_max as f32 * 0.3 {
+                ACCENT
+            } else {
+                TEXT
+            };
+            ui.shadowed(&format!("{mag}"), x, y + 42.0, 46, mag_c);
+            let mw = ui.width(&format!("{mag}"), 46, true);
+            ui.shadowed(&format!("/ {res}"), x + mw + 8.0, y + 42.0, 24, MUTED);
+            ui.shadowed(def.name, x, y + 70.0, 18, TEXT);
+        }
         // grenades
         for i in 0..self.grenades {
             draw_circle(
@@ -2710,7 +2773,7 @@ impl GameClient {
         ui.shadowed(stance, x - 40.0, y + 60.0, 30, TEXT);
         if self.reload_until.is_some() {
             ui.centered(t("Перезарядка…", "Reloading…"), w / 2.0, h * 0.58, 18, TEXT);
-        } else if mag == 0 && res == 0 {
+        } else if mag == 0 && res == 0 && !self.hand_empty() {
             ui.centered(
                 &tr!(
                     "Немає набоїв — {}/{} змінити зброю",
@@ -3325,7 +3388,7 @@ impl GameClient {
                 crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 420.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.22);
-                ui.panel(x, y, pw, 460.0);
+                ui.panel(x, y, pw, 384.0);
                 ui.bold(t("Пауза", "Pause"), x + 24.0, y + 44.0, 28, ACCENT);
                 ui.text(
                     t(
@@ -3338,8 +3401,27 @@ impl GameClient {
                     MUTED,
                 );
                 let bw = pw - 48.0;
-                if ui.button(t("Продовжити", "Resume"), x + 24.0, y + 90.0, bw, 46.0) {
+                let half = (bw - 12.0) / 2.0;
+                // before the match: ready or taking a break, right next to «Resume»
+                let resume_w = if self.ready.is_some() { half } else { bw };
+                if ui.button(
+                    t("Продовжити", "Resume"),
+                    x + 24.0,
+                    y + 90.0,
+                    resume_w,
+                    46.0,
+                ) {
                     self.overlay = self.after_pause();
+                }
+                if let Some((_, _, me, _)) = self.ready {
+                    let (label, c) = if me {
+                        (t("Не готовий (перерва)", "Not ready (a break)"), MUTED)
+                    } else {
+                        (t("Готовий!", "Ready!"), GOOD)
+                    };
+                    if ui.button_colored(label, x + 36.0 + half, y + 90.0, half, 46.0, c) {
+                        self.net.send(toon_shared::protocol::C2S::Ready(!me));
+                    }
                 }
                 // (no classes or sides in the battle royale: characters instead)
                 if self.mode == Mode::Br {
@@ -3366,7 +3448,6 @@ impl GameClient {
                 if ui.button2(team_label, x + 24.0, y + 202.0, bw, 46.0) {
                     self.overlay = Overlay::Team;
                 }
-                let half = (bw - 12.0) / 2.0;
                 if ui.button2(
                     t("Налаштування", "Settings"),
                     x + 24.0,
@@ -3387,26 +3468,10 @@ impl GameClient {
                     self.net.send(toon_shared::protocol::C2S::Leaderboards);
                     self.overlay = Overlay::Leaders;
                 }
-                // before the match: ready or taking a break
-                if let Some((_, _, me, _)) = self.ready {
-                    let label = if me {
-                        t("Не готовий (перерва)", "Not ready (a break)")
-                    } else {
-                        t("Готовий!", "Ready!")
-                    };
-                    let hit = if me {
-                        ui.button2(label, x + 24.0, y + 314.0, bw, 46.0)
-                    } else {
-                        ui.button(label, x + 24.0, y + 314.0, bw, 46.0)
-                    };
-                    if hit {
-                        self.net.send(toon_shared::protocol::C2S::Ready(!me));
-                    }
-                }
                 if ui.button_colored(
                     t("Відключитися", "Disconnect"),
                     x + 24.0,
-                    y + 392.0,
+                    y + 314.0,
                     bw,
                     46.0,
                     BAD,
@@ -4084,4 +4149,109 @@ fn draw_crate_icon(p: Vec2, k: f32) {
         3.0 * k,
         Color::new(0.94, 0.59, 0.16, 1.0),
     );
+}
+
+/// Pictures for the battle royale's equipment.
+#[derive(Clone, Copy)]
+enum Icon {
+    Medkit,
+    Vest,
+    Helmet,
+    Backpack,
+    Scope,
+    RedDot,
+}
+
+/// One of the equipment pictures, `sz` pixels across, centred on (cx, cy).
+fn draw_icon(icon: Icon, cx: f32, cy: f32, sz: f32, c: Color) {
+    let u = sz / 24.0;
+    let dark = Color::new(0.05, 0.05, 0.08, 0.9);
+    match icon {
+        Icon::Medkit => {
+            crate::ui::round_rect(cx - 11.0 * u, cy - 8.0 * u, 22.0 * u, 17.0 * u, 3.0 * u, c);
+            draw_rectangle_lines(cx - 4.0 * u, cy - 11.0 * u, 8.0 * u, 4.0 * u, 2.0 * u, c);
+            draw_rectangle(cx - 1.8 * u, cy - 5.5 * u, 3.6 * u, 12.0 * u, WHITE);
+            draw_rectangle(cx - 6.0 * u, cy - 1.3 * u, 12.0 * u, 3.6 * u, WHITE);
+        }
+        Icon::Vest => {
+            // the body, the arm holes cut out and the neck between the shoulder straps
+            draw_rectangle(cx - 9.0 * u, cy - 6.0 * u, 18.0 * u, 17.0 * u, c);
+            draw_rectangle(cx - 9.0 * u, cy - 11.0 * u, 5.0 * u, 6.0 * u, c);
+            draw_rectangle(cx + 4.0 * u, cy - 11.0 * u, 5.0 * u, 6.0 * u, c);
+            draw_triangle(
+                vec2(cx - 4.0 * u, cy - 6.0 * u),
+                vec2(cx + 4.0 * u, cy - 6.0 * u),
+                vec2(cx, cy - 1.0 * u),
+                dark,
+            );
+            draw_line(cx, cy - 1.0 * u, cx, cy + 11.0 * u, 1.5 * u, dark);
+            draw_line(
+                cx - 9.0 * u,
+                cy + 4.0 * u,
+                cx + 9.0 * u,
+                cy + 4.0 * u,
+                1.5 * u,
+                dark,
+            );
+        }
+        Icon::Helmet => {
+            // a dome over a brim
+            let n = 12;
+            for i in 0..n {
+                let a0 = std::f32::consts::PI * i as f32 / n as f32;
+                let a1 = std::f32::consts::PI * (i + 1) as f32 / n as f32;
+                draw_triangle(
+                    vec2(cx, cy + 3.0 * u),
+                    vec2(cx + a0.cos() * 10.0 * u, cy + 3.0 * u - a0.sin() * 11.0 * u),
+                    vec2(cx + a1.cos() * 10.0 * u, cy + 3.0 * u - a1.sin() * 11.0 * u),
+                    c,
+                );
+            }
+            draw_rectangle(cx - 12.0 * u, cy + 3.0 * u, 24.0 * u, 3.5 * u, c);
+            draw_line(
+                cx - 7.0 * u,
+                cy - 2.0 * u,
+                cx + 7.0 * u,
+                cy - 2.0 * u,
+                1.5 * u,
+                dark,
+            );
+        }
+        Icon::Backpack => {
+            draw_circle_lines(cx, cy - 9.0 * u, 3.5 * u, 2.0 * u, c);
+            crate::ui::round_rect(cx - 8.0 * u, cy - 7.0 * u, 16.0 * u, 18.0 * u, 4.0 * u, c);
+            draw_rectangle(cx - 8.0 * u, cy - 1.5 * u, 16.0 * u, 1.5 * u, dark);
+            crate::ui::round_rect(cx - 5.0 * u, cy + 2.0 * u, 10.0 * u, 6.0 * u, 1.5 * u, dark);
+        }
+        Icon::Scope => {
+            // a tube with its two bells, on a mount
+            draw_rectangle(cx - 9.0 * u, cy - 2.5 * u, 18.0 * u, 5.0 * u, c);
+            draw_rectangle(cx - 12.0 * u, cy - 4.5 * u, 5.0 * u, 9.0 * u, c);
+            draw_rectangle(cx + 6.0 * u, cy - 4.0 * u, 6.0 * u, 8.0 * u, c);
+            draw_rectangle(cx - 1.5 * u, cy - 6.5 * u, 3.0 * u, 4.0 * u, c);
+            draw_rectangle(cx - 6.0 * u, cy + 2.5 * u, 3.0 * u, 4.0 * u, c);
+            draw_rectangle(cx + 3.0 * u, cy + 2.5 * u, 3.0 * u, 4.0 * u, c);
+        }
+        Icon::RedDot => {
+            draw_circle_lines(cx, cy, 9.0 * u, 2.5 * u, c);
+            draw_circle(cx, cy, 2.5 * u, Color::new(1.0, 0.2, 0.15, 1.0));
+        }
+    }
+}
+
+/// A level as three pips, as many lit as the level, coloured by it.
+fn level_pips(cx: f32, cy: f32, level: u8) {
+    let lit = match level {
+        1 => Color::new(0.85, 0.85, 0.85, 1.0),
+        2 => Color::new(0.4, 0.65, 1.0, 1.0),
+        _ => Color::new(0.8, 0.45, 1.0, 1.0),
+    };
+    for i in 0..3u8 {
+        let x = cx + (i as f32 - 1.0) * 11.0;
+        if i < level {
+            draw_circle(x, cy, 4.0, lit);
+        } else {
+            draw_circle_lines(x, cy, 3.5, 1.5, Color::new(1.0, 1.0, 1.0, 0.25));
+        }
+    }
 }

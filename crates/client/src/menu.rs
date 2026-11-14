@@ -828,7 +828,9 @@ pub fn draw_menu(
                         } else {
                             ""
                         };
-                        let (name, map, mode) = (&r.name, r.map_name(), r.mode_name());
+                        // (a long name is cut short: the rest of the row matters too)
+                        let name = ui.fit(&r.name, 16, true, (pw - 102.0) * 0.36);
+                        let (map, mode) = (r.map_name(), r.mode_name());
                         let (players, max, bots, ping) = (r.players, r.max, r.bots, r.ping_ms);
                         tr!(
                             "{lock}{name}  ·  {map}  ·  {mode}  ·  {players}/{max} (+{bots} ботів)  ·  {ping} мс",

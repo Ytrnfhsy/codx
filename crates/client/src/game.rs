@@ -1567,8 +1567,8 @@ impl GameClient {
             let cone = if flat < 0.9 { 1.4 } else { 0.55 };
             (angle < cone).then_some(angle * 4.0 + flat * 0.25)
         };
-        // (the battle royale's empty second slot holds a placeholder pistol)
-        let empty_slot = self.br.as_ref().and_then(|b| b.empty_slot);
+        // (the battle royale's empty slots hold a placeholder pistol)
+        let empty = self.br.as_ref().map_or(0, |b| b.empty);
         self.ents
             .iter()
             .filter_map(|e| match e {
@@ -1579,7 +1579,7 @@ impl GameClient {
                         .weapons
                         .iter()
                         .enumerate()
-                        .any(|(k, w)| w.0 == *weapon && empty_slot != Some(k as u8));
+                        .any(|(k, w)| w.0 == *weapon && empty & (1 << k) == 0);
                     score(pos, PICK_REACH, 0.1)
                         .filter(|_| !have)
                         .map(|d| (d, *id, Pick::Weapon(*weapon)))
@@ -1823,6 +1823,13 @@ impl GameClient {
         s.tan() / (fovy * 0.5).tan() * screen_height() * 0.5
     }
 
+    /// Battle royale: no gun in hand (everybody lands empty-handed).
+    pub fn hand_empty(&self) -> bool {
+        self.br
+            .as_ref()
+            .is_some_and(|b| b.empty & (1 << (self.slot & 1)) != 0)
+    }
+
     pub fn scoped(&self) -> bool {
         (self.weapon().def().scoped || self.sight() >= 2) && self.ads_t > 0.85
     }
@@ -2049,7 +2056,7 @@ impl GameClient {
         self.net.send(C2S::Reload);
     }
 
-    fn switch_to(&mut self, slot: u8) {
+    pub(crate) fn switch_to(&mut self, slot: u8) {
         if slot == self.slot || slot > 1 {
             return;
         }
@@ -2334,6 +2341,7 @@ impl GameClient {
             // after sprinting the weapon has to come back up first (longer for heavy guns)
             let raising = now - self.sprint_end < def.sprint_out_time as f64;
             let ads_ok = ads_held
+                && !self.hand_empty()
                 && !self.sprinting
                 && !raising
                 && !reloading
@@ -2522,7 +2530,8 @@ impl GameClient {
                 || now < self.throw_until
                 || self.sprinting
                 || raising
-                || self.cooking.is_some();
+                || self.cooking.is_some()
+                || self.hand_empty();
             if trigger && !busy && now >= self.next_fire {
                 let (_, mag, res) = self.weapons[self.slot as usize];
                 if mag > 0 {

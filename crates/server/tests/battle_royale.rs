@@ -260,9 +260,29 @@ fn inventory_pick_up_heal_and_drop() {
     }
     let p = g.p(me).unwrap();
     assert!(p.alive);
-    assert_eq!(p.inv.ammo(AmmoType::Pistol), 15);
+    assert_eq!(p.empty, 0b11, "no guns at all after the jump");
+    assert_eq!(p.inv.ammo(AmmoType::Pistol), 0);
     assert_eq!(p.inv.medkits, 1, "one medkit to start with");
     let at = p.body.pos;
+    // a pistol found on the ground goes in the slot in hand
+    {
+        let id = g.new_ent_id();
+        g.pickups.push(toon_server::pickups::Pickup {
+            id,
+            w: toon_server::game::WState {
+                id: toon_shared::weapons::WeaponId::M9,
+                mag: 15,
+                reserve: 0,
+            },
+            pos: at,
+            yaw: 0.0,
+            expire: f64::INFINITY,
+        });
+        g.handle(me, C2S::PickUp(id));
+        let p = g.p(me).unwrap();
+        assert_eq!(p.empty, 0b10, "the pistol is in the first slot");
+        assert_eq!(p.weapons[0].id, toon_shared::weapons::WeaponId::M9);
+    }
 
     // put supplies at our feet: walking over them takes nothing, the use key does
     let put = |g: &mut Game, kind: LootKind, amount: u16| {
@@ -312,7 +332,7 @@ fn inventory_pick_up_heal_and_drop() {
             mag: 30,
             reserve: 0,
         };
-        p.empty_slot = None;
+        p.empty = 0;
         p.slot = 0;
     }
     g.handle(me, C2S::Item(ItemAction::AttachSight { level: 3, slot: 0 }));
@@ -388,16 +408,28 @@ fn inventory_pick_up_heal_and_drop() {
     // throwing the rifle away: its sight goes in the backpack, the slot is empty again
     g.handle(me, C2S::Item(ItemAction::Drop(Item::Weapon(1), 1)));
     let p = g.p(me).unwrap();
-    assert_eq!(p.empty_slot, Some(1));
+    assert_eq!(p.empty, 0b10);
     assert_eq!(p.inv.sights, [1, 0]);
     assert_eq!(p.inv.spare_sights, [0, 0, 1, 0]);
     assert!(g
         .pickups
         .iter()
         .any(|pk| pk.w.id == toon_shared::weapons::WeaponId::M4));
-    // the pistol cannot go too: one gun stays in the hands
+    // the pistol can go too (back to bare hands), and be picked up again
     g.handle(me, C2S::Item(ItemAction::Drop(Item::Weapon(0), 1)));
-    assert_eq!(g.p(me).unwrap().empty_slot, Some(1));
+    assert_eq!(g.p(me).unwrap().empty, 0b11);
+    let pistol = g
+        .pickups
+        .iter()
+        .find(|pk| pk.w.id == toon_shared::weapons::WeaponId::M9 && pk.pos.distance(at) < 2.0)
+        .map(|pk| pk.id)
+        .expect("the pistol on the ground");
+    g.handle(me, C2S::PickUp(pistol));
+    assert_eq!(
+        g.p(me).unwrap().empty,
+        0b01,
+        "into the (empty) slot in hand"
+    );
 
     // knocked out: everything ends up in one box where they fell, guns too
     let loot_before = g.br.loot.len();
@@ -888,6 +920,13 @@ fn jeeps_drive_carry_and_blow_up() {
         p.body.chute = Chute::None;
         p.body.pos = at + glam::vec3(dx, 0.0, 0.0);
         p.protected_until = 0.0;
+        // (everybody lands empty-handed: a pistol each)
+        p.weapons[0] = toon_server::game::WState {
+            id: WeaponId::M9,
+            mag: 15,
+            reserve: 0,
+        };
+        p.empty = 0b10;
     }
     g.handle(me, C2S::Car(CarCmd::Enter(car_id)));
     g.handle(friend, C2S::Car(CarCmd::Enter(car_id)));
@@ -1138,6 +1177,7 @@ fn attachments_change_the_gun() {
             reserve: 0,
         };
         p.slot = 0;
+        p.empty = 0b10;
         p.inv.add_ammo(AmmoType::Rifle, 90);
         p.br_refresh_reserve();
     }
