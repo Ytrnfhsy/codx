@@ -33,7 +33,7 @@ fn random_msg(rng: &mut Rng, life: u16, seq: &mut u32) -> C2S {
     let weapons: Vec<WeaponId> = WeaponId::all().collect();
     let w = weapons[rng.below(weapons.len())];
     let long = "Ж".repeat(rng.below(5000));
-    match rng.below(19) {
+    match rng.below(22) {
         0 => C2S::JoinTeam(match rng.below(4) {
             0 => None,
             1 => Some(Team::Allies),
@@ -166,6 +166,10 @@ fn random_br_msg(rng: &mut Rng, g: &Game) -> C2S {
             rng.below(65536) as u16
         }),
         15 => C2S::SetSkin(rng.below(256) as u8),
+        20 => C2S::ScopeZoom {
+            slot: small(rng),
+            zoom: rng.below(256) as u8,
+        },
         16 => C2S::PickUp(any(rng, loot)),
         17 => C2S::Item(ItemAction::AttachSight {
             level: small(rng),

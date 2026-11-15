@@ -923,6 +923,7 @@ impl GameClient {
                 killer_team,
                 victim_team,
                 dist,
+                gear,
             } => {
                 let st = self.server_now();
                 self.recorder.event(
@@ -932,6 +933,7 @@ impl GameClient {
                         victim,
                         cause,
                         headshot,
+                        gear,
                     },
                 );
                 let blow = DeathBlow {
@@ -973,6 +975,7 @@ impl GameClient {
                                 killer_team,
                                 cause,
                                 headshot,
+                                gear,
                             },
                             false,
                         ));
@@ -1507,7 +1510,8 @@ impl GameClient {
     /// After a match or round ends, everybody watches the last kill again in slow motion.
     fn queue_final_killcam(&mut self, now: f64) {
         let since = self.server_now() - 6.0;
-        let Some((_, killer, victim, cause, headshot)) = self.recorder.last_kill(since) else {
+        let Some((_, killer, victim, cause, headshot, gear)) = self.recorder.last_kill(since)
+        else {
             return;
         };
         let name = |id: u8| -> String {
@@ -1535,6 +1539,7 @@ impl GameClient {
                 killer_team,
                 cause,
                 headshot,
+                gear,
             },
             true,
         ));
@@ -2477,6 +2482,12 @@ impl GameClient {
                 // (five steps from the weakest to the strongest)
                 let k = &mut self.scope_turn[self.slot as usize & 1];
                 *k = (*k + wheel.signum() * 0.25).clamp(0.0, 1.0);
+                // (the server keeps it for the killcam of whoever we shoot)
+                let zoom = (self.sight_zoom_now() * 10.0).round() as u8;
+                self.net.send(C2S::ScopeZoom {
+                    slot: self.slot & 1,
+                    zoom,
+                });
                 if let Some(a) = audio {
                     a.play(Sfx::Click, 0.35);
                 }

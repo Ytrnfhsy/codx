@@ -133,6 +133,22 @@ pub enum C2S {
     Door(u16),
     /// Ask for the server's leaderboards.
     Leaderboards,
+    /// Battle royale: what the variable scope on gun `slot` magnifies now, tenths (for
+    /// the killcam of whoever we shoot).
+    ScopeZoom {
+        slot: u8,
+        zoom: u8,
+    },
+}
+
+/// What was on the killer's gun (battle royale): the killcam shows it as it was.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Gear {
+    /// Sight (0 = iron sights).
+    pub sight: u8,
+    pub mods: [u8; 3],
+    /// What the sight magnified (0 = the gun's own).
+    pub zoom: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -688,6 +704,8 @@ pub enum S2C {
         victim_team: Team,
         /// How far the killer was, metres (0: no killer, or their own doing).
         dist: u16,
+        /// What was on the killer's gun.
+        gear: Gear,
     },
     HitConfirm {
         kill: bool,

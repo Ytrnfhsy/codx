@@ -9,7 +9,7 @@ use crate::render::{Actor, VmState};
 use macroquad::prelude::*;
 use std::collections::{HashMap, VecDeque};
 use toon_shared::physics::{Stance, World};
-use toon_shared::protocol::{flags, stance_bits, BombSnap, EntSnap, PlayerSnap, ShotFx};
+use toon_shared::protocol::{flags, stance_bits, BombSnap, EntSnap, Gear, PlayerSnap, ShotFx};
 use toon_shared::rng::Rng;
 use toon_shared::tuning::Tuning;
 use toon_shared::weapons::{Cause, WeaponId};
@@ -44,6 +44,7 @@ pub enum Event {
         victim: u8,
         cause: Cause,
         headshot: bool,
+        gear: Gear,
     },
 }
 
@@ -95,15 +96,16 @@ impl Recorder {
     }
 
     /// The most recent kill (after `since`) that can be shown as a killcam.
-    pub fn last_kill(&self, since: f64) -> Option<(f64, u8, u8, Cause, bool)> {
+    pub fn last_kill(&self, since: f64) -> Option<(f64, u8, u8, Cause, bool, Gear)> {
         self.events.iter().rev().find_map(|(t, e)| match *e {
             Event::Kill {
                 killer: Some(k),
                 victim,
                 cause,
                 headshot,
+                gear,
             } if *t >= since && k != victim && has_killcam(cause) => {
-                Some((*t, k, victim, cause, headshot))
+                Some((*t, k, victim, cause, headshot, gear))
             }
             _ => None,
         })
@@ -129,6 +131,8 @@ pub struct KillInfo {
     pub killer_team: Team,
     pub cause: Cause,
     pub headshot: bool,
+    /// The sight and attachments on the killer's gun.
+    pub gear: Gear,
 }
 
 pub struct Killcam {
@@ -571,6 +575,7 @@ impl Killcam {
                 victim: v,
                 cause,
                 headshot,
+                ..
             } if v == victim && (*t - self.pt).abs() < 1.5 => Some((killer, cause, headshot)),
             _ => None,
         });
@@ -623,15 +628,26 @@ impl Killcam {
     }
 
     pub fn scoped(&self) -> bool {
-        self.weapon.def().scoped && self.ads_t > 0.85
+        (self.weapon.def().scoped || self.info.gear.sight >= 2) && self.ads_t > 0.85
+    }
+
+    /// How much the killer's gun magnified when aimed (their sight, at its setting).
+    pub fn ads_zoom(&self, tuning: &Tuning) -> f32 {
+        let g = self.info.gear;
+        let sight = if g.zoom > 0.0 {
+            g.zoom
+        } else {
+            toon_shared::inventory::sight_zoom_range(g.sight).0
+        };
+        tuning.weapon(self.weapon).ads_zoom.max(sight)
     }
 
     pub fn vm_state(&self, tuning: &Tuning) -> VmState {
         let ws = tuning.weapon(self.weapon);
         let since = |t: f64| (self.pt - t) as f32;
         VmState {
-            sight: 0,
-            mods: [0; 3],
+            sight: self.info.gear.sight,
+            mods: self.info.gear.mods,
             weapon: self.weapon,
             sleeve: [200, 200, 200],
             hand: [255, 214, 170],

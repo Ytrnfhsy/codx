@@ -38,7 +38,51 @@ pub struct Bullet {
     pub shot: u32,
     /// Its tracer among this tick's shots.
     pub fx: Option<usize>,
+    /// What is left of its force after the bodies it went through (1 = all).
+    pub power: f32,
+    /// The players it already went through.
+    pub passed: Vec<u8>,
 }
+
+/// How much of a bullet's force is left after going through a body: a sniper or machine
+/// gun round keeps a good part of it, a pistol round little, buckshot none; a vest (or a
+/// helmet, for a head) takes more away. Below `MIN_PIERCE` it stays in the body.
+pub fn body_pass(w: WeaponId, zone: HitZone, armor: u8, helmet: u8) -> f32 {
+    use toon_shared::weapons::WeaponClass as C;
+    let base = match w.def().class {
+        C::Sniper => 0.6,
+        C::Lmg => 0.5,
+        C::Rifle => 0.4,
+        C::Smg => 0.2,
+        C::Pistol if w == WeaponId::Deagle => 0.3,
+        C::Pistol => 0.12,
+        C::Shotgun => 0.0,
+    };
+    let worn = match zone {
+        HitZone::Head => helmet,
+        HitZone::Torso => armor,
+        HitZone::Legs => 0,
+    };
+    base * (1.0 - 0.22 * worn.min(3) as f32)
+}
+
+/// Kills this close together make a double kill, a triple…
+pub const MULTI_KILL_WINDOW: f64 = 4.0;
+/// Bonus points for each kill of a run after the first.
+const SCORE_MULTI: i32 = 25;
+
+/// What a run of `n` quick kills is called.
+pub fn multi_kill_name(n: u8) -> String {
+    match n {
+        2 => t("Подвійне вбивство!", "Double kill!").into(),
+        3 => t("Потрійне вбивство!", "Triple kill!").into(),
+        4 => t("Четверне вбивство!", "Quad kill!").into(),
+        _ => toon_shared::tr!("Мультивбивство ×{n}!", "Multi kill ×{n}!"),
+    }
+}
+
+/// Less force than this left after a body: the bullet stops there.
+pub const MIN_PIERCE: f32 = 0.15;
 
 /// Most bullets in the air at once.
 const MAX_BULLETS: usize = 3000;
@@ -63,7 +107,7 @@ impl Game {
         t: f64,
     ) -> (f32, Hit, f32) {
         let (best, _, pierced) = self.world.bullet_trace(o, d, max);
-        let (best, hit) = self.trace_targets(shooter, o, d, best, t);
+        let (best, hit) = self.trace_targets(shooter, &[], o, d, best, t);
         let left = pierced
             .iter()
             .filter(|p| p.t < best)
@@ -77,6 +121,7 @@ impl Game {
     fn trace_targets(
         &self,
         shooter: Option<u8>,
+        passed: &[u8],
         o: Vec3,
         d: Vec3,
         mut best: f32,
@@ -84,7 +129,7 @@ impl Game {
     ) -> (f32, Hit) {
         let mut hit = Hit::None;
         for p in self.players.iter().flatten() {
-            if !p.alive || Some(p.id) == shooter {
+            if !p.alive || Some(p.id) == shooter || passed.contains(&p.id) {
                 continue;
             }
             // far from this piece of the path (rewinding moves nobody more than a few metres)
@@ -250,6 +295,8 @@ impl Game {
                     checked: 0,
                     shot: self.shot_serial,
                     fx,
+                    power: 1.0,
+                    passed: Vec::new(),
                 });
             }
         }
@@ -268,37 +315,75 @@ impl Game {
             return;
         }
         let time = self.time;
-        let mut hits: Vec<(usize, Hit, f32)> = Vec::new();
+        // (bullet, what it hit, how far along, its force there)
+        let mut hits: Vec<(usize, Hit, f32, f32)> = Vec::new();
         let mut done: Vec<usize> = Vec::new();
+        // bullets that went on through somebody: their force and whom they went through
+        let mut through: Vec<(usize, f32, Vec<u8>)> = Vec::new();
+        // bullets that stopped in something (their tracers end there)
+        let mut stuck: Vec<usize> = Vec::new();
         for (bi, bl) in self.bullets.iter().enumerate() {
             let upto = bl.path.piece_at((time - bl.fired) as f32);
             let at = time + bl.rewind;
             let mut i = bl.checked;
-            let mut found = None;
-            while i < upto {
+            let mut stopped = false;
+            let mut power = bl.power;
+            let mut passed = bl.passed.clone();
+            let pierced_before = passed.len();
+            'pieces: while i < upto {
                 let (a, c) = (bl.path.points[i], bl.path.points[i + 1]);
                 let seg = c - a;
                 let len = seg.length();
-                if len > 1e-4 {
-                    let (dist, hit) = self.trace_targets(Some(bl.owner), a, seg / len, len, at);
-                    if !matches!(hit, Hit::None) {
-                        found = Some((hit, bl.path.dist[i] + dist));
-                        break;
+                // one piece can hold several bodies one behind another
+                while len > 1e-4 && passed.len() < 8 {
+                    let (dist, hit) =
+                        self.trace_targets(Some(bl.owner), &passed, a, seg / len, len, at);
+                    match hit {
+                        Hit::None => break,
+                        Hit::Player(v, _, zone) => {
+                            hits.push((bi, hit, bl.path.dist[i] + dist, power));
+                            let (armor, helmet) = self.p(v).map_or((0, 0), |p| {
+                                (
+                                    if p.inv.armor_hp > 0.0 { p.inv.armor } else { 0 },
+                                    if p.inv.helmet_hp > 0.0 {
+                                        p.inv.helmet
+                                    } else {
+                                        0
+                                    },
+                                )
+                            });
+                            power *= body_pass(bl.weapon, zone, armor, helmet);
+                            passed.push(v);
+                            if power < MIN_PIERCE {
+                                stopped = true;
+                                break 'pieces;
+                            }
+                        }
+                        _ => {
+                            hits.push((bi, hit, bl.path.dist[i] + dist, power));
+                            stopped = true;
+                            break 'pieces;
+                        }
                     }
                 }
                 i += 1;
             }
-            match found {
-                Some((hit, d)) => {
-                    hits.push((bi, hit, d));
-                    done.push(bi);
-                }
-                None if upto + 1 >= bl.path.points.len() => done.push(bi),
-                None => {}
+            if stopped {
+                stuck.push(bi);
+            }
+            if stopped || upto + 1 >= bl.path.points.len() {
+                done.push(bi);
+            } else if passed.len() > pierced_before {
+                through.push((bi, power, passed));
             }
         }
         for bl in self.bullets.iter_mut() {
             bl.checked = bl.path.piece_at((time - bl.fired) as f32);
+        }
+        for (bi, power, passed) in through {
+            let bl = &mut self.bullets[bi];
+            bl.power = power;
+            bl.passed = passed;
         }
         // pellets of one shot that hit the same player add up into one hit
         let mut per_victim: Vec<(u8, u8, WeaponId, f32, bool, Vec3)> = Vec::new();
@@ -306,14 +391,17 @@ impl Game {
         let mut heli_dmg: Vec<(u8, Team, usize, f32)> = Vec::new();
         let mut vehicle_dmg: Vec<(u8, usize, f32)> = Vec::new();
         let mut car_dmg: Vec<(u8, usize, f32)> = Vec::new();
-        for (bi, hit, dist) in hits {
+        for (bi, hit, dist, power) in hits {
             let bl = &self.bullets[bi];
             let def = self.tuning.weapon(bl.weapon);
             let left = bl.path.left_at(dist);
-            let base = def.damage_at(dist) * left;
+            let base = def.damage_at(dist) * left * power;
             let point = bl.path.point_at(dist);
             // the tracer of a shot fired this tick ends where it really hit
-            if let Some(i) = bl.fx.filter(|_| time - bl.fired <= TICK_DT as f64 + 1e-6) {
+            if let Some(i) = bl
+                .fx
+                .filter(|_| time - bl.fired <= TICK_DT as f64 + 1e-6 && stuck.contains(&bi))
+            {
                 if let Some(s) = self.shots.get_mut(i) {
                     s.to = point.to_array();
                     s.flesh = matches!(hit, Hit::Player(..));
@@ -658,12 +746,23 @@ impl Game {
                 let mut reward: Option<Killstreak> = None;
                 let streaks = self.tuning.streaks.clone();
                 let mut popup = None;
+                let mut multi = None;
                 if let Some(k) = self.pm(a) {
                     killer_name = k.name.clone();
                     killer_team = k.team;
                     if k.team != vteam || solo && !(vsquad != 0 && k.squad == vsquad) {
                         k.kills += 1;
                         k.streak += 1;
+                        k.multi = if time - k.multi_at <= MULTI_KILL_WINDOW {
+                            k.multi.saturating_add(1)
+                        } else {
+                            1
+                        };
+                        k.multi_at = time;
+                        if k.multi >= 2 {
+                            k.score += SCORE_MULTI;
+                            multi = Some((k.multi, k.name.clone()));
+                        }
                         let pts = SCORE_KILL + if headshot { SCORE_HEADSHOT_BONUS } else { 0 };
                         k.score += pts;
                         popup = Some((
@@ -692,6 +791,25 @@ impl Game {
                         points: pts,
                         text: pick(text).into(),
                     });
+                    if let Some((n, name)) = multi {
+                        self.say(Dest::One(a), || S2C::ScorePopup {
+                            points: SCORE_MULTI,
+                            text: multi_kill_name(n),
+                        });
+                        self.say(Dest::One(a), || S2C::Center {
+                            text: multi_kill_name(n).to_uppercase(),
+                            secs: 2.0,
+                        });
+                        // three and more: everybody hears of it
+                        if n >= 3 {
+                            let text = toon_shared::tr!(
+                                "★ {name}: {}",
+                                "★ {name}: {}",
+                                multi_kill_name(n)
+                            );
+                            self.announce(vec![crate::stats::News(text)]);
+                        }
+                    }
                     if counts && self.mode == Mode::Tdm {
                         self.scores[killer_team.index()] += 1;
                     }
@@ -719,6 +837,15 @@ impl Game {
             format!("{killer_name} [{}] {vname}", cause.name())
         };
         self.logf(line);
+        // (the gun's sight and attachments, for the killcam)
+        let gear = match cause {
+            Cause::Weapon(w) => attacker
+                .and_then(|a| self.p(a))
+                .filter(|k| k.weapon().id == w)
+                .map(|k| k.gear())
+                .unwrap_or_default(),
+            _ => Default::default(),
+        };
         self.broadcast(S2C::Kill {
             killer: attacker,
             victim,
@@ -729,6 +856,7 @@ impl Game {
             killer_team,
             victim_team: vteam,
             dist,
+            gear,
         });
 
         if counts && self.mode == Mode::Tdm {

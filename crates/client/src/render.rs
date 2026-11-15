@@ -155,11 +155,15 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         ),
     };
     let full = match &g.killcam {
-        Some(_) => g.tuning.weapon(weapon).ads_zoom,
+        Some(k) => k.ads_zoom(&g.tuning),
         None => g.ads_zoom(),
     };
     let zoom = 1.0 + (full - 1.0) * ads;
-    let zoom = if (weapon.def().scoped || g.killcam.is_none() && g.sight() >= 2) && !scoped {
+    let magnifier = match &g.killcam {
+        Some(k) => k.info.gear.sight >= 2,
+        None => g.sight() >= 2,
+    };
+    let zoom = if (weapon.def().scoped || magnifier) && !scoped {
         1.0 + (zoom - 1.0) * 0.25
     } else {
         zoom
@@ -756,11 +760,12 @@ pub fn fog_range(terrain: bool, settings: &Settings, altitude: f32) -> (f32, f32
 /// far-away targets (two and a half times as far, at most).
 fn weather_fog(g: &GameClient, (near, far): (f32, f32)) -> (f32, f32) {
     let v = g.weather.visibility();
-    let scope = if g.killcam.is_none() && g.alive && g.scoped() {
-        (1.0 + (g.ads_zoom() - 1.0) * 0.4).clamp(1.0, 2.5)
-    } else {
-        1.0
+    let zoom = match &g.killcam {
+        Some(k) if k.scoped() => k.ads_zoom(&g.tuning),
+        None if g.alive && g.scoped() => g.ads_zoom(),
+        _ => 1.0,
     };
+    let scope = (1.0 + (zoom - 1.0) * 0.4).clamp(1.0, 2.5);
     (near * v * scope, far * v * scope)
 }
 

@@ -142,6 +142,12 @@ pub struct Player {
     pub empty: u8,
     /// Battle royale character.
     pub skin: u8,
+    /// Battle royale: what the variable scope on each gun magnifies (0 = its weakest).
+    pub scope_zoom: [f32; 2],
+    /// Kills in a quick run (each within `MULTI_KILL_WINDOW` of the last) and when the
+    /// last one was.
+    pub multi: u8,
+    pub multi_at: f64,
 }
 
 impl Player {
@@ -152,6 +158,30 @@ impl Player {
             self.inv
                 .has_mod(self.slot as usize, toon_shared::inventory::MOD_EXTMAG),
         )
+    }
+
+    /// Battle royale: what is on the gun in hand, for the killcam.
+    pub fn gear(&self) -> toon_shared::protocol::Gear {
+        use toon_shared::inventory::{sight_fits, sight_zoom_range};
+        let k = self.slot as usize & 1;
+        if self.is_empty(k) {
+            return Default::default();
+        }
+        let id = self.weapons[k].id;
+        let sight = Some(self.inv.sights[k])
+            .filter(|&l| sight_fits(l, id))
+            .unwrap_or(0);
+        let (lo, hi) = sight_zoom_range(sight);
+        let zoom = if sight >= 2 {
+            self.scope_zoom[k].clamp(lo, hi)
+        } else {
+            0.0
+        };
+        toon_shared::protocol::Gear {
+            sight,
+            mods: self.inv.mods[k],
+            zoom,
+        }
     }
 
     /// The gun in hand has a suppressor on.
@@ -287,6 +317,9 @@ impl Player {
             inv: Default::default(),
             ammo_seen: [0; 2],
             empty: 0,
+            scope_zoom: [0.0; 2],
+            multi: 0,
+            multi_at: f64::MIN,
             skin: 0,
         }
     }
@@ -1395,6 +1428,13 @@ impl Game {
             }
             C2S::Reload => self.start_reload(id),
             C2S::Switch(slot) => self.switch_weapon(id, slot),
+            C2S::ScopeZoom { slot, zoom } => {
+                if let Some(p) = self.pm(id) {
+                    if slot < 2 {
+                        p.scope_zoom[slot as usize] = (zoom as f32 / 10.0).clamp(0.0, 8.0);
+                    }
+                }
+            }
             C2S::Grenade {
                 origin,
                 dir,
