@@ -62,6 +62,7 @@ fn state_json_raw(g: &Game) -> serde_json::Value {
                 "score": p.score, "kills": p.kills, "deaths": p.deaths, "assists": p.assists,
                 "ping": if p.is_bot() { 0 } else { (p.ping * 1000.0) as u32 },
                 "ip": p.ip, "bot": p.is_bot(), "alive": p.alive,
+                "in_plane": p.in_plane, "place": p.br_place, "squad": p.squad,
             })
         })
         .collect();

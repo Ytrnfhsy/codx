@@ -350,7 +350,7 @@ impl Killcam {
                     let d = pos.distance(self.eye);
                     self.shake = (self.shake + (1.0 - d / (radius * 4.0)).max(0.0)).min(1.2);
                     if let Some(a) = audio {
-                        a.play_at(Sfx::Explosion, pos, self.eye, 1.0, 120.0);
+                        a.play_at(Sfx::Explosion, pos, self.eye, 1.0, 260.0);
                     }
                 }
                 Event::Kill {

@@ -38,7 +38,7 @@ fetch("/api/info").then(r => r.json()).then(i => {
   p.replaceChildren();
   const line = (k, v) => { const d = document.createElement("div"); d.textContent = k + ": "; const b = document.createElement("b"); b.textContent = v; d.append(b); p.append(d); };
   line("Карта", i.map); line("Режим", i.mode); line("Гравці", i.players + " (+" + i.bots + " ботів) / " + i.max_players);
-  line("Рахунок", i.scores[0] + " : " + i.scores[1]); if (i.password) line("Вхід", "за паролем");
+  if (i.mode_id !== "br") line("Рахунок", i.scores[0] + " : " + i.scores[1]); if (i.password) line("Вхід", "за паролем");
   document.getElementById("addr").textContent = location.hostname + ":" + i.port;
 }).catch(() => { document.getElementById("info").textContent = "Сервер не відповідає"; });
 fetch("/api/top").then(r => r.json()).then(boards => {

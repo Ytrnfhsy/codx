@@ -66,6 +66,9 @@ pub enum Sfx {
     Whistle,
     /// Drone rotors (looped).
     Drone,
+    /// A car or boat engine ticking over, and pulling (looped).
+    EngineIdle,
+    EngineRun,
     /// Rain falling all around (looped).
     Rain,
     /// A footstep on earth, grass or sand (recordings only; `Step` otherwise).
@@ -143,6 +146,14 @@ impl Sfx {
                 | Sfx::Knife
                 | Sfx::Beep
                 | Sfx::Smoke
+        )
+    }
+
+    /// A loop that comes from somewhere in the world (it pans round the listener).
+    fn looped_in_world(self) -> bool {
+        matches!(
+            self,
+            Sfx::Heli | Sfx::Drone | Sfx::EngineIdle | Sfx::EngineRun
         )
     }
 
@@ -465,33 +476,137 @@ fn spatialize(dry: &[f32], sp: Space, tail: f32, rng: &mut Rng) -> Vec<[f32; 2]>
     out
 }
 
-/// The left- and right-side versions of a sound in the world (one of each per sound,
-/// to keep memory down on weak machines): the far ear hears it quieter and duller.
-async fn add_sides(sides: &mut HashMap<Sfx, [Vec<Sound>; 2]>, k: Sfx, pcm: &[[f32; 2]]) {
-    let e = sides.entry(k).or_default();
-    if !e[0].is_empty() {
+/// Where around the listener the prepared versions of a sound in the world come from,
+/// in degrees (0 ahead, 90 to the right, -90 to the left): straight ahead plays the sound
+/// as it is; the rest are made once at start. Six of them (every 45° or so, the back
+/// shared by the two back-quarter ones) keep the memory down on weak machines.
+pub const DIRS: [f32; 6] = [-140.0, -90.0, -45.0, 45.0, 90.0, 140.0];
+
+/// The sound as heard from `az` degrees, through headphones: the far ear hears it a moment
+/// later (up to 0.66 ms), quieter and duller (the head in the way); from behind both ears
+/// hear it a little muffled (the ears point forward). `looped`: the sound is a loop, so it
+/// is processed as one (no click where it starts again).
+fn binaural(pcm: &[[f32; 2]], az: f32, looped: bool) -> Vec<[f32; 2]> {
+    let r = az.to_radians();
+    let (lat, front) = (r.sin(), r.cos());
+    let side = lat.abs();
+    // 0: left ear, 1: right ear; the sound to the right reaches the left ear last
+    let far = if lat >= 0.0 { 0 } else { 1 };
+    let near = 1 - far;
+    let delay = (0.00066 * side * SR).round() as usize;
+    let far_gain = 1.0 - 0.55 * side;
+    let near_gain = 1.0 + 0.12 * side;
+    let shadow = 1400.0 + (1.0 - side) * 9000.0;
+    let back = (-front).max(0.0);
+    let pinna = 14000.0 - 10500.0 * back;
+    let n = pcm.len();
+    // a loop goes round twice: filters warmed up, the delay wraps
+    let passes = if looped { 2 } else { 1 };
+    let mut out = vec![[0.0f32; 2]; n];
+    let mut sh = Biquad::new(Kind::Low, shadow, 0.7);
+    let mut pin = [
+        Biquad::new(Kind::Low, pinna, 0.7),
+        Biquad::new(Kind::Low, pinna, 0.7),
+    ];
+    for pass in 0..passes {
+        for i in 0..n {
+            let get = |ch: usize, back_by: usize| -> f32 {
+                if looped {
+                    pcm[(i + n - back_by % n) % n][ch]
+                } else if i >= back_by {
+                    pcm[i - back_by][ch]
+                } else {
+                    0.0
+                }
+            };
+            let mut v = [0.0f32; 2];
+            v[near] = get(near, 0) * near_gain;
+            v[far] = sh.run(get(far, delay)) * far_gain;
+            if back > 0.05 {
+                for ch in 0..2 {
+                    v[ch] = pin[ch].run(v[ch]) * (1.0 - 0.12 * back);
+                }
+            }
+            if pass + 1 == passes {
+                out[i] = v;
+            }
+        }
+    }
+    out
+}
+
+/// The prepared versions of a sound (one list of variants per direction in `DIRS`): short
+/// sounds get all their variants (footsteps should not repeat), long ones the first.
+async fn add_dirs(dirs: &mut HashMap<Sfx, Vec<Vec<Sound>>>, k: Sfx, pcm: &[[f32; 2]]) {
+    let e = dirs
+        .entry(k)
+        .or_insert_with(|| vec![Vec::new(); DIRS.len()]);
+    let short = pcm.len() < (0.4 * SR) as usize;
+    let have = e[0].len();
+    if have >= if short { 4 } else { 1 } {
         return;
     }
-    for (ch, list) in e.iter_mut().enumerate() {
-        // ch 0: from the left, so the right ear (1) is the far one
-        let far = 1 - ch;
-        let mut lp = Biquad::new(Kind::Low, 2500.0, 0.7);
-        let side: Vec<[f32; 2]> = pcm
-            .iter()
-            .map(|v| {
-                let mut o = *v;
-                o[far] = lp.run(v[far]) * 0.4;
-                o
-            })
-            .collect();
-        if let Ok(snd) = load_sound_from_bytes(&wav(&side)).await {
+    for (d, list) in e.iter_mut().enumerate() {
+        if let Ok(snd) = load_sound_from_bytes(&wav(&binaural(pcm, DIRS[d], false))).await {
             list.push(snd);
         }
     }
 }
 
+/// Every direction of a looped sound: the sound itself (ahead), then one per `DIRS`.
+async fn loop_dirs(pcm: &[[f32; 2]]) -> Vec<Sound> {
+    let mut v = Vec::new();
+    for pcm in std::iter::once(pcm.to_vec()).chain(DIRS.iter().map(|&az| binaural(pcm, az, true))) {
+        if let Ok(snd) = load_sound_from_bytes(&wav(&pcm)).await {
+            v.push(snd);
+        }
+    }
+    v
+}
+
 fn mono(b: &[f32]) -> Vec<[f32; 2]> {
     b.iter().map(|v| [*v, *v]).collect()
+}
+
+/// How loud a sound `d` metres away is, out of 1: falling off with distance and gone at
+/// `range` (no floor: what is far away is not heard).
+pub fn falloff(d: f32, range: f32) -> f32 {
+    let k = (1.0 - d / range.max(0.1)).clamp(0.0, 1.0);
+    // close by it barely changes, then fades out smoothly
+    k * k * (3.0 - 2.0 * k)
+}
+
+/// Volumes of a looped sound's versions (ahead, then `DIRS`) for a sound at `az` degrees:
+/// the two directions either side of it, equal power.
+fn pan_weights(az: f32) -> [f32; DIRS.len() + 1] {
+    // every direction round the circle, with its version
+    let mut ring: Vec<(f32, usize)> = std::iter::once((0.0, 0))
+        .chain(DIRS.iter().enumerate().map(|(k, d)| (*d, k + 1)))
+        .collect();
+    ring.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let az = (az + 540.0).rem_euclid(360.0) - 180.0;
+    let mut w = [0.0f32; DIRS.len() + 1];
+    let n = ring.len();
+    for i in 0..n {
+        let (a, ka) = ring[i];
+        let (b, kb) = ring[(i + 1) % n];
+        let b = if i + 1 == n { b + 360.0 } else { b };
+        let x = if az < a && i + 1 == n { az + 360.0 } else { az };
+        if x >= a && x <= b {
+            let t = (x - a) / (b - a).max(1e-3);
+            w[ka] = (t * std::f32::consts::FRAC_PI_2).cos();
+            w[kb] = (t * std::f32::consts::FRAC_PI_2).sin();
+            return w;
+        }
+    }
+    // behind, between the last and the first round the back
+    let (a, ka) = ring[n - 1];
+    let (b, kb) = ring[0];
+    let x = if az < a { az + 360.0 } else { az };
+    let t = ((x - a) / (b + 360.0 - a)).clamp(0.0, 1.0);
+    w[ka] = (t * std::f32::consts::FRAC_PI_2).cos();
+    w[kb] = (t * std::f32::consts::FRAC_PI_2).sin();
+    w
 }
 
 /// Pans a mono sound (-1 = left, 1 = right), equal power.
@@ -915,6 +1030,35 @@ impl Synth {
         mono(&out)
     }
 
+    /// An engine as a one-second loop: cylinders firing `f` times a second (a whole
+    /// number, so the loop closes), a rumble under it and more rasp when it pulls.
+    fn engine(&mut self, f: f32, rough: f32) -> Vec<[f32; 2]> {
+        let n = SR as usize;
+        let mut b = vec![0.0f32; 2 * n];
+        let mut body = Biquad::new(Kind::Low, 160.0 + 260.0 * rough, 0.8);
+        let mut rasp = Biquad::new(Kind::Band, 900.0 + 900.0 * rough, 1.1);
+        let mut lp = Biquad::new(Kind::Low, 2400.0, 0.7);
+        for (i, v) in b.iter_mut().enumerate() {
+            let t = (i % n) as f32 / SR;
+            // a pulse per firing, each a little different in strength
+            let ph = (t * f).fract();
+            let k = (t * f) as usize % 4;
+            let strength = [1.0, 0.86, 0.95, 0.8][k];
+            let pulse = (-ph * 9.0).exp() * strength;
+            let nse = self.noise();
+            let tone = (t * f * TAU).sin() * 0.6 + (t * f * 2.0 * TAU).sin() * 0.35;
+            *v = lp.run(
+                body.run(pulse * 2.0 + nse * 0.15) * 1.4
+                    + tone * 0.3
+                    + rasp.run(nse) * pulse * rough * 1.2,
+            );
+        }
+        // the second pass, filters warmed up: the loop starts where it ends
+        let mut out = b[n..].to_vec();
+        Synth::norm(&mut out, 0.75);
+        mono(&out)
+    }
+
     fn heli(&mut self) -> Vec<[f32; 2]> {
         let period = 1.0;
         let xf = 0.15;
@@ -1290,6 +1434,8 @@ impl Synth {
                 mono(&b)
             }
             Sfx::Drone => self.drone(),
+            Sfx::EngineIdle => self.engine(36.0, 0.35),
+            Sfx::EngineRun => self.engine(72.0, 1.0),
             Sfx::Rain => self.rain(),
             Sfx::Streak => mono(&Synth::chord(
                 &[(0.0, 523.0), (0.09, 659.0), (0.18, 784.0), (0.27, 1046.0)],
@@ -1306,6 +1452,7 @@ fn variants(s: Sfx) -> usize {
     match s {
         Sfx::Gun(_) | Sfx::Far | Sfx::Explosion | Sfx::Hit | Sfx::Hurt => 2,
         Sfx::Step | Sfx::Whiz | Sfx::Shell | Sfx::Flesh => 4,
+        Sfx::EngineIdle | Sfx::EngineRun => 1,
         // recordings only; without one the generic sound plays
         Sfx::MagOutOf(_) | Sfx::MagInOf(_) | Sfx::BoltOf(_) => 0,
         Sfx::StepSoft | Sfx::Door | Sfx::DoorShut => 0,
@@ -1346,6 +1493,8 @@ fn all() -> Vec<Sfx> {
         Sfx::Heli,
         Sfx::Whistle,
         Sfx::Drone,
+        Sfx::EngineIdle,
+        Sfx::EngineRun,
         Sfx::Rain,
         Sfx::StepSoft,
         Sfx::Door,
@@ -1736,15 +1885,17 @@ fn synthesize(jobs: &[(Sfx, usize)]) -> Vec<(Sfx, Vec<[f32; 2]>)> {
 
 pub struct Audio {
     sounds: HashMap<Sfx, Vec<Sound>>,
-    /// The same, heard from the left and from the right (sounds out in the world).
-    sides: HashMap<Sfx, [Vec<Sound>; 2]>,
+    /// The same, heard from each of `DIRS` (sounds out in the world).
+    dirs: HashMap<Sfx, Vec<Vec<Sound>>>,
+    /// Looped sounds in the world (rotors, engines): ahead, then each of `DIRS`; all of
+    /// them play together and their volumes pan the sound round the listener.
+    loops: HashMap<Sfx, Vec<Sound>>,
+    loop_on: RefCell<HashMap<Sfx, bool>>,
     /// Where the listener looks (which way is left).
     listener_yaw: std::cell::Cell<f32>,
     /// Master volume (the settings slider changes it while the game runs).
     volume: std::cell::Cell<f32>,
     last: RefCell<HashMap<Sfx, f64>>,
-    heli_on: RefCell<bool>,
-    drone_on: RefCell<bool>,
     rain_on: RefCell<bool>,
     pending: RefCell<Vec<(f64, Sfx, f32)>>,
     rng: RefCell<Rng>,
@@ -1753,7 +1904,8 @@ pub struct Audio {
 impl Audio {
     pub async fn load(volume: f32, enabled: bool) -> Audio {
         let mut sounds: HashMap<Sfx, Vec<Sound>> = HashMap::new();
-        let mut sides: HashMap<Sfx, [Vec<Sound>; 2]> = HashMap::new();
+        let mut dirs: HashMap<Sfx, Vec<Vec<Sound>>> = HashMap::new();
+        let mut loops: HashMap<Sfx, Vec<Sound>> = HashMap::new();
         if enabled {
             // recordings first; everything else is synthesized on all CPU cores
             let mut jobs = Vec::new();
@@ -1765,7 +1917,10 @@ impl Audio {
                             Ok(snd) => {
                                 v.push(snd);
                                 if k.placed() {
-                                    add_sides(&mut sides, k, &pcm).await;
+                                    add_dirs(&mut dirs, k, &pcm).await;
+                                }
+                                if k.looped_in_world() && !loops.contains_key(&k) {
+                                    loops.insert(k, loop_dirs(&pcm).await);
                                 }
                             }
                             Err(e) => eprintln!("sound {file}: {e:?}"),
@@ -1782,19 +1937,22 @@ impl Audio {
                 if let Ok(snd) = load_sound_from_bytes(&wav(&pcm)).await {
                     sounds.entry(k).or_default().push(snd);
                     if k.placed() {
-                        add_sides(&mut sides, k, &pcm).await;
+                        add_dirs(&mut dirs, k, &pcm).await;
+                    }
+                    if k.looped_in_world() && !loops.contains_key(&k) {
+                        loops.insert(k, loop_dirs(&pcm).await);
                     }
                 }
             }
         }
         Audio {
             sounds,
-            sides,
+            dirs,
+            loops,
+            loop_on: RefCell::new(HashMap::new()),
             listener_yaw: std::cell::Cell::new(0.0),
             volume: std::cell::Cell::new(volume),
             last: RefCell::new(HashMap::new()),
-            heli_on: RefCell::new(false),
-            drone_on: RefCell::new(false),
             rain_on: RefCell::new(false),
             pending: RefCell::new(Vec::new()),
             rng: RefCell::new(Rng::from_time()),
@@ -1815,39 +1973,31 @@ impl Audio {
         self.listener_yaw.set(yaw);
     }
 
-    /// -1 well to the left .. 1 well to the right, as heard from `listener`.
-    fn side_of(&self, pos: Vec3, listener: Vec3) -> f32 {
+    /// Where `pos` is around the listener, in degrees: 0 ahead, 90 to the right, -90 to
+    /// the left, ±180 behind (0 when it is right here).
+    fn azimuth(&self, pos: Vec3, listener: Vec3) -> f32 {
         let d = pos - listener;
         let flat = vec3(d.x, 0.0, d.z);
-        if flat.length_squared() < 1.0 {
+        if flat.length_squared() < 0.25 {
             return 0.0;
         }
-        let (_, right) = toon_shared::yaw_basis(self.listener_yaw.get());
-        flat.normalize().dot(right)
+        let (fwd, right) = toon_shared::yaw_basis(self.listener_yaw.get());
+        flat.dot(right).atan2(flat.dot(fwd)).to_degrees()
     }
 
-    /// Sounds from behind are a little quieter than those in front.
-    fn behind(&self, pos: Vec3, listener: Vec3) -> f32 {
-        let d = pos - listener;
-        let flat = vec3(d.x, 0.0, d.z);
-        if flat.length_squared() < 1.0 {
-            return 1.0;
+    /// A sound from a place: the version made for the nearest direction.
+    fn play_placed(&self, s: Sfx, vol: f32, az: f32) {
+        let mut best = (az.abs(), None);
+        for (k, d) in DIRS.iter().enumerate() {
+            let diff = (az - d + 540.0).rem_euclid(360.0) - 180.0;
+            if diff.abs() < best.0 {
+                best = (diff.abs(), Some(k));
+            }
         }
-        let (fwd, _) = toon_shared::yaw_basis(self.listener_yaw.get());
-        let back = (-flat.normalize().dot(fwd)).max(0.0);
-        1.0 - 0.3 * back
-    }
-
-    /// A sound from a place: the left or right version when it is off to one side.
-    fn play_placed(&self, s: Sfx, vol: f32, side: f32) {
-        let k = if side < -0.35 {
-            0
-        } else if side > 0.35 {
-            1
-        } else {
+        let Some(k) = best.1 else {
             return self.play(s, vol);
         };
-        match self.sides.get(&s).map(|v| &v[k]).filter(|l| !l.is_empty()) {
+        match self.dirs.get(&s).map(|v| &v[k]).filter(|l| !l.is_empty()) {
             Some(list) => {
                 let i = (self.rng.borrow_mut().f32() * list.len() as f32) as usize;
                 self.play_one(s, &list[i.min(list.len() - 1)], vol);
@@ -1936,40 +2086,92 @@ impl Audio {
         }
     }
 
-    /// Distance-attenuated sound.
+    /// A sound from a place in the world: quieter with distance and gone beyond `range`
+    /// (a footstep 22 m off is not heard at all), from the direction it comes from.
     pub fn play_at(&self, s: Sfx, pos: Vec3, listener: Vec3, vol: f32, range: f32) {
-        let d = pos.distance(listener);
-        let k = (1.0 - d / range).clamp(0.0, 1.0);
-        let side = self.side_of(pos, listener);
-        let vol = vol * self.behind(pos, listener);
-        self.play_placed(s, vol * (0.08 + 0.92 * k * k), side);
+        let g = falloff(pos.distance(listener), range);
+        if g <= 0.0 {
+            return;
+        }
+        self.play_placed(s, vol * g, self.azimuth(pos, listener));
     }
 
     /// Gunfire with distance: close shots are sharp, far ones turn into a muffled boom
-    /// rolling through the streets.
+    /// rolling through the streets; both from where the shot was.
     pub fn play_shot(&self, s: Sfx, pos: Vec3, listener: Vec3, vol: f32) {
         let d = pos.distance(listener);
-        let side = self.side_of(pos, listener);
-        let vol = vol * self.behind(pos, listener);
-        let near = (1.0 - d / 60.0).clamp(0.0, 1.0);
+        let az = self.azimuth(pos, listener);
+        let near = falloff(d, 60.0);
         if near > 0.0 {
-            self.play_placed(s, vol * near * near, side);
+            self.play_placed(s, vol * near, az);
         }
         if d > 15.0 {
-            let far = ((d - 15.0) / 20.0).clamp(0.0, 1.0) * (1.0 - (d - 140.0).max(0.0) / 120.0);
+            let far = ((d - 15.0) / 20.0).clamp(0.0, 1.0) * falloff(d, 260.0).sqrt();
             let loud = if s.loud() { 0.7 } else { 0.45 };
-            self.play_placed(Sfx::Far, vol * far.max(0.0) * loud, side);
+            self.play_placed(Sfx::Far, vol * far * loud, az);
         }
     }
 
-    /// Helicopter rotor loop with distance-based volume (None = stop).
-    pub fn heli(&self, dist: Option<f32>) {
-        self.looped(Sfx::Heli, &self.heli_on, dist, 90.0, 0.7);
+    /// A looped sound at `at` (None: stop it): every direction of it plays at once and
+    /// the two nearest the sound's direction are heard, so it moves smoothly round the
+    /// listener; quieter with distance, silent beyond `range`.
+    pub fn loop_at(&self, s: Sfx, at: Option<(Vec3, Vec3)>, range: f32, gain: f32) {
+        let Some(list) = self.loops.get(&s).filter(|l| l.len() == DIRS.len() + 1) else {
+            return;
+        };
+        let mut on = self.loop_on.borrow_mut();
+        let playing = on.entry(s).or_insert(false);
+        let level = at.map_or(0.0, |(p, l)| falloff(p.distance(l), range));
+        if level <= 0.0 {
+            if *playing {
+                for snd in list {
+                    stop_sound(snd);
+                }
+                *playing = false;
+            }
+            return;
+        }
+        let (pos, listener) = at.expect("checked above");
+        let w = pan_weights(self.azimuth(pos, listener));
+        let master = (level * gain * self.volume.get()).min(1.0);
+        for (k, snd) in list.iter().enumerate() {
+            let v = master * w[k];
+            if *playing {
+                set_sound_volume(snd, v);
+            } else {
+                play_sound(
+                    snd,
+                    PlaySoundParams {
+                        looped: true,
+                        volume: v,
+                    },
+                );
+            }
+        }
+        *playing = true;
+    }
+
+    /// Helicopter rotors where the nearest helicopter is (None = stop).
+    pub fn heli(&self, at: Option<(Vec3, Vec3)>) {
+        self.loop_at(Sfx::Heli, at, 120.0, 0.7);
     }
 
     /// Drone buzz of the nearest drone (None = stop).
-    pub fn drone(&self, dist: Option<f32>) {
-        self.looped(Sfx::Drone, &self.drone_on, dist, 45.0, 0.55);
+    pub fn drone(&self, at: Option<(Vec3, Vec3)>) {
+        self.loop_at(Sfx::Drone, at, 50.0, 0.55);
+    }
+
+    /// The nearest engine running (None = none): `pull` 0 ticking over .. 1 flat out.
+    pub fn engine(&self, at: Option<(Vec3, Vec3)>, pull: f32) {
+        let pull = pull.clamp(0.0, 1.0);
+        let (idle, run) = ((1.0 - pull).sqrt(), pull.sqrt());
+        self.loop_at(
+            Sfx::EngineIdle,
+            at.filter(|_| idle > 0.05),
+            70.0,
+            0.45 * idle,
+        );
+        self.loop_at(Sfx::EngineRun, at.filter(|_| run > 0.05), 90.0, 0.55 * run);
     }
 
     /// Rain all around: 1 out in it, less under a roof (None = it does not rain).
@@ -2050,6 +2252,80 @@ mod tests {
         println!("{secs:.1} s of stereo audio in {:?}", t0.elapsed());
         let limit = if cfg!(debug_assertions) { 30.0 } else { 3.0 };
         assert!(t0.elapsed().as_secs_f32() < limit);
+    }
+
+    #[test]
+    fn far_sounds_are_not_heard() {
+        assert_eq!(falloff(0.0, 20.0), 1.0);
+        assert!(falloff(5.0, 20.0) > falloff(15.0, 20.0));
+        assert_eq!(falloff(20.0, 20.0), 0.0, "nothing at the edge of the range");
+        assert_eq!(falloff(300.0, 20.0), 0.0, "nor beyond it");
+    }
+
+    #[test]
+    fn loops_pan_between_the_nearest_directions() {
+        let total = |w: &[f32]| w.iter().map(|v| v * v).sum::<f32>();
+        for az in [
+            -180.0f32, -160.0, -100.0, -45.0, -10.0, 0.0, 30.0, 90.0, 150.0, 179.0,
+        ] {
+            let w = pan_weights(az);
+            assert!((total(&w) - 1.0).abs() < 1e-3, "{az}: {w:?}");
+            assert!(w.iter().filter(|v| **v > 1e-3).count() <= 2, "{az}: {w:?}");
+        }
+        // straight ahead: the sound as it is; to the right: the 90° version
+        assert!(pan_weights(0.0)[0] > 0.99);
+        let right = 1 + DIRS.iter().position(|d| *d == 90.0).unwrap();
+        assert!(pan_weights(90.0)[right] > 0.99);
+        // right behind: the two back versions
+        let w = pan_weights(180.0);
+        let back: f32 = DIRS
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.abs() > 120.0)
+            .map(|(k, _)| w[k + 1])
+            .sum();
+        assert!(back > 1.3, "{w:?}");
+    }
+
+    #[test]
+    fn a_sound_on_the_right_reaches_the_left_ear_later_and_quieter() {
+        // a click
+        let mut pcm = vec![[0.0f32; 2]; 400];
+        pcm[10] = [1.0, 1.0];
+        let out = binaural(&pcm, 90.0, false);
+        let peak = |ch: usize| {
+            out.iter()
+                .enumerate()
+                .max_by(|a, b| a.1[ch].abs().total_cmp(&b.1[ch].abs()))
+                .unwrap()
+        };
+        let (ti_r, r) = peak(1);
+        let (ti_l, l) = peak(0);
+        assert_eq!(ti_r, 10, "the near ear at once");
+        assert!(ti_l > ti_r + 20, "the far ear ~0.6 ms later: {ti_l}");
+        assert!(l[0].abs() < r[1].abs() * 0.6, "and quieter");
+        // and the mirror image from the left
+        let out = binaural(&pcm, -90.0, false);
+        assert!(out[10][0].abs() > 0.9 && out[10][1].abs() < 0.1);
+    }
+
+    #[test]
+    fn engine_loops() {
+        let mut s = Synth { rng: Rng::new(5) };
+        for k in [Sfx::EngineIdle, Sfx::EngineRun] {
+            let b = s.make(k, 0);
+            assert_eq!(b.len(), SR as usize, "one second");
+            let jump = (b[0][0] - b[b.len() - 1][0]).abs();
+            let typical = b
+                .windows(2)
+                .map(|w| (w[1][0] - w[0][0]).abs())
+                .fold(0.0, f32::max);
+            assert!(jump <= typical * 1.5, "{k:?}: seam {jump} vs {typical}");
+            // as a loop in a direction it still closes
+            let d = binaural(&b, 90.0, true);
+            let jump = (d[0][0] - d[d.len() - 1][0]).abs();
+            assert!(jump <= typical * 1.5, "{k:?} at 90°: seam {jump}");
+        }
     }
 
     #[test]

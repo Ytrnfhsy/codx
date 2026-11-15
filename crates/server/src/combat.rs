@@ -810,7 +810,8 @@ impl Game {
                             self.announce(vec![crate::stats::News(text)]);
                         }
                     }
-                    if counts && self.mode == Mode::Tdm {
+                    // (a spectator's kill, as by a leftover grenade, counts for no side)
+                    if counts && self.mode == Mode::Tdm && killer_team.is_playing() {
                         self.scores[killer_team.index()] += 1;
                     }
                 }

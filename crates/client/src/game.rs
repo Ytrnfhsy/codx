@@ -1039,7 +1039,7 @@ impl GameClient {
                     + (1.0 - d / (radius * 4.0)).max(0.0) * if big { 1.0 } else { 0.6 })
                 .min(1.2);
                 if let Some(a) = audio {
-                    a.play_at(Sfx::Explosion, p, self.eye(), 1.0, 120.0);
+                    a.play_at(Sfx::Explosion, p, self.camera().0, 1.0, 260.0);
                 }
             }
             S2C::Melee { id } => {
@@ -2870,18 +2870,35 @@ impl GameClient {
             }
         }
         if let Some(a) = audio {
-            let heli = self
-                .ents
+            let ear = self.camera().0;
+            let nearest = |it: &mut dyn Iterator<Item = Vec3>| {
+                it.min_by(|a, b| a.distance(ear).total_cmp(&b.distance(ear)))
+            };
+            let heli = nearest(&mut self.ents.iter().filter_map(|e| match e {
+                EntSnap::Heli { pos, .. } => Some(Vec3::from_array(*pos)),
+                _ => None,
+            }));
+            a.heli(heli.map(|p| (p, ear)));
+            // the nearest running engine: ours, or a car or boat that moves or has
+            // somebody in it
+            let mine = self.me.seat.filter(|_| self.alive).map(|s| s.0);
+            let engine = self
+                .cars
                 .iter()
-                .filter_map(|e| {
-                    if let EntSnap::Heli { pos, .. } = e {
-                        Some(Vec3::from_array(*pos).distance(self.eye()))
-                    } else {
-                        None
-                    }
+                .filter(|(id, c)| {
+                    Some(**id) == mine
+                        || c.state.speed.abs() > 0.5
+                        || c.seats.iter().any(|s| *s != 255)
                 })
-                .reduce(f32::min);
-            a.heli(heli);
+                .map(|(id, c)| {
+                    let at = if Some(*id) == mine { ear } else { c.state.pos };
+                    (at, c.state.speed.abs(), c.kind.max_speed())
+                })
+                .min_by(|a, b| a.0.distance(ear).total_cmp(&b.0.distance(ear)));
+            match engine {
+                Some((at, speed, max)) => a.engine(Some((at, ear)), speed / max.max(1.0)),
+                None => a.engine(None, 0.0),
+            }
             // rain: loud out in it, a murmur under a roof
             let rain = (self.weather == Weather::Rain && self.killcam.is_none()).then(|| {
                 let eye = self.camera().0;
@@ -2893,26 +2910,26 @@ impl GameClient {
             });
             a.rain(rain);
             // the nearest drone buzzes (our own one right in our ears)
-            let ear = self.camera().0;
             let own = self
                 .piloting
                 .as_ref()
                 .filter(|p| p.kind != toon_shared::vehicles::VehicleKind::Nrk)
-                .map(|_| 3.0);
-            let drone = self
-                .ents
-                .iter()
-                .filter_map(|e| match e {
-                    EntSnap::Vehicle { pos, kind, .. }
-                        if *kind != toon_shared::vehicles::VehicleKind::Nrk =>
-                    {
-                        Some(Vec3::from_array(*pos).distance(ear))
-                    }
-                    _ => None,
-                })
-                .chain(own)
-                .reduce(f32::min);
-            a.drone(drone);
+                .map(|_| ear);
+            let drone = nearest(
+                &mut self
+                    .ents
+                    .iter()
+                    .filter_map(|e| match e {
+                        EntSnap::Vehicle { pos, kind, .. }
+                            if *kind != toon_shared::vehicles::VehicleKind::Nrk =>
+                        {
+                            Some(Vec3::from_array(*pos))
+                        }
+                        _ => None,
+                    })
+                    .chain(own),
+            );
+            a.drone(drone.map(|p| (p, ear)));
         }
     }
 
@@ -2988,7 +3005,7 @@ impl GameClient {
         let rt = self.render_time();
         let walk_speed = self.tuning.movement.walk_speed;
         let now = self.now;
-        let listener = self.eye();
+        let listener = self.camera().0;
         let mut deaths = Vec::new();
         for (id, r) in self.remotes.iter_mut() {
             // find the two snapshots around rt
@@ -3073,8 +3090,14 @@ impl GameClient {
                     if r.step_acc > 2.2 {
                         r.step_acc = 0.0;
                         if let Some(a) = audio {
+                            // running is heard further than walking
                             let step = step_sfx(&self.world, r.pos);
-                            a.play_at(step, r.pos, listener, 0.35, 22.0);
+                            let (vol, range) = if r.sprint > 0.5 {
+                                (0.45, 32.0)
+                            } else {
+                                (0.32, 20.0)
+                            };
+                            a.play_at(step, r.pos, listener, vol, range);
                         }
                     }
                 }

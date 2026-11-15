@@ -60,14 +60,14 @@
 
   <section class="card wide">
     <h2>Гравці</h2>
-    <table><thead><tr><th>#</th><th>Ім'я</th><th>Команда</th><th>Очки</th><th>В/С/Д</th><th>Пінг</th><th>IP</th><th>Дії</th></tr></thead><tbody id="players"></tbody></table>
+    <table><thead><tr><th>#</th><th>Ім'я</th><th id="teamcol">Команда</th><th>Очки</th><th>В/С/Д</th><th>Пінг</th><th>IP</th><th>Дії</th></tr></thead><tbody id="players"></tbody></table>
   </section>
 
   <section class="card">
     <h2>Карта і режим</h2>
     <div class="row">
-      <select id="map"><option value="wreck">Аварія</option><option value="site">Будмайданчик</option><option value="depot">Депо</option><option value="market">Ринок</option><option value="cargo">Вантаж</option></select>
-      <select id="mode"><option value="tdm">Командний бій</option><option value="sab">Саботаж</option></select>
+      <select id="map"><option value="wreck">Аварія</option><option value="site">Будмайданчик</option><option value="depot">Депо</option><option value="market">Ринок</option><option value="cargo">Вантаж</option><option value="island">Острів</option></select>
+      <select id="mode"><option value="tdm">Командний бій</option><option value="sab">Саботаж</option><option value="br">Королівська битва</option></select>
       <button data-act="changemap">Змінити</button>
     </div>
     <div class="row">
@@ -177,8 +177,12 @@ async function refresh() {
   $("sname").textContent = i.name;
   const st = $("stats"); st.replaceChildren();
   const add = (k, v) => { const d = el("span", k + ": "); d.append(el("b", v)); st.append(d); };
+  // the battle royale has no sides: everybody for themselves (or in squads)
+  const br = i.mode_id === "br";
   add("Карта", i.map); add("Режим", i.mode); add("Стан", i.state);
-  add("Рахунок", i.scores[0] + " : " + i.scores[1]);
+  if (br) add("Живих", s.players.filter(p => p.team_id !== 2 && (p.alive || p.in_plane)).length);
+  else add("Рахунок", i.scores[0] + " : " + i.scores[1]);
+  $("teamcol").textContent = br ? "Стан" : "Команда";
   add("Гравці", i.players + " + " + i.bots + " ботів / " + i.max_players);
   add("Залишилось", Math.floor(i.time_left / 60) + ":" + String(Math.floor(i.time_left % 60)).padStart(2, "0"));
   add("Порт", i.port);
@@ -188,14 +192,18 @@ async function refresh() {
     const tr = el("tr");
     tr.append(el("td", p.id));
     const name = el("td", p.name); if (p.bot) name.append(el("span", " бот", "bot")); tr.append(name);
-    tr.append(el("td", p.team, "t" + p.team_id));
+    if (br) {
+      const st = p.team_id === 2 ? "глядач" : p.in_plane ? "у літаку" : p.alive ? "живий" : p.place ? "вибув, #" + p.place : "чекає";
+      tr.append(el("td", st + (p.squad ? " · загін " + p.squad : "")));
+    } else tr.append(el("td", p.team, "t" + p.team_id));
     tr.append(el("td", p.score));
     tr.append(el("td", p.kills + "/" + p.deaths + "/" + p.assists));
     tr.append(el("td", p.bot ? "—" : p.ping));
     tr.append(el("td", p.ip));
     const td = el("td");
     const b = (label, cmd, cls) => { const x = el("button", label, "small " + (cls || "ghost")); x.onclick = () => run(cmd); td.append(x, " "); };
-    b("→Сині", "team " + p.id + " allies"); b("→Червоні", "team " + p.id + " axis"); b("→Глядачі", "team " + p.id + " spec");
+    if (br) { b("→Грати", "team " + p.id + " allies"); b("→Глядачі", "team " + p.id + " spec"); }
+    else { b("→Сині", "team " + p.id + " allies"); b("→Червоні", "team " + p.id + " axis"); b("→Глядачі", "team " + p.id + " spec"); }
     b("Вбити", "kill " + p.id);
     const k = el("button", "Кік", "small danger"); k.onclick = () => { const r = prompt("Причина кіку:", ""); if (r !== null) run("kick " + p.id + " " + r); }; td.append(k, " ");
     if (!p.bot) { const bn = el("button", "Бан", "small danger"); bn.onclick = () => { const r = prompt("Причина бану:", ""); if (r !== null) run("ban " + p.id + " " + r); }; td.append(bn); }
