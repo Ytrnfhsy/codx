@@ -639,7 +639,7 @@ impl Killcam {
         } else {
             toon_shared::inventory::sight_zoom_range(g.sight).0
         };
-        tuning.weapon(self.weapon).ads_zoom.max(sight)
+        toon_shared::inventory::aimed_zoom(tuning.weapon(self.weapon).ads_zoom, g.sight, sight)
     }
 
     pub fn vm_state(&self, tuning: &Tuning) -> VmState {

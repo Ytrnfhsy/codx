@@ -142,6 +142,18 @@ pub fn sight_zoom_range(level: u8) -> (f32, f32) {
     }
 }
 
+/// How much aiming down the sights magnifies: a scope (2× and up) on the gun decides it
+/// (a variable one at `sight_zoom`, what it is turned to), even on a sniper rifle with its
+/// own 4× optic; with iron sights or a red dot the gun's own `gun_zoom` counts, or the
+/// red dot's if that is stronger.
+pub fn aimed_zoom(gun_zoom: f32, sight: u8, sight_zoom: f32) -> f32 {
+    if sight >= 2 {
+        sight_zoom
+    } else {
+        gun_zoom.max(sight_zoom)
+    }
+}
+
 /// The magnification can be turned.
 pub fn sight_variable(level: u8) -> bool {
     let (a, b) = sight_zoom_range(level);
@@ -399,6 +411,30 @@ impl Inventory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A variable scope zooms as it is turned, also on a sniper rifle (whose own optic is
+    /// 4×); a red dot never zooms less than the gun's iron sights.
+    #[test]
+    fn scopes_set_the_zoom() {
+        let sniper = 4.0;
+        for level in [3u8, 4] {
+            let (lo, hi) = sight_zoom_range(level);
+            assert_eq!(
+                aimed_zoom(sniper, level, lo),
+                lo,
+                "level {level} at its weakest"
+            );
+            assert_eq!(
+                aimed_zoom(sniper, level, hi),
+                hi,
+                "level {level} at its strongest"
+            );
+            assert!(aimed_zoom(sniper, level, lo) < aimed_zoom(sniper, level, hi));
+        }
+        assert_eq!(aimed_zoom(1.35, 0, 1.0), 1.35, "iron sights: the gun's own");
+        assert_eq!(aimed_zoom(1.2, 1, 1.5), 1.5, "a red dot");
+        assert_eq!(aimed_zoom(1.6, 1, 1.5), 1.6);
+    }
 
     #[test]
     fn vests_and_helmets_soak_and_wear_out() {

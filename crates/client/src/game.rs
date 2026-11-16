@@ -1871,10 +1871,10 @@ impl GameClient {
         )
     }
 
-    /// Magnification when aiming: the gun's own, or its sight's if that is stronger (a
-    /// variable scope at what it is turned to).
+    /// Magnification when aiming: a scope's (a variable one at what it is turned to),
+    /// otherwise the gun's own.
     pub fn ads_zoom(&self) -> f32 {
-        self.ws().ads_zoom.max(self.sight_zoom_now())
+        toon_shared::inventory::aimed_zoom(self.ws().ads_zoom, self.sight(), self.sight_zoom_now())
     }
 
     /// What the sight on the gun in hand magnifies right now.
