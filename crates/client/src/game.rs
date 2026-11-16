@@ -1376,7 +1376,7 @@ impl GameClient {
                     pos: Vec3::from_array(*pos),
                     yaw: *yaw,
                     speed: *speed,
-                    vy: 0.0,
+                    ..Default::default()
                 };
                 let c = self.cars.entry(*id).or_insert(CarView {
                     kind: *kind,

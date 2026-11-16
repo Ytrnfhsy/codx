@@ -189,6 +189,11 @@ pub struct Bot {
     cover_check: f64,
     /// Stance picked for the current exchange of fire, and until when.
     fight_stance: (Stance, f64),
+    /// Seconds of sprint used up (the same breath a player has: it runs out after
+    /// `sprint_time`, then comes back slowly).
+    pub winded_by: f32,
+    /// Out of breath: no sprinting until a good part of it is back.
+    pub winded: bool,
 }
 
 /// What a bot does for its side, so that they do not all run the same way.
@@ -269,6 +274,8 @@ impl Bot {
             nade_ready: 0.0,
             attacked_by: None,
             detour_until: 0.0,
+            winded_by: 0.0,
+            winded: false,
             role: match rng.f32() {
                 r if r < 0.35 => Role::Rusher,
                 r if r < 0.6 => Role::Flanker,
@@ -894,6 +901,32 @@ impl Game {
             stance = Stance::Prone;
             sprint = false;
             jump = false;
+        }
+        // bots get tired like players: a few seconds of sprint (twice that with Extreme
+        // Conditioning), then a walk until their breath is back
+        {
+            let m = &self.tuning.movement;
+            let most = m.sprint_time
+                * if self
+                    .p(id)
+                    .is_some_and(|p| p.has_perk3(Perk3::ExtremeConditioning))
+                {
+                    2.0
+                } else {
+                    1.0
+                };
+            if bot.winded && bot.winded_by <= most * 0.65 {
+                bot.winded = false;
+            }
+            sprint = sprint && !bot.winded && stance == Stance::Stand;
+            if sprint && move_dir.dot(yaw_basis(yaw).0) > 0.5 {
+                bot.winded_by += dt;
+                if bot.winded_by >= most {
+                    bot.winded = true;
+                }
+            } else {
+                bot.winded_by = (bot.winded_by - dt * m.sprint_recover).max(0.0);
+            }
         }
         let (f, r) = yaw_basis(yaw);
         let inp = MoveInput {

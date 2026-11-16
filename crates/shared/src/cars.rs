@@ -71,6 +71,8 @@ pub struct CarState {
     pub speed: f32,
     /// Falling (off a ledge).
     pub vy: f32,
+    /// Which way it last ran into something: 1 forward, -1 backing, 0 nothing yet.
+    pub hit: f32,
 }
 
 /// What the driver does: throttle and steering (-1..1), handbrake.
@@ -187,17 +189,36 @@ pub fn car_step(world: &World, kind: CarKind, s: &mut CarState, inp: CarInput, d
         s.speed = 0.0;
     }
     s.speed = s.speed.clamp(-max * 0.3, max);
-    // steering bites harder the faster you go (up to a point), and reverses backwards
-    let grip = (s.speed / 6.0).clamp(-1.0, 1.0);
+    // steering bites harder the faster you go (up to a point, soon enough to manoeuvre
+    // out of a tight spot), and reverses backwards
+    let grip = (s.speed / 3.5).clamp(-1.0, 1.0);
     let rate = match kind {
         CarKind::Jeep => 1.5,
         CarKind::Boat => 1.0,
     };
+    // where it stands now is clear (or it is wedged against something already)
+    let free_now = rest_at(world, kind, s, s.pos).is_some();
+    let old_yaw = s.yaw;
     s.yaw = wrap_angle(s.yaw + steer * rate * grip * dt);
+    // turning does not swing the body into a tree or a wall
+    if free_now && s.yaw != old_yaw && rest_at(world, kind, s, s.pos).is_none() {
+        s.yaw = old_yaw;
+    }
 
     let next = s.pos + s.forward() * s.speed * dt;
+    // wedged against what it ran into: it may always back away from it (the way it was
+    // not going when it hit)
+    let backing_off = !free_now && s.hit != 0.0 && s.speed * s.hit < -0.01;
     match rest_at(world, kind, s, next) {
+        None if backing_off => {
+            s.pos.x = next.x;
+            s.pos.z = next.z;
+            0.0
+        }
         Some(y) => {
+            if s.speed.abs() > 0.3 {
+                s.hit = 0.0;
+            }
             s.pos.x = next.x;
             s.pos.z = next.z;
             if y >= s.pos.y - 0.4 || kind == CarKind::Boat {
@@ -217,6 +238,9 @@ pub fn car_step(world: &World, kind: CarKind, s: &mut CarState, inp: CarInput, d
         None => {
             // hit something: bounce back a little
             let crash = s.speed.abs();
+            if s.speed != 0.0 {
+                s.hit = s.speed.signum();
+            }
             s.speed = -s.speed * 0.25;
             crash
         }
@@ -227,6 +251,86 @@ pub fn car_step(world: &World, kind: CarKind, s: &mut CarState, inp: CarInput, d
 mod tests {
     use super::*;
     use crate::map::MapId;
+
+    /// Rammed into a wall with the wheel turned towards it, a jeep still backs out and
+    /// drives away; one wedged in already backs out too.
+    #[test]
+    fn a_jeep_backs_out_of_a_crash() {
+        let map = crate::maps::test_yard();
+        let world = World::from_map(&map);
+        let dt = 1.0 / 30.0;
+        // east of the warehouse (its east wall's face is at x = -20), heading west at it
+        let mut s = CarState {
+            pos: vec3(-6.0, 0.0, -8.0),
+            yaw: std::f32::consts::FRAC_PI_2,
+            ..Default::default()
+        };
+        let ram = CarInput {
+            throttle: 1.0,
+            steer: 1.0,
+            brake: false,
+        };
+        let mut crashes = 0;
+        for _ in 0..(4.0 / dt) as usize {
+            if car_step(&world, CarKind::Jeep, &mut s, ram, dt) > 0.0 {
+                crashes += 1;
+            }
+        }
+        assert!(crashes > 0, "never reached the wall: {:?}", s.pos);
+        let at_wall = s.pos;
+        let back = CarInput {
+            throttle: -1.0,
+            steer: -1.0,
+            brake: false,
+        };
+        for _ in 0..(3.0 / dt) as usize {
+            car_step(&world, CarKind::Jeep, &mut s, back, dt);
+        }
+        assert!(
+            s.pos.distance(at_wall) > 4.0,
+            "stuck by the wall: {:?} from {:?}",
+            s.pos,
+            at_wall
+        );
+        // and drives off forwards again
+        let go = CarInput {
+            throttle: 1.0,
+            steer: 0.0,
+            brake: false,
+        };
+        let from = s.pos;
+        for _ in 0..(2.0 / dt) as usize {
+            car_step(&world, CarKind::Jeep, &mut s, go, dt);
+        }
+        assert!(s.pos.distance(from) > 3.0, "cannot drive off: {:?}", s.pos);
+
+        // wedged: its nose in the wall already (as after a hard crash)
+        let (_, hz) = CarKind::Jeep.half();
+        let mut w = CarState {
+            // (the nose half way into the wall)
+            pos: vec3(-20.15 + hz, 0.0, -8.0),
+            yaw: std::f32::consts::FRAC_PI_2,
+            hit: 1.0,
+            ..Default::default()
+        };
+        assert!(
+            rest_at(&world, CarKind::Jeep, &w, w.pos).is_none(),
+            "not wedged"
+        );
+        let start = w.pos;
+        for _ in 0..(2.0 / dt) as usize {
+            car_step(&world, CarKind::Jeep, &mut w, back, dt);
+        }
+        assert!(
+            w.pos.distance(start) > 2.0,
+            "a wedged jeep stays put: {:?}",
+            w.pos
+        );
+        assert!(
+            rest_at(&world, CarKind::Jeep, &w, w.pos).is_some(),
+            "still in the wall"
+        );
+    }
 
     #[test]
     fn a_jeep_drives_and_stops_at_walls_a_boat_stays_afloat() {

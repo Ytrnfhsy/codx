@@ -1172,7 +1172,7 @@ pub fn draw_model_gallery(mats: &Materials) {
                 pos: vec3(x, 0.0, -2.5),
                 yaw,
                 speed: 8.0,
-                vy: 0.0,
+                ..Default::default()
             };
             models::add_car(&mut m, kind, &s, 100, 0.0);
         }

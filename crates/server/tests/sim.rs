@@ -456,3 +456,35 @@ fn nobody_spawns_inside_another_player() {
         }
     }
 }
+
+/// Bots run out of breath like players: none sprints longer at a stretch than a player's
+/// sprint lasts, and each gets it back slowly.
+#[test]
+fn bots_get_tired_sprinting() {
+    let (mut g, _) = setup(MapId::Island, Mode::Tdm);
+    let most = g.tuning.movement.sprint_time;
+    let mut run_for: std::collections::HashMap<u8, f32> = Default::default();
+    let mut longest = 0.0f32;
+    let mut sprinted = 0.0f32;
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+        for p in g.players.iter().flatten().filter(|p| p.is_bot() && p.alive) {
+            let r = run_for.entry(p.id).or_default();
+            if p.flags & toon_shared::protocol::flags::SPRINT != 0 {
+                *r += TICK_DT;
+                sprinted += TICK_DT;
+                longest = longest.max(*r);
+            } else {
+                *r = 0.0;
+            }
+        }
+    }
+    println!("longest sprint {longest:.1} s, {sprinted:.0} s of sprint in all");
+    assert!(sprinted > 5.0, "the bots never sprinted");
+    assert!(
+        longest <= most * 2.0 + 0.2,
+        "a bot sprinted {longest} s without a break"
+    );
+}
