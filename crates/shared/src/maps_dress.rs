@@ -112,8 +112,8 @@ fn fits(old: &[MapBox], new: &[MapBox], keep: &Keep, min: Vec2, max: Vec2) -> bo
             if o.max.y < n.min.y || o.min.y > n.max.y + 0.5 {
                 continue;
             }
-            // a body (0.7 m) and a bit gets between a prop and anything that stands up
-            let gap = if o.max.y - o.min.y > 0.6 { 1.1 } else { 0.5 };
+            // a body (0.7 m) gets comfortably between a prop and anything that stands up
+            let gap = if o.max.y - o.min.y > 0.6 { 1.6 } else { 1.0 };
             if n.max.x + gap > o.min.x
                 && n.min.x - gap < o.max.x
                 && n.max.z + gap > o.min.z
@@ -199,17 +199,21 @@ pub fn dress(
         let mine: Vec<&Slot> = slots.iter().filter(|s| s.cover == *cover).collect();
         // the allies' half: a pick per slot (another one if it does not fit there)
         let mut picks = Vec::new();
+        // (a crowded slot looks further round itself before it gives up)
         for s in &mine {
             let first = rng.below(props.len());
-            for k in 0..props.len() {
-                let pick = Pick {
-                    prop: (first + k) % props.len(),
-                    seed: rng.next_u64(),
-                };
-                if place(b, props, pick, s.x, s.z, &mut rng, keep, min, max, spread) {
-                    picks.push(pick);
-                    got[0].0[ci] += 1;
-                    break;
+            'slot: for wider in [1.0, 1.8, 2.6] {
+                for k in 0..props.len() {
+                    let pick = Pick {
+                        prop: (first + k) % props.len(),
+                        seed: rng.next_u64(),
+                    };
+                    let r = spread * wider;
+                    if place(b, props, pick, s.x, s.z, &mut rng, keep, min, max, r) {
+                        picks.push(pick);
+                        got[0].0[ci] += 1;
+                        break 'slot;
+                    }
                 }
             }
         }
@@ -363,7 +367,7 @@ pub mod props {
     pub fn sacks(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
         b.sacks(x, z);
         if r.chance(0.6) {
-            let (dx, dz) = if ax { (1.35, 0.0) } else { (0.0, 1.35) };
+            let (dx, dz) = if ax { (1.3, 0.0) } else { (0.0, 1.1) };
             b.sacks(x + dx, z + dz);
         }
     }
@@ -371,7 +375,7 @@ pub mod props {
     pub fn barrier(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
         b.barrier(x, z, ax);
         if r.chance(0.5) {
-            let (dx, dz) = if ax { (2.5, 0.3) } else { (0.3, 2.5) };
+            let (dx, dz) = if ax { (2.4, 0.0) } else { (0.0, 2.4) };
             b.barrier(x + dx, z + dz, ax);
         }
     }
@@ -395,16 +399,15 @@ pub mod props {
     }
 
     pub fn low_crates(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
+        // a row of crates side by side, each touching the next
         let n = 2 + r.below(2);
-        for k in 0..n {
-            let s = r.range(0.95, 1.15);
-            let o = k as f32 * 1.15 - (n - 1) as f32 * 0.575;
-            let (dx, dz) = if ax {
-                (o, r.range(-0.15, 0.15))
-            } else {
-                (r.range(-0.15, 0.15), o)
-            };
+        let sizes: Vec<f32> = (0..n).map(|_| r.range(0.95, 1.15)).collect();
+        let mut o = -sizes.iter().sum::<f32>() / 2.0;
+        for s in sizes {
+            let c = o + s / 2.0;
+            let (dx, dz) = if ax { (c, 0.0) } else { (0.0, c) };
             b.crate_(x + dx, z + dz, s, 0.0);
+            o += s;
         }
     }
 
@@ -429,7 +432,7 @@ pub mod props {
     pub fn tyres(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
         let n = 2 + r.below(2);
         for k in 0..n {
-            let o = k as f32 * 0.95 - (n - 1) as f32 * 0.475;
+            let o = k as f32 * 0.9 - (n - 1) as f32 * 0.45;
             let (dx, dz) = if ax { (o, 0.0) } else { (0.0, o) };
             b.cbox(x + dx, z + dz, 0.9, 0.9, 0.0, 1.0, pal::TYRE);
             b.push_detail(
@@ -461,10 +464,10 @@ pub mod props {
             pal::BARREL_BLUE
         };
         for (dx, dz) in [
-            (-0.38f32, -0.38f32),
-            (0.38, -0.38),
-            (-0.38, 0.38),
-            (0.38, 0.38),
+            (-0.33f32, -0.33f32),
+            (0.33, -0.33),
+            (-0.33, 0.33),
+            (0.33, 0.33),
         ] {
             if r.chance(0.85) {
                 b.cbox(x + dx, z + dz, 0.66, 0.66, 0.12, 1.0, c);
@@ -480,7 +483,7 @@ pub mod props {
             }
         }
         // (one always stands, so the cover is never empty)
-        b.cbox(x - 0.38, z - 0.38, 0.66, 0.66, 0.12, 1.0, c);
+        b.cbox(x - 0.33, z - 0.33, 0.66, 0.66, 0.12, 1.0, c);
     }
 
     pub fn timber(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
@@ -493,10 +496,12 @@ pub mod props {
     pub fn bricks(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
         let n = 2 + r.below(2);
         for k in 0..n {
-            let o = k as f32 * 1.3 - (n - 1) as f32 * 0.65;
+            // pallets side by side, touching
+            let o = k as f32 * 1.2 - (n - 1) as f32 * 0.6;
             let (dx, dz) = if ax { (o, 0.0) } else { (0.0, o) };
-            b.cbox(x + dx, z + dz, 1.2, 1.0, 0.0, 0.15, pal::WOOD);
-            b.cbox(x + dx, z + dz, 1.1, 0.9, 0.15, 0.8, pal::BRICK);
+            let (w, d) = if ax { (1.2, 1.0) } else { (1.0, 1.2) };
+            b.cbox(x + dx, z + dz, w, d, 0.0, 0.15, pal::WOOD);
+            b.cbox(x + dx, z + dz, w, d, 0.15, 0.8, pal::BRICK);
             b.push_detail(
                 x + dx - 0.56,
                 0.6,
@@ -516,7 +521,8 @@ pub mod props {
         b.cbox(x, z, w, d, 0.0, 1.5, pal::WOOD);
         b.push_detail(x - 0.5, 0.5, z - 0.5, x + 0.5, 1.0, z + 0.5, pal::DARK);
         if r.chance(0.5) {
-            let (dx, dz) = if ax { (1.6, 0.2) } else { (0.2, 1.6) };
+            // a smaller one against it
+            let (dx, dz) = if ax { (1.35, 0.0) } else { (0.0, 1.35) };
             b.cbox(x + dx, z + dz, w * 0.8, d * 0.8, 0.0, 1.35, pal::WOOD);
         }
     }
@@ -524,9 +530,9 @@ pub mod props {
     pub fn big_crates(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
         b.crate_(x, z, 1.5, 0.0);
         let (dx, dz) = if ax {
-            (1.4, r.range(-0.3, 0.3))
+            (1.4, r.range(-0.1, 0.1))
         } else {
-            (r.range(-0.3, 0.3), 1.4)
+            (r.range(-0.1, 0.1), 1.4)
         };
         b.crate_(x + dx, z + dz, 1.3, 0.0);
         if r.chance(0.5) {
@@ -537,16 +543,17 @@ pub mod props {
     pub fn forklift(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
         b.forklift(x, z, ax);
         if r.chance(0.5) {
-            let (dx, dz) = if ax { (2.0, 0.0) } else { (0.0, 2.0) };
+            // a crate on the forks, against the mast
+            let (dx, dz) = if ax { (1.78, 0.0) } else { (0.0, 1.78) };
             b.crate_(x + dx, z + dz, 0.9, 0.0);
         }
     }
 
     pub fn tank_cube(b: &mut MapBuilder, x: f32, z: f32, ax: bool, _r: &mut Rng) {
-        for k in [-0.7f32, 0.7] {
+        for k in [-0.625f32, 0.625] {
             let (dx, dz) = if ax { (k, 0.0) } else { (0.0, k) };
             b.cbox(x + dx, z + dz, 1.25, 1.25, 0.0, 0.15, pal::DARK);
-            b.cbox(x + dx, z + dz, 1.15, 1.15, 0.15, 1.25, pal::TANK);
+            b.cbox(x + dx, z + dz, 1.25, 1.25, 0.15, 1.25, pal::TANK);
             b.push_detail(
                 x + dx - 0.6,
                 0.5,
@@ -647,7 +654,7 @@ pub mod props {
 
     pub fn toilets(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
         for k in 0..3 {
-            let o = (k as f32 - 1.0) * 1.25;
+            let o = (k as f32 - 1.0) * 1.1;
             let (dx, dz) = if ax { (o, 0.0) } else { (0.0, o) };
             let c = [pal::CONT_BLUE, pal::CONT_GREEN, pal::CONT_ORANGE][(k + r.below(3)) % 3];
             b.toilet(x + dx, z + dz, c);
@@ -668,7 +675,8 @@ pub mod props {
 
     /// Two side by side, one on top across the gap.
     pub fn stack_pyramid(b: &mut MapBuilder, x: f32, z: f32, ax: bool, r: &mut Rng) {
-        let (dx, dz) = if ax { (0.0, 1.3) } else { (1.3, 0.0) };
+        // (side by side, touching: no slit between them)
+        let (dx, dz) = if ax { (0.0, 1.225) } else { (1.225, 0.0) };
         b.container(x - dx, z - dz, ax, 0.0, colour(r));
         b.container(x + dx, z + dz, ax, 0.0, colour(r));
         b.container(x, z, ax, 2.6, colour(r));

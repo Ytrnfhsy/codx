@@ -277,7 +277,7 @@ fn skeleton(b: &mut MapBuilder, st: &Style) {
     b.tank(-61.0, 44.0);
     b.site_cabin(-43.5, 34.5, true, st.cabin);
     b.brick_pallet(-45.0, 51.5);
-    b.brick_pallet(-46.5, 51.5);
+    b.brick_pallet(-46.2, 51.5);
     b.timber(-55.0, 52.0, true);
     b.barrel(-39.0, 38.5, pal::BARREL_BLUE);
 

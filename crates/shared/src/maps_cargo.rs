@@ -59,7 +59,9 @@ impl MapBuilder {
         } else {
             (cx, cz + 1.2)
         };
-        self.cbox(mx, mz, 0.25, 0.25, 0.0, 2.6, pal::DARK);
+        // the mast as wide as the truck (nothing to squeeze into beside it)
+        let (mw, md) = if along_x { (0.25, 1.0) } else { (1.0, 0.25) };
+        self.cbox(mx, mz, mw, md, 0.0, 2.6, pal::DARK);
         for s in [-0.35f32, 0.35] {
             if along_x {
                 self.push_detail(
@@ -269,7 +271,7 @@ fn skeleton(b: &mut MapBuilder, st: &Style) {
     b.cbox(32.0, 21.0, 1.2, 6.0, 0.0, 2.6, pal::METAL);
     b.cbox(27.0, 24.5, 4.0, 1.2, 0.0, 2.6, pal::METAL);
     b.crate_(37.0, 24.0, 1.4, 0.0);
-    b.crate_(37.0, 22.5, 1.2, 0.0);
+    b.crate_(37.0, 22.7, 1.2, 0.0);
     b.crate_(36.8, 23.4, 1.0, 1.4);
     b.sacks(26.0, 16.5);
     b.ladder(vec3(25.5, 0.0, 27.0), vec3(0.0, 0.0, 1.0), 5.55);

@@ -199,8 +199,8 @@ fn skeleton(b: &mut MapBuilder, st: &Style) {
     b.cbox(-41.0, 14.5, 1.0, 5.0, 0.0, 1.1, pal::WOOD);
     b.cbox(-36.5, 19.0, 1.4, 4.0, 0.0, 2.4, pal::METAL);
     b.crate_(-42.5, 27.5, 1.4, 0.0);
-    b.crate_(-41.0, 27.8, 1.2, 0.0);
-    b.crate_(-41.8, 27.6, 1.0, 1.4);
+    b.crate_(-41.2, 27.5, 1.2, 0.0);
+    b.crate_(-41.9, 27.5, 1.0, 1.4);
     b.barrel(-44.5, 11.0, pal::BARREL_BLUE);
     b.tyres(-36.0, 28.5);
 

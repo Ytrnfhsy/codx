@@ -366,8 +366,10 @@ impl MapBuilder {
 
     /// Blocky toon tree (palm-ish when `palm`).
     pub fn tree(&mut self, cx: f32, cz: f32, palm: bool) {
+        // (the trunk runs on up inside the crown to its top: nobody stands on a trunk with
+        // their head in the leaves)
         if palm {
-            self.cbox(cx, cz, 0.35, 0.35, 0.0, 5.0, pal::TRUNK);
+            self.cbox(cx, cz, 0.35, 0.35, 0.0, 5.6, pal::TRUNK);
             self.push_detail(
                 cx - 2.2,
                 4.8,
@@ -396,7 +398,7 @@ impl MapBuilder {
                 pal::LEAVES,
             );
         } else {
-            self.cbox(cx, cz, 0.45, 0.45, 0.0, 2.6, pal::TRUNK);
+            self.cbox(cx, cz, 0.45, 0.45, 0.0, 5.2, pal::TRUNK);
             self.push_detail(
                 cx - 1.6,
                 2.4,

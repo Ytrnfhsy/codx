@@ -411,7 +411,7 @@ fn base(m: &Heightmap, x: f32, z: f32, r: f32) -> f32 {
 
 /// A leafy tree of size `s`.
 fn tree(b: &mut MapBuilder, x: f32, z: f32, s: f32, leaves: [u8; 3]) {
-    b.cbox(x, z, 0.45 * s, 0.45 * s, -0.4, 2.8 * s + 0.4, pal::TRUNK);
+    b.cbox(x, z, 0.45 * s, 0.45 * s, -0.4, 5.3 * s + 0.4, pal::TRUNK);
     b.push_detail(
         x - 1.7 * s,
         2.2 * s,
@@ -435,7 +435,7 @@ fn tree(b: &mut MapBuilder, x: f32, z: f32, s: f32, leaves: [u8; 3]) {
 /// A tall pine of size `s`.
 fn pine(b: &mut MapBuilder, x: f32, z: f32, s: f32) {
     let c = [60, 128, 84];
-    b.cbox(x, z, 0.4 * s, 0.4 * s, -0.4, 3.0 * s + 0.4, pal::TRUNK);
+    b.cbox(x, z, 0.4 * s, 0.4 * s, -0.4, 6.6 * s + 0.4, pal::TRUNK);
     for (k, (w, y0, y1)) in [(3.0, 1.6, 3.4), (2.2, 3.4, 5.0), (1.3, 5.0, 6.6)]
         .into_iter()
         .enumerate()
