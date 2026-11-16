@@ -4,7 +4,6 @@ use glam::vec3;
 use toon_server::config::ServerConfig;
 use toon_server::game::{Dest, Game};
 use toon_shared::consts::TICK_DT;
-use toon_shared::map::MapId;
 use toon_shared::protocol::{MatchState, C2S, S2C};
 use toon_shared::rng::Rng;
 use toon_shared::weapons::DEFAULT_CLASSES;
@@ -25,7 +24,8 @@ fn game(skill: f32, bots: usize, seed: u64, protection: f32) -> (Game, u8) {
     };
     let mut g = Game::new(cfg);
     g.rng = Rng::new(seed);
-    g.change_map(MapId::Depot, Mode::Tdm);
+    // (the small fixed yard: these tests place players by its coordinates)
+    g.play_on(toon_shared::maps::test_yard(), Mode::Tdm);
     let id = g
         .connect(
             "127.0.0.1:5000".parse().unwrap(),

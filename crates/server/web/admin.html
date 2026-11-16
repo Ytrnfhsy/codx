@@ -87,8 +87,8 @@
       <label>Час раунду Sab, хв<input id="s_sabtime" type="number" min="1" step="0.5"></label>
       <label>Раундів для перемоги<input id="s_rounds" type="number" min="1"></label>
       <label>Таймер бомби, с<input id="s_bombtimer" type="number" min="5"></label>
-      <label>Макс. гравців<input id="s_maxplayers" type="number" min="2" max="64"></label>
-      <label>Боти (заповнення до)<input id="s_bots" type="number" min="0" max="64"></label>
+      <label>Макс. гравців<input id="s_maxplayers" type="number" min="2" max="32"></label>
+      <label>Боти (заповнення до)<input id="s_bots" type="number" min="0" max="32"></label>
       <label>Макс. гравців, королівська битва<input id="s_brmaxplayers" type="number" min="2" max="64"></label>
       <label>Боти, королівська битва<input id="s_brbots" type="number" min="0" max="64"></label>
       <label>Складність ботів<select id="s_botskill"><option value="0.1">Легкі</option><option value="0.4">Звичайні</option><option value="0.7">Важкі</option><option value="1">Ветерани</option></select></label>
@@ -318,6 +318,16 @@ async function applyTuning() {
   tState = { tuning: s.tuning, fields: s.tuning_fields };
   renderTuning(true);
 }
+// the island is for the battle royale only, and the other way round
+$("map").addEventListener("change", () => {
+  if ($("map").value === "island") $("mode").value = "br";
+  else if ($("mode").value === "br") $("mode").value = "tdm";
+});
+$("mode").addEventListener("change", () => {
+  if ($("mode").value === "br") $("map").value = "island";
+  else if ($("map").value === "island") $("map").value = "wreck";
+});
+
 document.addEventListener("click", async (e) => {
   const t = e.target;
   if (!(t instanceof HTMLElement)) return;

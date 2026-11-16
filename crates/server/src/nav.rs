@@ -750,9 +750,6 @@ mod tests {
         for id in MapId::ALL {
             let m = maps::build(id);
             let w = World::from_map(&m);
-            if id == MapId::Cargo {
-                continue; // deliberately flat close-quarters map
-            }
             let nav = Nav::build(&m, &w);
             let s = m.spawns[0][0].pos;
             // every map must offer some high ground bots can walk up to
@@ -807,15 +804,12 @@ mod tests {
                 [-46.25, 4.6, 11.75],
                 "south-west terrace balcony",
             ),
-            (
-                MapId::Site,
-                [0.0, 3.4, -3.5],
-                "first floor of the unfinished building",
-            ),
-            (MapId::Site, [0.0, 3.4, 7.7], "scaffolding"),
-            (MapId::Site, [-4.0, 6.8, -3.5], "half roof"),
-            (MapId::Site, [-29.0, 6.8, -16.0], "office roof"),
-            (MapId::Site, [-22.3, 3.4, -16.0], "office balcony"),
+            (MapId::Site, [0.0, 3.4, 7.0], "first floor of the frame"),
+            (MapId::Site, [1.0, 3.4, 9.7], "scaffolding"),
+            (MapId::Site, [-4.0, 6.8, 4.0], "roof quarter of the frame"),
+            (MapId::Site, [4.0, 6.8, -4.0], "the other roof quarter"),
+            (MapId::Site, [-34.0, 3.4, 14.0], "site office upper floor"),
+            (MapId::Site, [38.0, 3.75, 20.0], "garage roof (by ladder)"),
             (MapId::Market, [27.5, 6.8, -11.25], "east high house roof"),
             (MapId::Market, [-27.5, 6.8, -11.25], "west high house roof"),
             (MapId::Market, [43.0, 3.4, 5.8], "balcony over the street"),
@@ -839,7 +833,28 @@ mod tests {
                 [28.5, 6.35, 27.5],
                 "warehouse roof (by ladder)",
             ),
-            (MapId::Depot, [25.0, 3.4, 0.0], "office upper floor"),
+            (MapId::Depot, [47.0, 3.4, 12.0], "office upper floor"),
+            (MapId::Depot, [0.0, 3.6, 3.0], "footbridge over the line"),
+            (
+                MapId::Depot,
+                [13.0, 5.2, 20.3],
+                "container stack (by ladder)",
+            ),
+            (
+                MapId::Cargo,
+                [2.0, 3.4, 23.0],
+                "harbour control upper floor",
+            ),
+            (
+                MapId::Cargo,
+                [-7.0, 5.2, 10.0],
+                "container stack (by ladder)",
+            ),
+            (
+                MapId::Cargo,
+                [32.0, 5.55, 20.0],
+                "warehouse roof (by ladder)",
+            ),
         ];
         for &(id, p, what) in spots {
             let m = maps::build(id);

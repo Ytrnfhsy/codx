@@ -6,7 +6,6 @@ use toon_server::config::ServerConfig;
 use toon_server::game::Game;
 use toon_shared::consts::TICK_DT;
 use toon_shared::look_dir;
-use toon_shared::map::MapId;
 use toon_shared::protocol::{MatchState, C2S};
 use toon_shared::vehicles::{keys, VehicleKind, BOMBER_ALT};
 use toon_shared::weapons::{Cause, Killstreak, DEFAULT_CLASSES};
@@ -29,7 +28,8 @@ fn duel() -> (Game, u8, u8) {
     };
     let mut g = Game::new(cfg);
     g.rng = toon_shared::rng::Rng::new(99);
-    g.change_map(MapId::Depot, Mode::Tdm);
+    // (the small fixed yard: these tests place players by its coordinates)
+    g.play_on(toon_shared::maps::test_yard(), Mode::Tdm);
     let mut ids = Vec::new();
     for (k, team) in [Team::Allies, Team::Axis].into_iter().enumerate() {
         let id = g

@@ -36,6 +36,8 @@ pub const RELEASE_BUILD: bool = option_env!("TW_VERSION").is_some();
 pub const QUERY_MAGIC: &[u8; 4] = b"TWQ?";
 pub const QUERY_REPLY_MAGIC: &[u8; 4] = b"TWQ!";
 pub const MAX_PLAYERS: usize = 64;
+/// Most players on the ordinary maps (only the island has room for `MAX_PLAYERS`).
+pub const MAX_PLAYERS_ARENA: usize = 32;
 /// On big maps a player is told only about what is this close (m); the fog ends sooner.
 pub const INTEREST_RANGE: f32 = 400.0;
 /// Guns and supplies on the ground are sent this far (big maps).

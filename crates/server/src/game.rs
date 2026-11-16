@@ -2076,6 +2076,16 @@ impl Game {
         });
     }
 
+    /// Plays on a map given ready-made (tests use the small fixed yard, which never
+    /// changes when the real maps do).
+    pub fn play_on(&mut self, map: toon_shared::map::Map, mode: Mode) {
+        self.world = World::from_map(&map);
+        self.nav = Nav::build(&map, &self.world);
+        self.map = map;
+        self.spare_map = None;
+        self.change_map(self.map.id, mode);
+    }
+
     /// Switches map/mode immediately (admin or rotation).
     pub fn change_map(&mut self, map: MapId, mode: Mode) {
         // building a big map (and its routes) takes seconds: the same map again keeps what

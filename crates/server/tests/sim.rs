@@ -181,6 +181,8 @@ fn grenade_landing(g: &mut Game, id: u8) -> f32 {
 fn grenade_throw_range_is_tunable() {
     let (mut g, id) = setup(MapId::Depot, Mode::Tdm);
     toon_server::admin::exec(&mut g, "bots 0");
+    // (the small fixed yard: its road is open ground)
+    g.play_on(toon_shared::maps::test_yard(), Mode::Tdm);
     run(&mut g, 1.0);
     // stand at the west end of the road (z = 0) and throw east along it: ~38 m of open ground
     let place = |g: &mut Game| {

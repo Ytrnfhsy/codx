@@ -1893,3 +1893,59 @@ fn a_spectator_does_not_start_rounds_over_and_over() {
     assert_eq!(ends, 0);
     assert_eq!(g.state, MatchState::Playing);
 }
+
+/// The island and the battle royale only go together: asking for either gives both, on
+/// the command line, in the rotation and in the admin commands; the ordinary maps hold
+/// 32 players at most.
+#[test]
+fn the_island_is_for_the_battle_royale_only() {
+    use toon_server::config::RotationEntry;
+    let pair = |map: &str, mode: &str| {
+        RotationEntry {
+            map: map.into(),
+            mode: mode.into(),
+        }
+        .resolve()
+    };
+    assert_eq!(pair("island", "tdm"), (MapId::Island, Mode::Br));
+    assert_eq!(pair("market", "br"), (MapId::Island, Mode::Br));
+    assert_eq!(pair("market", "sab"), (MapId::Market, Mode::Sab));
+
+    let cfg = ServerConfig {
+        ready_check: false,
+        bots: 0,
+        max_players: 64,
+        data_dir: std::env::temp_dir()
+            .join("tw-br-rule")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    }
+    .sanitized();
+    assert_eq!(cfg.max_players, 32, "32 at most off the island");
+    assert_eq!(cfg.br.max_players.max(64), 64);
+    let mut g = Game::new(cfg);
+    let exec = |g: &mut Game, c: &str| toon_server::admin::exec(g, c);
+    // refused: nothing changes
+    exec(&mut g, "map cargo br");
+    assert_eq!((g.map.id, g.mode), (MapId::Wreck, Mode::Tdm));
+    exec(&mut g, "map island sab");
+    assert_eq!((g.map.id, g.mode), (MapId::Wreck, Mode::Tdm));
+    // the island alone brings the battle royale, and the mode alone the island
+    exec(&mut g, "map island");
+    assert_eq!((g.map.id, g.mode), (MapId::Island, Mode::Br));
+    exec(&mut g, "mode tdm");
+    assert_eq!(
+        (g.map.id, g.mode),
+        (MapId::Island, Mode::Br),
+        "not on the island"
+    );
+    exec(&mut g, "map cargo");
+    assert_eq!((g.map.id, g.mode), (MapId::Cargo, Mode::Tdm));
+    exec(&mut g, "mode br");
+    assert_eq!((g.map.id, g.mode), (MapId::Island, Mode::Br));
+    exec(&mut g, "set maxplayers 64");
+    assert_eq!(g.cfg.max_players, 32);
+    exec(&mut g, "set brmaxplayers 64");
+    assert_eq!(g.cfg.br.max_players, 64);
+}

@@ -1,4 +1,4 @@
-//! «Аварія» — a desert town on a hillside, 120 × 108 m.
+//! «Аварія» — a stone town on a hillside, 120 × 108 m.
 //!
 //! A crossroads in the valley (level 0) with the crashed helicopter in its square. The
 //! north-east and south-west quarters stand on 1.2 m terraces behind retaining walls,
@@ -8,7 +8,7 @@
 //! (x, z → −x, −z), so both teams get the same climbs and distances, but the buildings on
 //! each side are different.
 //!
-//! Dusty noon: a pale hot sky, sand and adobe, warm light.
+//! A cold clear morning: a pale blue haze, grey stone and bluish plaster, cool light.
 
 use crate::map::{door, pal, wide_door, window, Map, MapBuilder, MapId, Opening, Side, Spawn};
 use crate::props::Tower;
@@ -21,15 +21,15 @@ const HALF_Z: f32 = 54.0;
 const TERRACE: f32 = 1.2;
 const HILL: f32 = 2.4;
 
-const SAND: [u8; 3] = [224, 198, 146];
-const DUST: [u8; 3] = [206, 182, 138];
-const RETAIN: [u8; 3] = [170, 140, 100];
-const PAVING: [u8; 3] = [214, 192, 150];
-const ADOBE: [u8; 3] = [212, 166, 112];
-const ADOBE_LIGHT: [u8; 3] = [236, 206, 160];
-const ADOBE_PINK: [u8; 3] = [222, 160, 128];
-const WHITEWASH: [u8; 3] = [240, 232, 214];
-const ROOF_CLAY: [u8; 3] = [186, 104, 70];
+const SAND: [u8; 3] = [196, 202, 204];
+const DUST: [u8; 3] = [174, 184, 192];
+const RETAIN: [u8; 3] = [126, 138, 152];
+const PAVING: [u8; 3] = [188, 196, 204];
+const ADOBE: [u8; 3] = [168, 186, 204];
+const ADOBE_LIGHT: [u8; 3] = [212, 224, 234];
+const ADOBE_PINK: [u8; 3] = [190, 178, 204];
+const WHITEWASH: [u8; 3] = [232, 238, 244];
+const ROOF_CLAY: [u8; 3] = [98, 118, 146];
 const TEAL: [u8; 3] = [70, 150, 150];
 
 fn upper_door(at: f32) -> Opening {
@@ -646,9 +646,10 @@ pub fn wreck() -> Map {
         spawns: [allies, axis],
         bomb: vec3(0.0, 0.0, 0.0),
         sites: [site_allies, site_axis],
-        sky: [200, 222, 236],
-        fog: [232, 214, 180],
-        tint: [1.06, 1.0, 0.9],
+        // a cold clear morning: pale blue haze, bluish light
+        sky: [158, 196, 236],
+        fog: [198, 214, 230],
+        tint: [0.93, 0.99, 1.09],
         terrain: None,
         loot: Vec::new(),
         nav_detail: Vec::new(),

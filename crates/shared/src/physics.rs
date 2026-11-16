@@ -1424,7 +1424,7 @@ mod tests {
     }
 
     fn world() -> (Map, World) {
-        let m = maps::build(MapId::Depot);
+        let m = maps::test_yard();
         let w = World::from_map(&m);
         (m, w)
     }

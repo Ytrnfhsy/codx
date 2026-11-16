@@ -83,21 +83,6 @@ fn main() {
             }
         }
     }
-    // --bots sets the bots of the mode the server starts with (the battle royale keeps
-    // its own count)
-    if let Some(n) = bots {
-        let start_mode = first
-            .as_ref()
-            .map(|f| f.1.clone())
-            .filter(|m| !m.is_empty())
-            .unwrap_or_else(|| cfg.rotation[0].mode.clone());
-        if toon_shared::Mode::parse(&start_mode) == Some(toon_shared::Mode::Br) {
-            cfg.br.bots = n;
-            cfg.br.max_players = cfg.br.max_players.max(n);
-        } else {
-            cfg.bots = n;
-        }
-    }
     if let Some((map, mode)) = first {
         let cur = cfg.rotation[0].clone();
         cfg.rotation.insert(
@@ -107,6 +92,16 @@ fn main() {
                 mode: if mode.is_empty() { cur.mode } else { mode },
             },
         );
+    }
+    // --bots sets the bots of the mode the server starts with (the battle royale keeps
+    // its own count)
+    if let Some(n) = bots {
+        if cfg.rotation[0].resolve().1 == toon_shared::Mode::Br {
+            cfg.br.bots = n;
+            cfg.br.max_players = cfg.br.max_players.max(n);
+        } else {
+            cfg.bots = n;
+        }
     }
     if cfg.rcon_password.is_empty() {
         println!("⚠  rcon_password порожній — веб-адмінка і /rcon вимкнені (консоль працює).");

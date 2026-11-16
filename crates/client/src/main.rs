@@ -332,8 +332,13 @@ async fn amain(args: Args) {
         if let Some(n) = args.score_limit {
             cfg.tdm.score_limit = n.max(1);
         }
-        let map = args.map.clone().unwrap_or(hs.map.clone());
-        let mode = args.mode.clone().unwrap_or(hs.mode.clone());
+        // (the island and the battle royale only go together)
+        let entry = toon_server::config::RotationEntry {
+            map: args.map.clone().unwrap_or(hs.map.clone()),
+            mode: args.mode.clone().unwrap_or(hs.mode.clone()),
+        };
+        let (map, mode) = entry.resolve();
+        let (map, mode) = (map.short().to_string(), mode.short().to_string());
         // --bots: for the mode we start with
         if let Some(n) = args.bots {
             if toon_shared::Mode::parse(&mode) == Some(toon_shared::Mode::Br) {

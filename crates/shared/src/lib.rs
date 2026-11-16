@@ -8,9 +8,11 @@ pub mod inventory;
 pub mod lang;
 pub mod map;
 pub mod maps;
-pub mod maps_extra;
+pub mod maps_cargo;
+pub mod maps_depot;
 pub mod maps_island;
 pub mod maps_market;
+pub mod maps_site;
 pub mod maps_wreck;
 pub mod net;
 pub mod physics;
@@ -100,6 +102,15 @@ impl Mode {
     /// Everyone fights everyone (no teams).
     pub fn solo(self) -> bool {
         self == Mode::Br
+    }
+    /// The map and mode that go together: the battle royale is played on the island and
+    /// the island holds nothing else, so either one asked for gives both.
+    pub fn pair(map: map::MapId, mode: Mode) -> (map::MapId, Mode) {
+        if mode == Mode::Br || map == map::MapId::Island {
+            (map::MapId::Island, Mode::Br)
+        } else {
+            (map, mode)
+        }
     }
     pub fn parse(s: &str) -> Option<Mode> {
         match s.to_ascii_lowercase().as_str() {

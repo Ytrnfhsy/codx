@@ -347,6 +347,22 @@ pub fn shade(c: [u8; 3], k: f32) -> [u8; 3] {
     ]
 }
 
+/// `c` swapped for its partner in `pairs` (either way round), the darker shades the
+/// builder derives from a colour (trims, ribs, copings) included; anything else stays.
+pub fn swap_color(c: [u8; 3], pairs: &[([u8; 3], [u8; 3])]) -> [u8; 3] {
+    for (a, b) in pairs {
+        for k in [1.0f32, 0.8, 0.86] {
+            if c == shade(*a, k) {
+                return shade(*b, k);
+            }
+            if c == shade(*b, k) {
+                return shade(*a, k);
+            }
+        }
+    }
+    c
+}
+
 #[derive(Default)]
 pub struct MapBuilder {
     pub boxes: Vec<MapBox>,
@@ -432,6 +448,35 @@ impl MapBuilder {
         for l in &mut self.ladders[nl..] {
             l.base.y += h;
             l.top += h;
+        }
+    }
+
+    /// Where the builder stands now, for `mirror_since`.
+    pub fn mark(&self) -> (usize, usize) {
+        (self.boxes.len(), self.ladders.len())
+    }
+
+    /// Adds a copy of everything built since `mark`, turned half round the map's middle
+    /// (x, z → −x, −z) and recoloured: both teams get the same ground, in their own
+    /// colours.
+    pub fn mirror_since(&mut self, mark: (usize, usize), recolor: impl Fn([u8; 3]) -> [u8; 3]) {
+        let (nb, nl) = (self.boxes.len(), self.ladders.len());
+        for k in mark.0..nb {
+            let b = self.boxes[k];
+            self.boxes.push(MapBox {
+                min: vec3(-b.max.x, b.min.y, -b.max.z),
+                max: vec3(-b.min.x, b.max.y, -b.min.z),
+                color: recolor(b.color),
+                ..b
+            });
+        }
+        for k in mark.1..nl {
+            let l = self.ladders[k];
+            self.ladders.push(Ladder {
+                base: vec3(-l.base.x, l.base.y, -l.base.z),
+                out: -l.out,
+                top: l.top,
+            });
         }
     }
 

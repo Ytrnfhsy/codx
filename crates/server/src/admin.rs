@@ -263,7 +263,21 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 return "Використання: map <wreck|site|depot|market|cargo|island> [tdm|sab|br]"
                     .into();
             };
-            let mode = args.next().and_then(Mode::parse).unwrap_or(g.mode);
+            // (the island is for the battle royale only, and the other way round: a map
+            // named without a mode keeps the current one where it can)
+            let asked = args.next().and_then(Mode::parse);
+            let mode = match asked {
+                Some(Mode::Br) if m != MapId::Island => {
+                    return "Королівська битва — лише на карті island".into();
+                }
+                Some(mode) if m == MapId::Island && mode != Mode::Br => {
+                    return "На карті island — лише королівська битва (br)".into();
+                }
+                Some(mode) => mode,
+                None if m == MapId::Island => Mode::Br,
+                None if g.mode == Mode::Br => Mode::Tdm,
+                None => g.mode,
+            };
             g.change_map(m, mode);
             format!("Карта змінена: {} ({})", g.map.name, mode.name())
         }
@@ -271,9 +285,16 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             let Some(mode) = args.next().and_then(Mode::parse) else {
                 return "Використання: mode <tdm|sab|br>".into();
             };
-            let m = g.map.id;
+            let m = match (g.map.id, mode) {
+                (_, Mode::Br) => MapId::Island,
+                (MapId::Island, _) => {
+                    return "На карті island — лише королівська битва: map <карта> <tdm|sab>"
+                        .into();
+                }
+                (m, _) => m,
+            };
             g.change_map(m, mode);
-            format!("Режим змінено: {}", mode.name())
+            format!("Режим змінено: {} ({})", mode.name(), g.map.name)
         }
         "nextmap" => {
             g.next_map();
@@ -517,7 +538,8 @@ fn set_var(g: &mut Game, key: &str, v: &str) -> String {
         },
         "maxplayers" => match num {
             Ok(n) if n >= 2.0 => {
-                g.cfg.max_players = (n as usize).min(toon_shared::consts::MAX_PLAYERS)
+                g.cfg.max_players = (n as usize).min(toon_shared::consts::MAX_PLAYERS_ARENA);
+                g.cfg.bots = g.cfg.bots.min(g.cfg.max_players);
             }
             _ => return bad(),
         },

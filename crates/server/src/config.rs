@@ -25,7 +25,8 @@ impl Default for RotationEntry {
 
 impl RotationEntry {
     pub fn resolve(&self) -> (MapId, Mode) {
-        (
+        // (the island and the battle royale only go together)
+        Mode::pair(
             MapId::parse(&self.map).unwrap_or(MapId::Depot),
             Mode::parse(&self.mode).unwrap_or(Mode::Tdm),
         )
@@ -239,7 +240,9 @@ impl ServerConfig {
     }
 
     pub fn sanitized(mut self) -> ServerConfig {
-        self.max_players = self.max_players.clamp(2, toon_shared::consts::MAX_PLAYERS);
+        self.max_players = self
+            .max_players
+            .clamp(2, toon_shared::consts::MAX_PLAYERS_ARENA);
         self.bots = self.bots.min(self.max_players);
         self.br.max_players = self
             .br

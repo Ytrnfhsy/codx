@@ -6,11 +6,11 @@ use std::f32::consts::PI;
 
 pub fn build(id: MapId) -> Map {
     match id {
-        MapId::Depot => depot(),
+        MapId::Depot => crate::maps_depot::depot(),
         MapId::Market => crate::maps_market::market(),
-        MapId::Cargo => cargo(),
+        MapId::Cargo => crate::maps_cargo::cargo(),
         MapId::Wreck => crate::maps_wreck::wreck(),
-        MapId::Site => crate::maps_extra::site(),
+        MapId::Site => crate::maps_site::site(),
         // generating the island takes a moment: build it once, hand out copies
         MapId::Island => {
             static ISLAND: std::sync::OnceLock<Map> = std::sync::OnceLock::new();
@@ -19,14 +19,14 @@ pub fn build(id: MapId) -> Map {
     }
 }
 
-fn spawn(x: f32, z: f32, yaw: f32) -> Spawn {
+pub(crate) fn spawn(x: f32, z: f32, yaw: f32) -> Spawn {
     Spawn {
         pos: vec3(x, 0.0, z),
         yaw,
     }
 }
 
-fn site_pad(b: &mut MapBuilder, p: Vec3, c: [u8; 3]) {
+pub(crate) fn site_pad(b: &mut MapBuilder, p: Vec3, c: [u8; 3]) {
     b.decal(p.x - 2.6, p.z - 2.6, p.x + 2.6, p.z + 2.6, 0.0, c);
     b.decal(
         p.x - 1.8,
@@ -39,8 +39,10 @@ fn site_pad(b: &mut MapBuilder, p: Vec3, c: [u8; 3]) {
     b.decal(p.x - 1.5, p.z - 1.5, p.x + 1.5, p.z + 1.5, 0.06, c);
 }
 
-/// «Депо» — medium sized depot: warehouse, two-storey office, container yard.
-fn depot() -> Map {
+/// A small fixed yard (a warehouse, a two-storey office with stairs, containers) that the
+/// physics tests walk about in: it never changes, whatever happens to the real maps.
+#[doc(hidden)]
+pub fn test_yard() -> Map {
     let min = vec2(-40.0, -40.0);
     let max = vec2(40.0, 40.0);
     let mut b = MapBuilder::new();
@@ -259,79 +261,69 @@ fn depot() -> Map {
     }
 }
 
-/// «Вантаж» — tiny container yard for chaotic close-quarters fights.
-fn cargo() -> Map {
-    let min = vec2(-20.0, -20.0);
-    let max = vec2(20.0, 20.0);
-    let mut b = MapBuilder::new();
-    b.ground_and_bounds(min, max, pal::CONCRETE, pal::CONT_BLUE, 5.0);
-    b.decal(-20.0, -1.0, 20.0, 1.0, 0.0, pal::CONT_YELLOW);
-    let cols = [
-        pal::CONT_RED,
-        pal::CONT_BLUE,
-        pal::CONT_GREEN,
-        pal::CONT_ORANGE,
-        pal::CONT_YELLOW,
-    ];
-    let mut k = 0;
-    for &x in &[-10.0f32, 0.0, 10.0] {
-        for &z in &[-8.0f32, 8.0] {
-            b.container(x, z, true, 0.0, cols[k % cols.len()]);
-            k += 1;
-        }
-    }
-    b.container(-10.0, 8.0, true, 2.6, pal::CONT_ORANGE);
-    b.container(10.0, -8.0, true, 2.6, pal::CONT_GREEN);
-    b.container(-15.0, 0.0, false, 0.0, pal::CONT_YELLOW);
-    b.container(15.0, 0.0, false, 0.0, pal::CONT_RED);
-    for (x, z, s) in [
-        (4.0, 2.5, 1.2),
-        (-4.0, -2.5, 1.2),
-        (5.5, -3.0, 1.0),
-        (-5.5, 3.0, 1.0),
-        (0.0, 13.5, 1.2),
-        (0.0, -13.5, 1.2),
-    ] {
-        b.crate_(x, z, s, 0.0);
-    }
-
-    let site_allies = vec3(-14.5, 0.0, 14.5);
-    let site_axis = vec3(14.5, 0.0, -14.5);
-    site_pad(&mut b, site_allies, pal::PAD_ALLIES);
-    site_pad(&mut b, site_axis, pal::PAD_AXIS);
-
-    let allies = [-16.0, -10.0, -5.0, 0.0, 5.0, 10.0, 16.0]
-        .iter()
-        .map(|&x| spawn(x, 18.0, 0.0))
-        .collect();
-    let axis = [-16.0, -10.0, -5.0, 0.0, 5.0, 10.0, 16.0]
-        .iter()
-        .map(|&x| spawn(x, -18.0, PI))
-        .collect();
-
-    Map {
-        id: MapId::Cargo,
-        name: "Вантаж",
-        min,
-        max,
-        boxes: b.boxes,
-        ladders: b.ladders,
-        spawns: [allies, axis],
-        bomb: vec3(0.0, 0.0, 0.0),
-        sites: [site_allies, site_axis],
-        // the port at dusk: teal sea haze, violet sky, cool light
-        sky: [150, 140, 190],
-        fog: [160, 190, 200],
-        tint: [0.9, 0.95, 1.06],
-        terrain: None,
-        loot: Vec::new(),
-        nav_detail: Vec::new(),
-        car_spots: Vec::new(),
-        doors: Vec::new(),
-    }
+/// Team spawns in two rows near `z` (allies in the south look north, axis the other way).
+pub(crate) fn spawn_rows(half_w: f32, z: f32, n: usize) -> [Vec<Spawn>; 2] {
+    let row = |sign: f32, yaw: f32| {
+        (0..n)
+            .map(|i| {
+                let x = -half_w + 2.0 * half_w * i as f32 / (n - 1) as f32;
+                // two staggered rows, so a full team does not stand shoulder to shoulder
+                let back = if i % 2 == 0 { 0.0 } else { 2.2 };
+                spawn(x * sign, (z + back) * sign, yaw)
+            })
+            .collect::<Vec<_>>()
+    };
+    [row(1.0, 0.0), row(-1.0, PI)]
 }
 
 /// Kept for map authors: an opening helper with explicit dimensions.
 pub fn opening(at: f32, w: f32, bottom: f32, top: f32) -> Opening {
     Opening { at, w, bottom, top }
+}
+
+#[cfg(test)]
+mod dump {
+    /// Writes every arena's boxes as text for a top-down picture (TW_DUMP=<dir>).
+    #[test]
+    #[ignore]
+    fn dump_maps() {
+        let Ok(dir) = std::env::var("TW_DUMP") else {
+            return;
+        };
+        for id in crate::map::MapId::ALL {
+            let m = super::build(id);
+            let mut out = format!("{} {} {} {}\n", m.min.x, m.min.y, m.max.x, m.max.y);
+            for b in &m.boxes {
+                if !b.visible {
+                    continue;
+                }
+                out += &format!(
+                    "b {} {} {} {} {} {} {} {} {} {}\n",
+                    b.min.x,
+                    b.min.y,
+                    b.min.z,
+                    b.max.x,
+                    b.max.y,
+                    b.max.z,
+                    b.color[0],
+                    b.color[1],
+                    b.color[2],
+                    b.solid as u8
+                );
+            }
+            for (t, s) in m.spawns.iter().enumerate() {
+                for s in s {
+                    out += &format!("s {} {} {}\n", t, s.pos.x, s.pos.z);
+                }
+            }
+            for (t, s) in m.sites.iter().enumerate() {
+                out += &format!("p {} {} {}\n", t, s.x, s.z);
+            }
+            out += &format!("o {} {}\n", m.bomb.x, m.bomb.z);
+            for l in &m.ladders {
+                out += &format!("l {} {}\n", l.base.x, l.base.z);
+            }
+            std::fs::write(format!("{dir}/{}.txt", id.short()), out).unwrap();
+        }
+    }
 }

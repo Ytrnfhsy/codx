@@ -614,9 +614,11 @@ pub fn draw_menu(
             );
             if d != 0 {
                 hs.mode = modes[((mi as i32 + d).rem_euclid(modes.len() as i32)) as usize].into();
-                // the battle royale is played on the big island
+                // the battle royale is played on the big island, the rest anywhere else
                 if hs.mode == "br" {
                     hs.map = MapId::Island.short().into();
+                } else if hs.map == MapId::Island.short() {
+                    hs.map = MapId::ALL[0].short().into();
                 }
             }
             let maps = MapId::EVERY;
@@ -633,10 +635,26 @@ pub fn draw_menu(
                 hs.map = maps[((ci as i32 + d).rem_euclid(maps.len() as i32)) as usize]
                     .short()
                     .into();
+                // the island is for the battle royale only, and the other way round
+                if hs.map == MapId::Island.short() {
+                    hs.mode = "br".into();
+                } else if hs.mode == "br" {
+                    hs.mode = "tdm".into();
+                }
+            }
+            // (settings saved before the two went together)
+            if (hs.mode == "br") != (hs.map == MapId::Island.short()) {
+                hs.mode = "br".into();
+                hs.map = MapId::Island.short().into();
             }
             // the battle royale keeps its own bots and player limit (it wants many more;
             // the team modes in the rotation keep theirs)
             let br = hs.mode == "br";
+            let most = if br {
+                toon_shared::consts::MAX_PLAYERS
+            } else {
+                toon_shared::consts::MAX_PLAYERS_ARENA
+            } as f32;
             let (mut bots, mut max) = if br {
                 (hs.br_bots, hs.br_max_players)
             } else {
@@ -662,9 +680,9 @@ pub fn draw_menu(
             bots = ui
                 .slider(
                     bots_label,
-                    bots as f32,
+                    (bots as f32).min(most),
                     0.0,
-                    toon_shared::consts::MAX_PLAYERS as f32,
+                    most,
                     x + 24.0,
                     y + 280.0,
                     pw - 48.0,
@@ -707,9 +725,9 @@ pub fn draw_menu(
             max = ui
                 .slider(
                     max_label,
-                    max as f32,
+                    (max as f32).min(most),
                     2.0,
-                    toon_shared::consts::MAX_PLAYERS as f32,
+                    most,
                     x + 24.0,
                     y + 380.0,
                     sw,
