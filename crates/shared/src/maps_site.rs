@@ -14,9 +14,11 @@
 //! The map is point-symmetric (x, z → −x, −z): the south half is built and copied over
 //! to the north in other colours, so both teams have the same ground.
 
-use crate::map::{door, pal, shade, swap_color, wide_door, window, Map, MapBuilder, MapId, Side};
+use crate::map::{door, pal, shade, wide_door, window, Map, MapBuilder, MapId, Side};
 use crate::maps::{site_pad, spawn_rows};
+use crate::maps_dress::{dress, keep_clear, litter, props as p, slot, Cover, Dressed, Set, Slot};
 use crate::props::Tower;
+use crate::rng::Rng;
 use glam::{vec2, vec3};
 
 const HALF_X: f32 = 65.0;
@@ -27,20 +29,6 @@ pub const STOREY: f32 = 3.4;
 pub const FRAME: (f32, f32) = (12.0, 9.0);
 /// How high the materials yards' walls are.
 const YARD_WALL: f32 = 4.6;
-
-fn recolor(c: [u8; 3]) -> [u8; 3] {
-    swap_color(
-        c,
-        &[
-            (pal::CONT_RED, pal::CONT_GREEN),
-            (pal::CONT_BLUE, pal::CONT_ORANGE),
-            (pal::BRICK, pal::WALL_TAN),
-            (pal::CABIN, pal::CONT_YELLOW),
-            (pal::WALL_GREEN, pal::WALL_BLUE),
-            (pal::ROOF_RED, pal::ROOF_GREY),
-        ],
-    )
-}
 
 impl MapBuilder {
     /// An excavator: tracks, a body with a cab, the arm reaching out along +x.
@@ -81,37 +69,6 @@ impl MapBuilder {
         self.cbox(cx + 4.3, cz - 0.7, 1.1, 1.3, 0.0, 0.9, pal::DARK);
     }
 
-    /// Concrete pipes: two on the ground and one on top (chest-high cover, a step up).
-    fn pipes(&mut self, cx: f32, cz: f32, along_x: bool) {
-        let (w, d) = if along_x { (4.0, 1.4) } else { (1.4, 4.0) };
-        let (ox, oz) = if along_x { (0.0, 0.75) } else { (0.75, 0.0) };
-        for s in [-1.0f32, 1.0] {
-            self.cbox(cx + ox * s, cz + oz * s, w, d, 0.0, 1.4, pal::CONCRETE);
-        }
-        self.cbox(cx, cz, w, d, 1.4, 1.3, pal::CONCRETE);
-        let (ew, ed) = if along_x {
-            (w + 0.06, 0.9)
-        } else {
-            (0.9, d + 0.06)
-        };
-        self.push_detail(
-            cx - ew / 2.0,
-            1.6,
-            cz - ed / 2.0,
-            cx + ew / 2.0,
-            2.5,
-            cz + ed / 2.0,
-            pal::DARK,
-        );
-    }
-
-    /// A heap of sand: three steps up.
-    fn sand_heap(&mut self, cx: f32, cz: f32) {
-        self.cbox(cx, cz, 6.0, 4.4, 0.0, 0.45, pal::SAND);
-        self.cbox(cx, cz, 4.2, 3.0, 0.45, 0.45, pal::SAND);
-        self.cbox(cx, cz, 2.4, 1.6, 0.9, 0.45, pal::SAND);
-    }
-
     /// A stack of timber.
     fn timber(&mut self, cx: f32, cz: f32, along_x: bool) {
         let (w, d) = if along_x { (4.2, 1.4) } else { (1.4, 4.2) };
@@ -120,22 +77,41 @@ impl MapBuilder {
     }
 }
 
-/// «Будмайданчик» — a building site.
-pub fn site() -> Map {
-    let min = vec2(-HALF_X, -HALF_Z);
-    let max = vec2(HALF_X, HALF_Z);
-    let mut b = MapBuilder::new();
-    b.ground_and_bounds(min, max, pal::DIRT, pal::CONCRETE_DARK, 5.0);
+/// How one half looks (and the parts of the frame that are its own).
+struct Style {
+    office: [u8; 3],
+    roof: [u8; 3],
+    garage: [u8; 3],
+    garage_roof: [u8; 3],
+    gate_cont: [u8; 3],
+    cabin: [u8; 3],
+    crane_h: f32,
+}
+
+const SOUTH: Style = Style {
+    office: pal::BRICK,
+    roof: pal::ROOF_GREY,
+    garage: pal::CONCRETE,
+    garage_roof: pal::CONCRETE_DARK,
+    gate_cont: pal::CONT_RED,
+    cabin: pal::CABIN,
+    crane_h: 22.0,
+};
+
+const NORTH: Style = Style {
+    office: pal::WALL_TAN,
+    roof: [98, 118, 146],
+    garage: [200, 186, 160],
+    garage_roof: [140, 120, 100],
+    gate_cont: pal::CONT_GREEN,
+    cabin: pal::CONT_YELLOW,
+    crane_h: 19.0,
+};
+
+/// One team's half, in the allies' (south) frame: what both teams have the same of.
+fn skeleton(b: &mut MapBuilder, st: &Style) {
     let (fx, fz) = FRAME;
     let h = STOREY;
-
-    // the site road through the frame's ground floor, the trodden yard round it
-    b.decal(-34.0, -22.0, 34.0, 22.0, 0.0, [178, 152, 108]);
-    b.decal(-HALF_X, -2.6, HALF_X, 2.6, 0.03, pal::ASPHALT);
-    b.decal(-fx, -fz, fx, fz, 0.06, pal::CONCRETE_DARK);
-
-    // ---- the south half (the allies'); the north is its copy
-    let mark = b.mark();
 
     // --- the frame: columns two storeys high
     for x in [-fx + 0.3, -4.0, 4.0, fx - 0.3] {
@@ -242,15 +218,8 @@ pub fn site() -> Map {
     // scaffolding up the south face
     b.scaffold_x(-4.5, 6.5, fz, 1.4, h);
 
-    // --- the tower crane, material by the frame
-    b.crane(21.0, 7.0, 22.0);
-    b.brick_pallet(-14.5, 5.5);
-    b.brick_pallet(-14.5, 7.0);
-    b.brick_pallet(10.0, 13.5);
-    b.timber(-2.0, 14.5, true);
-    b.rubble(15.0, 12.0);
-    b.barrier(-20.0, 5.0, false);
-    b.barrier(28.0, 5.0, false);
+    // --- the tower crane
+    b.crane(21.0, 7.0, st.crane_h);
 
     // --- south-west: the site office, two storeys
     b.tower(&Tower {
@@ -260,8 +229,8 @@ pub fn site() -> Map {
         z1: 24.0,
         floors: 2,
         storey: 3.4,
-        color: pal::BRICK,
-        roof: pal::ROOF_GREY,
+        color: st.office,
+        roof: st.roof,
         ground: &[
             (Side::MaxX, door(14.0)),
             (Side::MinZ, door(-33.0)),
@@ -277,18 +246,8 @@ pub fn site() -> Map {
         ],
         roof_access: false,
     });
-    // cabins, toilets, pipes and a fence between the office and the frame
-    b.site_cabin(-18.0, 21.0, true, pal::CABIN);
-    b.site_cabin(-18.0, 24.2, true, pal::CONT_BLUE);
-    b.toilet(-10.0, 27.0, pal::CONT_BLUE);
-    b.toilet(-8.7, 27.0, pal::CONT_GREEN);
-    b.pipes(-22.0, 11.5, false);
+    // a fence between the office and the frame
     b.site_fence(true, -26.0, -4.0, 31.0, &[wide_door(-15.0)]);
-    b.sand_heap(-46.0, 20.0);
-    b.container(-57.0, 13.0, false, 0.0, pal::CONT_GREEN);
-    b.pipes(-50.0, 27.0, true);
-    b.timber(-60.0, 24.0, false);
-    b.barrel(-27.0, 27.5, pal::BARREL_RED);
 
     // --- the allies' materials yard in the corner: the Sabotage site behind high walls
     b.wall_x(
@@ -312,17 +271,17 @@ pub fn site() -> Map {
         pal::CONCRETE_DARK,
     );
     // (nobody shoots straight in through a gate: something stands behind each)
-    b.container(-56.0, 36.5, true, 0.0, pal::CONT_RED);
+    b.container(-56.0, 36.5, true, 0.0, st.gate_cont);
     b.wall_z(43.0, 49.0, -42.5, 0.0, 2.6, 0.4, &[], pal::BRICK);
     b.tank(-61.0, 50.0);
     b.tank(-61.0, 44.0);
-    b.site_cabin(-43.5, 34.5, true, pal::CABIN);
+    b.site_cabin(-43.5, 34.5, true, st.cabin);
     b.brick_pallet(-45.0, 51.5);
     b.brick_pallet(-46.5, 51.5);
     b.timber(-55.0, 52.0, true);
     b.barrel(-39.0, 38.5, pal::BARREL_BLUE);
 
-    // --- south-east: the garage block (a ladder to its roof), plant and material
+    // --- south-east: the garage block (a ladder to its roof), fences
     b.building(
         28.0,
         14.0,
@@ -338,8 +297,8 @@ pub fn site() -> Map {
             (Side::MaxX, window(21.0)),
             (Side::MaxZ, window(32.0)),
         ],
-        pal::CONCRETE,
-        Some(pal::CONCRETE_DARK),
+        st.garage,
+        Some(st.garage_roof),
     );
     b.cbox(37.0, 21.0, 0.6, 0.6, 0.0, 3.4, pal::CONCRETE);
     b.ladder(vec3(30.0, 0.0, 28.0), vec3(0.0, 0.0, 1.0), 3.75);
@@ -348,56 +307,145 @@ pub fn site() -> Map {
         b.brick_pallet(41.0, 24.0);
         b.cbox(44.0, 16.5, 1.6, 1.6, 0.0, 0.9, pal::CONCRETE_DARK);
     });
-    b.crate_(43.0, 25.0, 1.3, 0.0);
-    b.excavator(12.0, 24.0);
-    b.sand_heap(16.0, 34.0);
-    b.lorry(52.0, 22.0, pal::SCAFFOLD, None);
-    b.cbox(52.0, 22.6, 2.3, 5.6, 1.0, 0.9, pal::SAND);
-    b.pipes(24.0, 34.0, true);
-    b.timber(36.0, 34.5, false);
-    b.cbox(6.0, 27.0, 2.2, 2.2, 0.0, 1.8, pal::CONT_ORANGE); // cement mixer
-    b.push_detail(5.2, 1.8, 26.2, 6.8, 2.5, 27.8, pal::METAL);
     b.site_fence(false, 8.0, 30.0, 57.0, &[door(14.0), door(25.0)]);
     b.site_fence(true, 40.0, 56.0, 38.0, &[wide_door(48.0)]);
-    b.rubble(56.0, 44.0);
-    b.container(48.0, 46.0, true, 0.0, pal::CONT_BLUE);
-
-    // --- the allies' end: barriers, a cabin, trees by the fence
-    b.barrier(-12.0, 43.0, true);
-    b.barrier(0.0, 40.0, true);
-    b.barrier(12.0, 43.0, true);
-    b.site_cabin(-4.0, 33.5, true, pal::CABIN);
-    b.brick_pallet(3.0, 20.0);
+    // trees by the fence
     b.tree(62.0, 51.0, false);
     b.tree(-33.0, 51.5, false);
+}
 
-    b.mirror_since(mark, recolor);
+/// How many slots each half fills.
+pub const SLOT_COUNT: usize = SLOTS.len();
+
+/// The cover lying about in a half (allies' frame): where, and how high.
+const SLOTS: &[Slot] = &[
+    slot(-18.0, 21.0, Cover::Tall),
+    slot(-18.0, 25.0, Cover::Tall),
+    slot(-9.0, 27.5, Cover::Tall),
+    slot(-57.0, 13.0, Cover::Tall),
+    slot(12.0, 24.0, Cover::Tall),
+    slot(52.0, 22.0, Cover::Tall),
+    slot(48.0, 46.0, Cover::Tall),
+    slot(-4.0, 33.5, Cover::Tall),
+    slot(-28.0, 40.0, Cover::Stack),
+    slot(-22.0, 11.5, Cover::Chest),
+    slot(-46.0, 20.0, Cover::Chest),
+    slot(-50.0, 27.5, Cover::Chest),
+    slot(43.0, 33.0, Cover::Chest),
+    slot(16.0, 34.0, Cover::Chest),
+    slot(24.0, 34.0, Cover::Chest),
+    slot(6.0, 27.0, Cover::Chest),
+    slot(-8.0, 16.0, Cover::Chest),
+    slot(-14.5, 6.0, Cover::Low),
+    slot(10.0, 13.5, Cover::Low),
+    slot(-2.0, 14.5, Cover::Low),
+    slot(-20.0, 5.0, Cover::Low),
+    slot(28.0, 5.0, Cover::Low),
+    slot(15.0, 12.0, Cover::Low),
+    slot(-27.0, 27.5, Cover::Low),
+    slot(-60.0, 24.0, Cover::Low),
+    slot(36.0, 34.5, Cover::Low),
+    slot(56.0, 44.0, Cover::Low),
+    slot(-12.0, 43.0, Cover::Low),
+    slot(0.0, 40.0, Cover::Low),
+    slot(12.0, 43.0, Cover::Low),
+    slot(3.0, 20.0, Cover::Low),
+];
+
+fn excavator(b: &mut MapBuilder, x: f32, z: f32, _ax: bool, _r: &mut Rng) {
+    b.excavator(x - 1.0, z);
+}
+
+fn tipper(b: &mut MapBuilder, x: f32, z: f32, _ax: bool, _r: &mut Rng) {
+    b.lorry(x, z, pal::SCAFFOLD, None);
+    b.cbox(x, z + 0.6, 2.3, 5.6, 1.0, 0.9, pal::SAND);
+}
+
+const SET: Set = Set {
+    low: &[
+        p::bricks,
+        p::barrier,
+        p::timber,
+        p::sandbags,
+        p::drums,
+        p::tyres,
+    ],
+    chest: &[p::pipes, p::sand_heap, p::mixer, p::big_crates, p::reel],
+    tall: &[
+        p::cabin,
+        p::container,
+        p::toilets,
+        p::van,
+        tipper,
+        excavator,
+    ],
+    stack: &[p::cabin_stack, p::stack2],
+    litter: &[p::stain, p::puddle, p::plank, p::flat_pallet],
+};
+
+/// «Будмайданчик» — a building site.
+pub fn site() -> Map {
+    site_dressed().0
+}
+
+/// The map, and what each half got of its cover (for the balance tests).
+pub fn site_dressed() -> (Map, [Dressed; 2]) {
+    let min = vec2(-HALF_X, -HALF_Z);
+    let max = vec2(HALF_X, HALF_Z);
+    let mut b = MapBuilder::new();
+    b.ground_and_bounds(min, max, pal::DIRT, pal::CONCRETE_DARK, 5.0);
+    let (fx, fz) = FRAME;
+
+    // the site road through the frame's ground floor, the trodden yard round it
+    b.decal(-34.0, -22.0, 34.0, 22.0, 0.0, [178, 152, 108]);
+    b.decal(-HALF_X, -2.6, HALF_X, 2.6, 0.03, pal::ASPHALT);
+    b.decal(-fx, -fz, fx, fz, 0.06, pal::CONCRETE_DARK);
+
+    // both halves' skeletons, the axis one turned round
+    skeleton(&mut b, &SOUTH);
+    let mark = b.mark();
+    skeleton(&mut b, &NORTH);
+    b.turn_since(mark);
 
     let site_allies = vec3(-50.0, 0.0, 42.0);
     let site_axis = vec3(50.0, 0.0, -42.0);
     site_pad(&mut b, site_allies, pal::PAD_ALLIES);
     site_pad(&mut b, site_axis, pal::PAD_AXIS);
+    let spawns = spawn_rows(26.0, 49.6, 12);
+    let bomb = vec3(0.0, 0.0, 0.0);
 
-    Map {
-        id: MapId::Site,
-        name: "Будмайданчик",
-        min,
-        max,
-        boxes: b.boxes,
-        ladders: b.ladders,
-        spawns: spawn_rows(26.0, 49.6, 12),
-        bomb: vec3(0.0, 0.0, 0.0),
-        sites: [site_allies, site_axis],
-        // an overcast morning on the building site: grey sky, flat cool light
-        sky: [176, 188, 200],
-        fog: [198, 204, 210],
-        tint: [0.93, 0.96, 1.03],
-        terrain: None,
-        loot: Vec::new(),
-        nav_detail: Vec::new(),
-        car_spots: Vec::new(),
-        doors: Vec::new(),
+    // the cover lying about: the same amount of each height, not the same things
+    let all: Vec<_> = spawns.iter().flatten().map(|s| s.pos).collect();
+    let keep = keep_clear(&b, &all, bomb, &[site_allies, site_axis]);
+    let dressed = dress(&mut b, SLOTS, &SET, 0x5_17E0_u64, &keep, min, max, 1.8);
+    let mut rng = Rng::new(0x5_17E1);
+    for turned in [false, true] {
+        litter(&mut b, &SET, 55, turned, &mut rng, min, max);
     }
+
+    (
+        Map {
+            id: MapId::Site,
+            name: "Будмайданчик",
+            min,
+            max,
+            boxes: b.boxes,
+            ladders: b.ladders,
+            spawns,
+            bomb,
+            sites: [site_allies, site_axis],
+            // an overcast morning on the building site: grey sky, flat cool light
+            sky: [176, 188, 200],
+            fog: [198, 204, 210],
+            tint: [0.93, 0.96, 1.03],
+            terrain: None,
+            loot: Vec::new(),
+            nav_detail: Vec::new(),
+            car_spots: Vec::new(),
+            doors: Vec::new(),
+        },
+        dressed,
+    )
 }
 
 #[cfg(test)]

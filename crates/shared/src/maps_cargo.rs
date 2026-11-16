@@ -6,12 +6,16 @@
 //! control building with an upper floor, fuel tanks by the Sabotage sites, trucks,
 //! forklifts, cable reels and pallets.
 //!
-//! The yard is point-symmetric (x, z → −x, −z): the south half is built and copied over
-//! to the north in other colours, so both teams have the same ground.
+//! Each team's half has the same skeleton (the crane's legs, the control building, the
+//! warehouse, the stacks with ladders, the site's tanks and wall of containers), turned
+//! half round; the cover lying about is the same in kind and amount but not the same
+//! things in the same places (see `maps_dress`).
 
 use crate::map::{door, pal, shade, swap_color, wide_door, window, Map, MapBuilder, MapId, Side};
 use crate::maps::{site_pad, spawn_rows};
+use crate::maps_dress::{dress, keep_clear, litter, props as p, slot, Cover, Dressed, Set, Slot};
 use crate::props::Tower;
+use crate::rng::Rng;
 use glam::{vec2, vec3};
 
 const HALF_X: f32 = 48.0;
@@ -112,12 +116,6 @@ impl MapBuilder {
         }
     }
 
-    /// A cable reel on its side (chest-high cover).
-    pub(crate) fn reel(&mut self, cx: f32, cz: f32) {
-        self.cbox(cx, cz, 1.5, 0.9, 0.0, 1.5, pal::WOOD);
-        self.push_detail(cx - 0.5, 0.5, cz - 0.5, cx + 0.5, 1.0, cz + 0.5, pal::DARK);
-    }
-
     /// A pallet of sacks (waist high).
     pub(crate) fn sacks(&mut self, cx: f32, cz: f32) {
         self.cbox(cx, cz, 1.3, 1.1, 0.0, 0.15, pal::WOOD);
@@ -168,8 +166,178 @@ impl MapBuilder {
     }
 }
 
+/// How one half looks.
+struct Style {
+    office: [u8; 3],
+    stripe: [u8; 3],
+    warehouse: [u8; 3],
+    roof: [u8; 3],
+    /// The stacks with ladders and the wall of containers by the site.
+    conts: [[u8; 3]; 5],
+}
+
+const SOUTH: Style = Style {
+    office: pal::WALL_WHITE,
+    stripe: pal::CONT_BLUE,
+    warehouse: pal::WALL_BLUE,
+    roof: pal::ROOF_GREY,
+    conts: [
+        pal::CONT_GREEN,
+        pal::CONT_ORANGE,
+        pal::CONT_ORANGE,
+        pal::CONT_BLUE,
+        pal::CONT_GREEN,
+    ],
+};
+
+const NORTH: Style = Style {
+    office: [226, 214, 190],
+    stripe: pal::CONT_RED,
+    warehouse: [182, 96, 78],
+    roof: [92, 96, 104],
+    conts: [
+        pal::CONT_RED,
+        pal::CONT_YELLOW,
+        [150, 160, 170],
+        pal::CONT_GREEN,
+        pal::CONT_RED,
+    ],
+};
+
+/// One team's half, in the allies' (south) frame: what both teams have the same of.
+fn skeleton(b: &mut MapBuilder, st: &Style) {
+    // the gantry crane's legs
+    for x in [-12.0f32, 12.0] {
+        b.cbox(x, 5.0, 1.2, 1.2, 0.0, 11.0, CRANE);
+        b.cbox(x, 5.0, 2.2, 2.2, 0.0, 0.5, pal::CONCRETE_DARK);
+    }
+    // the stacks with ladders: one two high by the middle, one low
+    b.stack(-7.0, 10.0, true, &[st.conts[0], st.conts[1]]);
+    b.ladder(vec3(-10.0, 0.0, 10.0), vec3(-1.0, 0.0, 0.0), 5.2);
+    b.stack(8.0, 9.0, true, &[st.conts[2]]);
+    b.ladder(vec3(11.0, 0.0, 9.0), vec3(1.0, 0.0, 0.0), 2.6);
+    // the wall of containers north of the site: no straight shot at it from the middle
+    b.stack(-36.0, 20.5, true, &[st.conts[3], st.conts[4]]);
+
+    // the harbour control building: stairs to an upper floor that looks over the yard
+    b.tower(&Tower {
+        x0: -5.0,
+        z0: 21.0,
+        x1: 5.0,
+        z1: 30.5,
+        floors: 2,
+        storey: 3.4,
+        color: st.office,
+        roof: st.roof,
+        ground: &[
+            (Side::MaxZ, door(2.0)),
+            (Side::MinZ, door(1.5)),
+            (Side::MaxX, door(26.0)),
+            (Side::MinX, window(27.0)),
+        ],
+        upper: &[
+            (Side::MinZ, window(-2.5)),
+            (Side::MinZ, window(2.5)),
+            (Side::MinX, window(23.5)),
+            (Side::MaxX, window(23.5)),
+        ],
+        roof_access: false,
+    });
+    b.push_detail(-5.05, 2.6, 20.9, 5.05, 3.0, 21.0, st.stripe);
+
+    // the warehouse: wide doors on three sides, shelves inside, a ladder to its roof
+    b.building(
+        23.0,
+        13.0,
+        40.0,
+        27.0,
+        0.0,
+        5.2,
+        &[
+            (Side::MinX, wide_door(20.0)),
+            (Side::MinZ, wide_door(28.0)),
+            (Side::MinZ, wide_door(36.0)),
+            (Side::MaxZ, door(33.0)),
+            (Side::MaxX, door(20.0)),
+            (Side::MaxZ, window(27.0)),
+        ],
+        st.warehouse,
+        Some(st.roof),
+    );
+    b.push_detail(22.9, 4.2, 12.9, 40.1, 4.5, 13.0, st.stripe);
+    b.decal(23.3, 13.3, 39.7, 26.7, 0.0, QUAY);
+    b.cbox(32.0, 21.0, 1.2, 6.0, 0.0, 2.6, pal::METAL);
+    b.cbox(27.0, 24.5, 4.0, 1.2, 0.0, 2.6, pal::METAL);
+    b.crate_(37.0, 24.0, 1.4, 0.0);
+    b.crate_(37.0, 22.5, 1.2, 0.0);
+    b.crate_(36.8, 23.4, 1.0, 1.4);
+    b.sacks(26.0, 16.5);
+    b.ladder(vec3(25.5, 0.0, 27.0), vec3(0.0, 0.0, 1.0), 5.55);
+
+    // the site's fuel tanks
+    b.tank(-41.0, 31.5);
+    b.tank(-41.0, 24.0);
+}
+
+/// How many slots each half fills.
+pub const SLOT_COUNT: usize = SLOTS.len();
+
+/// The cover lying about in a half (allies' frame): where, and how high.
+const SLOTS: &[Slot] = &[
+    // stacks you hide behind (none to climb)
+    slot(-34.0, 7.0, Cover::Stack),
+    slot(19.0, 7.0, Cover::Stack),
+    slot(11.0, 16.5, Cover::Stack),
+    slot(-15.0, 17.3, Cover::Stack),
+    // single containers, lorries, vans, cabins
+    slot(-23.0, 9.0, Cover::Tall),
+    slot(32.0, 6.0, Cover::Tall),
+    slot(-28.0, 16.0, Cover::Tall),
+    slot(14.0, 26.5, Cover::Tall),
+    slot(-20.0, 27.0, Cover::Tall),
+    // reels, big crates, forklifts, tanks
+    slot(-20.0, 3.5, Cover::Chest),
+    slot(27.0, 9.0, Cover::Chest),
+    slot(35.5, 31.0, Cover::Chest),
+    slot(-40.0, 12.5, Cover::Chest),
+    slot(2.5, 14.0, Cover::Chest),
+    slot(4.0, 3.5, Cover::Chest),
+    slot(-4.0, 4.5, Cover::Chest),
+    slot(38.0, 3.7, Cover::Chest),
+    slot(-10.5, 25.5, Cover::Chest),
+    // sacks, barriers, crates, drums, tyres
+    slot(-30.5, 24.0, Cover::Low),
+    slot(-30.5, 29.7, Cover::Low),
+    slot(-2.0, 16.0, Cover::Low),
+    slot(41.0, 10.0, Cover::Low),
+    slot(-41.0, 4.0, Cover::Low),
+    slot(17.0, 13.0, Cover::Low),
+    slot(25.0, 31.0, Cover::Low),
+    slot(-24.0, 21.5, Cover::Low),
+];
+
+const SET: Set = Set {
+    low: &[
+        p::sacks,
+        p::barrier,
+        p::low_crates,
+        p::pallets,
+        p::drums,
+        p::tyres,
+    ],
+    chest: &[p::reel, p::big_crates, p::forklift, p::tank_cube],
+    tall: &[p::container, p::lorry, p::van, p::cabin],
+    stack: &[p::stack2, p::stack3, p::stack_pyramid, p::stack_crates],
+    litter: &[p::stain, p::puddle, p::paint, p::plank, p::flat_pallet],
+};
+
 /// «Вантаж» — a container port.
 pub fn cargo() -> Map {
+    cargo_dressed().0
+}
+
+/// The map, and what each half got of its cover (for the balance tests).
+pub fn cargo_dressed() -> (Map, [Dressed; 2]) {
     let min = vec2(-HALF_X, -HALF_Z);
     let max = vec2(HALF_X, HALF_Z);
     let mut b = MapBuilder::new();
@@ -208,7 +376,7 @@ pub fn cargo() -> Map {
             b.container(45.8, z, false, 9.1, recolor(c));
         }
     }
-    // bollards and mooring lines along the quay
+    // bollards along the quay
     for k in -4..=4 {
         let z = k as f32 * 7.5;
         b.cbox(42.2, z, 0.5, 0.5, 0.0, 0.7, pal::DARK);
@@ -222,7 +390,7 @@ pub fn cargo() -> Map {
     b.wagon(-45.0, 13.5, false, None);
     b.wagon(-45.0, 27.0, false, Some(pal::CONT_BLUE));
 
-    // the gantry crane's rails and beams over the middle (its legs stand in each half)
+    // the gantry crane's beams over the middle
     for z in [-5.0f32, 5.0] {
         b.push_detail(-14.0, 11.0, z - 0.7, 14.0, 12.2, z + 0.7, CRANE);
     }
@@ -230,143 +398,49 @@ pub fn cargo() -> Map {
     b.push_detail(-0.08, 8.2, -0.08, 0.08, 11.2, 0.08, pal::DARK);
     b.push_detail(-3.0, 5.6, -1.22, 3.0, 8.2, 1.22, pal::CONT_RED);
 
-    // ---- the south half (the allies'); the north is its copy
+    // both halves' skeletons, the axis one turned round
+    skeleton(&mut b, &SOUTH);
     let mark = b.mark();
-
-    // crane legs
-    for x in [-12.0f32, 12.0] {
-        b.cbox(x, 5.0, 1.2, 1.2, 0.0, 11.0, CRANE);
-        b.cbox(x, 5.0, 2.2, 2.2, 0.0, 0.5, pal::CONCRETE_DARK);
-    }
-
-    // the first row of containers, by the middle
-    b.stack(-34.0, 7.0, true, &[pal::CONT_RED, pal::CONT_YELLOW]);
-    b.stack(-23.0, 9.0, false, &[pal::CONT_BLUE]);
-    b.stack(-7.0, 10.0, true, &[pal::CONT_GREEN, pal::CONT_ORANGE]);
-    b.ladder(vec3(-10.0, 0.0, 10.0), vec3(-1.0, 0.0, 0.0), 5.2);
-    b.stack(8.0, 9.0, true, &[pal::CONT_ORANGE]);
-    b.ladder(vec3(11.0, 0.0, 9.0), vec3(1.0, 0.0, 0.0), 2.6);
-    b.stack(
-        19.0,
-        7.0,
-        false,
-        &[pal::CONT_YELLOW, pal::CONT_BLUE, pal::CONT_RED],
-    );
-    b.stack(32.0, 6.0, true, &[pal::CONT_RED]);
-
-    // the second row
-    b.stack(-28.0, 17.0, false, &[pal::CONT_GREEN]);
-    b.stack(-15.0, 16.0, true, &[pal::CONT_BLUE]);
-    b.stack(-15.0, 18.6, true, &[pal::CONT_ORANGE]);
-    b.container(-15.0, 17.3, true, 2.6, pal::CONT_YELLOW);
-    b.stack(11.0, 16.0, false, &[pal::CONT_RED, pal::CONT_GREEN]);
-    // (north of the site: no straight shot at it from the middle)
-    b.stack(-36.0, 20.5, true, &[pal::CONT_BLUE, pal::CONT_GREEN]);
-
-    // the harbour control building: stairs to an upper floor that looks over the yard
-    b.tower(&Tower {
-        x0: -5.0,
-        z0: 21.0,
-        x1: 5.0,
-        z1: 30.5,
-        floors: 2,
-        storey: 3.4,
-        color: pal::WALL_WHITE,
-        roof: pal::ROOF_GREY,
-        ground: &[
-            (Side::MaxZ, door(2.0)),
-            (Side::MinZ, door(1.5)),
-            (Side::MaxX, door(26.0)),
-            (Side::MinX, window(27.0)),
-        ],
-        upper: &[
-            (Side::MinZ, window(-2.5)),
-            (Side::MinZ, window(2.5)),
-            (Side::MinX, window(23.5)),
-            (Side::MaxX, window(23.5)),
-        ],
-        roof_access: false,
-    });
-    b.push_detail(-5.05, 2.6, 20.9, 5.05, 3.0, 21.0, pal::CONT_BLUE);
-
-    // the warehouse: wide doors on three sides, shelves inside, a ladder to its roof
-    b.building(
-        23.0,
-        13.0,
-        40.0,
-        27.0,
-        0.0,
-        5.2,
-        &[
-            (Side::MinX, wide_door(20.0)),
-            (Side::MinZ, wide_door(28.0)),
-            (Side::MinZ, wide_door(36.0)),
-            (Side::MaxZ, door(33.0)),
-            (Side::MaxX, door(20.0)),
-            (Side::MaxZ, window(27.0)),
-        ],
-        pal::WALL_BLUE,
-        Some(pal::ROOF_GREY),
-    );
-    b.decal(23.3, 13.3, 39.7, 26.7, 0.0, QUAY);
-    b.cbox(32.0, 21.0, 1.2, 6.0, 0.0, 2.6, pal::METAL);
-    b.cbox(27.0, 24.5, 4.0, 1.2, 0.0, 2.6, pal::METAL);
-    b.crate_(37.0, 24.0, 1.4, 0.0);
-    b.crate_(37.0, 22.5, 1.2, 0.0);
-    b.crate_(36.8, 23.4, 1.0, 1.4);
-    b.sacks(26.0, 16.5);
-    b.ladder(vec3(25.5, 0.0, 27.0), vec3(0.0, 0.0, 1.0), 5.55);
-
-    // around the Sabotage site: fuel tanks, barrels
-    b.tank(-41.0, 31.5);
-    b.tank(-41.0, 24.0);
-    b.barrel(-31.5, 29.5, pal::BARREL_RED);
-    b.barrel(-30.7, 29.9, pal::BARREL_BLUE);
-    b.sacks(-31.0, 24.0);
-
-    // lorries, forklifts, reels and crates about the yard
-    b.lorry(14.0, 26.0, pal::CAR_A, Some(pal::CONT_GREEN));
-    b.lorry(-20.0, 27.0, pal::CAR_C, None);
-    b.forklift(-20.0, 4.0, true);
-    b.forklift(27.0, 9.5, false);
-    b.reel(36.0, 31.0);
-    b.reel(-40.0, 13.0);
-    b.reel(2.5, 14.0);
-    b.sacks(-2.0, 15.5);
-    b.crate_(3.4, 2.6, 1.2, 0.0);
-    b.crate_(4.6, 3.4, 1.0, 0.0);
-    b.crate_(-4.0, 4.5, 1.3, 0.0);
-    b.crate_(38.5, 3.0, 1.3, 0.0);
-    b.crate_(38.5, 4.4, 1.1, 0.0);
-    b.barrel(17.0, 13.0, pal::BARREL_BLUE);
-    b.barrier(41.0, 10.0, true);
-    b.barrier(-41.0, 4.0, true);
-
-    b.mirror_since(mark, recolor);
+    skeleton(&mut b, &NORTH);
+    b.turn_since(mark);
 
     let site_allies = vec3(-36.0, 0.0, 27.0);
     let site_axis = vec3(36.0, 0.0, -27.0);
     site_pad(&mut b, site_allies, pal::PAD_ALLIES);
     site_pad(&mut b, site_axis, pal::PAD_AXIS);
+    let spawns = spawn_rows(24.0, 32.2, 12);
+    let bomb = vec3(0.0, 0.0, 0.0);
 
-    Map {
-        id: MapId::Cargo,
-        name: "Вантаж",
-        min,
-        max,
-        boxes: b.boxes,
-        ladders: b.ladders,
-        spawns: spawn_rows(24.0, 32.2, 12),
-        bomb: vec3(0.0, 0.0, 0.0),
-        sites: [site_allies, site_axis],
-        // the port at dusk: teal sea haze, violet sky, cool light
-        sky: [150, 140, 190],
-        fog: [160, 190, 200],
-        tint: [0.9, 0.95, 1.06],
-        terrain: None,
-        loot: Vec::new(),
-        nav_detail: Vec::new(),
-        car_spots: Vec::new(),
-        doors: Vec::new(),
+    // the cover lying about: the same amount of each height, not the same things
+    let all: Vec<_> = spawns.iter().flatten().map(|s| s.pos).collect();
+    let keep = keep_clear(&b, &all, bomb, &[site_allies, site_axis]);
+    let dressed = dress(&mut b, SLOTS, &SET, 0xCA_560u64, &keep, min, max, 1.6);
+    let mut rng = Rng::new(0xCA_5A1);
+    for turned in [false, true] {
+        litter(&mut b, &SET, 40, turned, &mut rng, min, max);
     }
+
+    (
+        Map {
+            id: MapId::Cargo,
+            name: "Вантаж",
+            min,
+            max,
+            boxes: b.boxes,
+            ladders: b.ladders,
+            spawns,
+            bomb,
+            sites: [site_allies, site_axis],
+            // the port at dusk: teal sea haze, violet sky, cool light
+            sky: [150, 140, 190],
+            fog: [160, 190, 200],
+            tint: [0.9, 0.95, 1.06],
+            terrain: None,
+            loot: Vec::new(),
+            nav_detail: Vec::new(),
+            car_spots: Vec::new(),
+            doors: Vec::new(),
+        },
+        dressed,
+    )
 }

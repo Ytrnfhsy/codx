@@ -352,3 +352,46 @@ fn island_upper_floors_are_walkable() {
         tried - reached
     );
 }
+
+/// Building Site, Depot and Cargo share a skeleton between the halves but their cover
+/// stands differently: the walks from both teams' spawns to the bomb and to both sites
+/// must still be about as long.
+#[test]
+fn dressed_maps_are_equally_far_for_both_teams() {
+    for id in [MapId::Site, MapId::Depot, MapId::Cargo] {
+        let m = toon_shared::maps::build(id);
+        let w = World::from_map(&m);
+        let nav = Nav::build(&m, &w);
+        let len = |a: glam::Vec3, b: glam::Vec3| -> f32 {
+            let path = nav
+                .path(a, b)
+                .unwrap_or_else(|| panic!("{id:?}: no path {a} -> {b}"));
+            let mut l = 0.0;
+            let mut p = a;
+            for q in path {
+                l += p.distance(q);
+                p = q;
+            }
+            l
+        };
+        let mut rows = Vec::new();
+        for team in 0..2 {
+            let mut sum = [0.0f32; 3];
+            for s in &m.spawns[team] {
+                sum[0] += len(s.pos, m.bomb);
+                sum[1] += len(s.pos, m.sites[team]);
+                sum[2] += len(s.pos, m.sites[1 - team]);
+            }
+            let n = m.spawns[team].len() as f32;
+            rows.push(sum.map(|x| x / n));
+        }
+        println!("{id:?}: allies {:?}, axis {:?}", rows[0], rows[1]);
+        for (k, what) in ["bomb", "own site", "enemy site"].iter().enumerate() {
+            let (a, b) = (rows[0][k], rows[1][k]);
+            assert!(
+                (a - b).abs() / a.max(b) < 0.06,
+                "{id:?} {what}: allies walk {a:.0} m, axis {b:.0} m"
+            );
+        }
+    }
+}
