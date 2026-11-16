@@ -368,6 +368,12 @@ impl Tuning {
         }
     }
 
+    /// How high a jump lifts the feet with the tuned jump and gravity (1.1 m by default).
+    pub fn jump_height(&self) -> f32 {
+        let m = &self.movement;
+        m.jump_speed * m.jump_speed / (2.0 * m.gravity.max(0.1))
+    }
+
     /// Movement speed multiplier for a weapon (and the max sprint speed it allows).
     pub fn max_sprint_speed(&self) -> f32 {
         let best = self

@@ -409,9 +409,11 @@ impl Game {
     }
 }
 
-/// In the air nobody gets higher than this above where they last stood (a jump is 1.1 m).
-const MAX_AIR_RISE: f32 = 2.2;
-/// Falls up to this many metres do not hurt; each metre more costs this much health.
+/// In the air nobody gets higher than this above where they last stood, beyond a jump
+/// (1.1 m with the default tuning, more when the server's tuning jumps higher).
+const MAX_AIR_RISE: f32 = 1.1;
+/// Falls up to this many metres do not hurt (and never one's own jump back down); each
+/// metre more costs this much health.
 pub const SAFE_FALL: f32 = 6.5;
 pub const FALL_DAMAGE: f32 = 11.0;
 
@@ -1651,6 +1653,8 @@ impl Game {
             p.fall_top = None;
             return;
         }
+        // (how high this server's tuning lets anybody jump)
+        let jump = self.tuning.jump_height();
         let new = Vec3::from_array(inp.pos);
         if !new.is_finite() {
             return;
@@ -1670,7 +1674,7 @@ impl Game {
             || world.ground(new.x, new.z).is_some_and(|g| new.y - g < 0.6)
             || world.floor_below(new + vec3(0.0, 0.1, 0.0), 0.7).is_some();
         // nobody rises higher than a jump above where they last stood
-        if ok && !skydiving && !supported && new.y > p.support_y + MAX_AIR_RISE {
+        if ok && !skydiving && !supported && new.y > p.support_y + jump + MAX_AIR_RISE {
             ok = false;
         }
         let mut fell = 0.0;
@@ -1719,12 +1723,14 @@ impl Game {
             self.outbox
                 .push((Dest::One(id), S2C::Correction { pos, life }, true));
         }
-        if fell > SAFE_FALL {
+        // (a jump back down to where one stood never hurts, however high the tuning jumps)
+        let safe = SAFE_FALL.max(self.tuning.jump_height() + 1.0);
+        if fell > safe {
             let at = Vec3::from_array(inp.pos);
             self.damage(
                 id,
                 None,
-                (fell - SAFE_FALL) * FALL_DAMAGE,
+                (fell - safe) * FALL_DAMAGE,
                 Cause::Fall,
                 false,
                 at,

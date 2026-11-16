@@ -230,3 +230,57 @@ fn rcon_needs_a_fresh_proof() {
     );
     assert!(wrong(&replies(&mut g)));
 }
+
+/// A server tuned to jump high (here 20 m/s against 40 m/s² of gravity: 5 m up) lets
+/// honest jumps through on open ground, does not hurt the landing, and still stops
+/// anybody who rises further than such a jump.
+#[test]
+fn high_jumps_of_a_tuned_server_pass() {
+    let (mut g, me) = game();
+    toon_server::admin::exec(&mut g, "tune movement.jump_speed 20");
+    toon_server::admin::exec(&mut g, "tune movement.gravity 40");
+    assert!((g.tuning.jump_height() - 5.0).abs() < 0.01);
+    let mut b = Body {
+        pos: g.p(me).unwrap().body.pos,
+        ..Default::default()
+    };
+    let mut seq = 0;
+    let dt = 1.0 / 60.0;
+    let start = b.pos.y;
+    let mut top = start;
+    g.outbox.clear();
+    for k in 0..60 * 8 {
+        let inp = MoveInput {
+            forward: 1.0,
+            yaw: 0.6,
+            jump: k % 70 == 0,
+            want_stance: Stance::Stand,
+            ..Default::default()
+        };
+        b.step(&g.world, &inp, &g.tuning.movement, dt);
+        top = top.max(b.pos.y - start);
+        send(&mut g, me, &mut seq, b.pos, b.on_ground);
+        if k % 2 == 0 {
+            g.tick(TICK_DT);
+        }
+    }
+    assert!(top > 3.0, "the jumps went only {top} m up");
+    assert_eq!(corrections(&g), 0, "a tuned jump was pulled back");
+    assert_eq!(g.p(me).unwrap().hp, MAX_HEALTH, "a tuned jump hurt");
+
+    // flying: still refused, a little above such a jump
+    let ground = g.p(me).unwrap().body.pos;
+    send(&mut g, me, &mut seq, ground, true);
+    for k in 1..80 {
+        send(
+            &mut g,
+            me,
+            &mut seq,
+            ground + vec3(0.0, k as f32 * 0.4, 0.0),
+            false,
+        );
+        g.tick(TICK_DT);
+    }
+    let y = g.p(me).unwrap().body.pos.y;
+    assert!(y < ground.y + 6.6, "flew up to {} from {}", y, ground.y);
+}
