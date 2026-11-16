@@ -470,6 +470,10 @@ pub struct Body {
     pub ladder_free: f32,
     /// Dropping from the battle royale plane.
     pub chute: Chute,
+    /// Kicks off walls since the feet left the ground.
+    pub wall_jumps: u8,
+    /// Seconds before the next kick off a wall.
+    pub wall_cool: f32,
 }
 
 /// Skydiving: free fall first, then the parachute opens near the ground.
@@ -519,6 +523,42 @@ pub struct MoveInput {
     pub sprint_mult: f32,
     /// Weight of the carried weapon in kg (adds inertia).
     pub weight: f32,
+}
+
+/// Which way is away from the wall a standing body at `pos` touches (within a hand's
+/// width, at chest height: not a low step or a ledge underfoot), if any.
+pub fn wall_beside(world: &World, pos: Vec3) -> Option<Vec3> {
+    let r = PLAYER_RADIUS;
+    let reach = 0.3;
+    let (y0, y1) = (pos.y + 0.5, pos.y + 1.5);
+    let mut n = Vec3::ZERO;
+    for (dir, lo, hi) in [
+        (
+            vec3(1.0, 0.0, 0.0),
+            vec3(pos.x + r, y0, pos.z - r * 0.8),
+            vec3(pos.x + r + reach, y1, pos.z + r * 0.8),
+        ),
+        (
+            vec3(-1.0, 0.0, 0.0),
+            vec3(pos.x - r - reach, y0, pos.z - r * 0.8),
+            vec3(pos.x - r, y1, pos.z + r * 0.8),
+        ),
+        (
+            vec3(0.0, 0.0, 1.0),
+            vec3(pos.x - r * 0.8, y0, pos.z + r),
+            vec3(pos.x + r * 0.8, y1, pos.z + r + reach),
+        ),
+        (
+            vec3(0.0, 0.0, -1.0),
+            vec3(pos.x - r * 0.8, y0, pos.z - r - reach),
+            vec3(pos.x + r * 0.8, y1, pos.z - r),
+        ),
+    ] {
+        if world.overlaps(&Aabb { min: lo, max: hi }) {
+            n -= dir;
+        }
+    }
+    (n.length_squared() > 0.5).then(|| n.normalize())
 }
 
 pub fn body_box(pos: Vec3, h: f32) -> Aabb {
@@ -774,6 +814,32 @@ impl Body {
         };
         self.vel.x = new_hv.x;
         self.vel.z = new_hv.z;
+
+        // a kick off a wall: jump in the air next to one and you spring away from it,
+        // a little up again (a couple of times before the feet touch the ground)
+        if self.on_ground {
+            self.wall_jumps = 0;
+        }
+        self.wall_cool = (self.wall_cool - dt).max(0.0);
+        if inp.jump
+            && !self.on_ground
+            && self.stance == Stance::Stand
+            && self.wall_cool <= 0.0
+            && t.wall_jump_kick > 0.0
+            && (self.wall_jumps as f32) < t.wall_jumps.floor()
+        {
+            if let Some(n) = wall_beside(world, self.pos) {
+                let hv = vec3(self.vel.x, 0.0, self.vel.z);
+                // what ran along the wall goes on; what ran into it turns round
+                let along = hv - n * hv.dot(n);
+                let out = along * 0.85 + n * t.wall_jump_kick + wish.normalize_or_zero() * 1.5;
+                self.vel.x = out.x;
+                self.vel.z = out.z;
+                self.vel.y = self.vel.y.max(t.jump_speed * t.wall_jump_up);
+                self.wall_jumps += 1;
+                self.wall_cool = 0.3;
+            }
+        }
 
         if inp.jump && self.on_ground && self.stance == Stance::Stand {
             self.vel.y = t.jump_speed;
@@ -1522,6 +1588,69 @@ mod tests {
         assert!(b.pos.y > 3.3 && b.pos.x < 29.0, "pos={:?}", b.pos);
     }
 
+    /// Jumping at a wall and jumping again next to it springs you back off it and up a
+    /// little; only twice per jump; a kick needs a wall within reach.
+    #[test]
+    fn kicks_off_walls() {
+        let (_, w) = world();
+        let t = mt();
+        let dt = 1.0 / 60.0;
+        // east of the warehouse (its east wall's outer face is at x = -20), running west
+        let mut b = Body {
+            pos: vec3(-17.0, 0.0, -9.0),
+            ..Default::default()
+        };
+        settle(&w, &mut b);
+        let west = std::f32::consts::FRAC_PI_2;
+        let run = |jump: bool| MoveInput {
+            forward: 1.0,
+            yaw: west,
+            jump,
+            ..Default::default()
+        };
+        // run up and jump at the wall
+        let mut jumped = false;
+        let mut kicked = None;
+        for k in 0..120 {
+            let near = b.pos.x < -18.9;
+            let jump =
+                (!jumped && b.pos.x < -18.0 && b.on_ground) || (jumped && near && k % 2 == 0);
+            if !jumped && jump {
+                jumped = true;
+            }
+            let before = b.wall_jumps;
+            b.step(&w, &run(jump), &t, dt);
+            if b.wall_jumps > before && kicked.is_none() {
+                kicked = Some(b.vel);
+            }
+            if b.on_ground && jumped && k > 10 {
+                break;
+            }
+        }
+        let v = kicked.expect("no kick off the wall");
+        assert!(v.x > 3.0, "not away from the wall: {v:?}");
+        assert!(v.y > 0.5 * t.jump_speed, "no lift: {v:?}");
+        assert!(
+            b.wall_jumps as f32 <= t.wall_jumps,
+            "{} kicks",
+            b.wall_jumps
+        );
+
+        // in the open there is nothing to kick off
+        let mut b = Body {
+            pos: vec3(0.0, 0.0, 20.0),
+            ..Default::default()
+        };
+        settle(&w, &mut b);
+        b.step(&w, &run(true), &t, dt);
+        for _ in 0..30 {
+            b.step(&w, &run(true), &t, dt);
+            assert_eq!(b.wall_jumps, 0);
+        }
+        assert!(wall_beside(&w, vec3(0.0, 0.0, 20.0)).is_none());
+        assert!(wall_beside(&w, vec3(-19.6, 0.0, -9.0)).is_some());
+    }
+
     #[test]
     fn jump_and_land() {
         let (_, w) = world();
@@ -1545,7 +1674,13 @@ mod tests {
             b.step(&w, &MoveInput::default(), &mt(), 1.0 / 60.0);
             peak = peak.max(b.pos.y);
         }
-        assert!(b.on_ground && peak > 0.9 && peak < 1.3, "peak {peak}");
+        // as high as the tuning says (v² / 2g), give or take a frame's step
+        let t = mt();
+        let h = t.jump_speed * t.jump_speed / (2.0 * t.gravity);
+        assert!(
+            b.on_ground && (peak - h).abs() < 0.12,
+            "peak {peak}, tuned {h}"
+        );
     }
 
     #[test]

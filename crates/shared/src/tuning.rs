@@ -70,12 +70,15 @@ tuned! {
         ground_accel: f32 = 38.0, [1.0, 200.0], "Розгін на землі, м/с²";
         ground_decel: f32 = 32.0, [1.0, 200.0], "Гальмування на землі, м/с²";
         sprint_accel: f32 = 12.0, [1.0, 200.0], "Розгін від ходьби до спринту, м/с²";
-        air_accel: f32 = 5.0, [0.0, 100.0], "Керування в повітрі, м/с²";
+        air_accel: f32 = 8.0, [0.0, 100.0], "Керування в повітрі, м/с²";
         air_strafe_accel: f32 = 40.0, [0.0, 200.0], "Стрейф-джамп: сила поштовху вбік, м/с²";
         strafe_jump: f32 = 1.12, [1.0, 1.2], "Стрейф-джамп: найбільша швидкість у повітрі (× спринт)";
         weight_inertia: f32 = 0.05, [0.0, 1.0], "Інерція від ваги зброї (на кг)";
-        gravity: f32 = 20.0, [1.0, 60.0], "Гравітація, м/с²";
-        jump_speed: f32 = 6.6, [0.0, 20.0], "Сила стрибка, м/с";
+        gravity: f32 = 17.0, [1.0, 60.0], "Гравітація, м/с²";
+        jump_speed: f32 = 6.8, [0.0, 20.0], "Сила стрибка, м/с";
+        wall_jump_kick: f32 = 6.5, [0.0, 20.0], "Відштовхування від стіни: сила вбік, м/с (0 — вимкнено)";
+        wall_jump_up: f32 = 0.8, [0.0, 1.5], "Відштовхування від стіни: підйом (× стрибок)";
+        wall_jumps: f32 = 2.0, [0.0, 5.0], "Відштовхувань від стін за один стрибок";
         sprint_time: f32 = 4.0, [0.5, 60.0], "Тривалість спринту, с";
         sprint_recover: f32 = 0.6, [0.05, 10.0], "Відновлення витривалості, с за с";
         view_bob: f32 = 1.0, [0.0, 3.0], "Розгойдування камери/зброї при ходьбі";
@@ -368,10 +371,21 @@ impl Tuning {
         }
     }
 
-    /// How high a jump lifts the feet with the tuned jump and gravity (1.1 m by default).
+    /// How high a jump lifts the feet with the tuned jump and gravity (1.36 m by default).
     pub fn jump_height(&self) -> f32 {
         let m = &self.movement;
         m.jump_speed * m.jump_speed / (2.0 * m.gravity.max(0.1))
+    }
+
+    /// The most a jump and the kicks off walls that may follow it can lift the feet.
+    pub fn air_rise(&self) -> f32 {
+        let m = &self.movement;
+        let kicks = if m.wall_jump_kick > 0.0 {
+            m.wall_jumps.floor().max(0.0)
+        } else {
+            0.0
+        };
+        self.jump_height() * (1.0 + kicks * m.wall_jump_up * m.wall_jump_up)
     }
 
     /// Movement speed multiplier for a weapon (and the max sprint speed it allows).

@@ -120,7 +120,9 @@ fn flying_is_refused() {
         g.tick(TICK_DT);
     }
     let y = g.p(me).unwrap().body.pos.y;
-    assert!(y < start.y + 2.6, "flew up to {} from {}", y, start.y);
+    // (a jump's height and a little; the first 0.4 m still counts as standing)
+    let most = start.y + 0.6 + g.tuning.jump_height() + 1.1;
+    assert!(y < most, "flew up to {} from {}", y, start.y);
     assert!(corrections(&g) > 10);
 }
 
@@ -283,4 +285,53 @@ fn high_jumps_of_a_tuned_server_pass() {
     }
     let y = g.p(me).unwrap().body.pos.y;
     assert!(y < ground.y + 6.6, "flew up to {} from {}", y, ground.y);
+}
+
+/// Kicking off a wall lifts a player higher than a jump: the server lets it through by a
+/// wall (and still refuses the same rise in the open, see `flying_is_refused`).
+#[test]
+fn kicks_off_walls_pass() {
+    let (mut g, me) = game();
+    g.play_on(toon_shared::maps::test_yard(), Mode::Tdm);
+    let start = vec3(-17.0, 0.0, -9.0);
+    {
+        let p = g.pm(me).unwrap();
+        p.alive = true;
+        p.body.pos = start;
+        p.protected_until = 0.0;
+    }
+    let mut b = Body {
+        pos: start,
+        ..Default::default()
+    };
+    let mut seq = 0;
+    let dt = 1.0 / 60.0;
+    send(&mut g, me, &mut seq, b.pos, true);
+    g.tick(TICK_DT);
+    g.outbox.clear();
+    let mut jumped = false;
+    let mut kicks = 0;
+    for k in 0..240 {
+        let near = b.pos.x < -18.9;
+        let jump = (!jumped && b.pos.x < -18.0 && b.on_ground) || (jumped && near && k % 2 == 0);
+        jumped |= jump;
+        let before = b.wall_jumps;
+        let inp = MoveInput {
+            forward: if kicks > 0 { -1.0 } else { 1.0 },
+            yaw: std::f32::consts::FRAC_PI_2,
+            jump,
+            want_stance: Stance::Stand,
+            ..Default::default()
+        };
+        b.step(&g.world, &inp, &g.tuning.movement, dt);
+        if b.wall_jumps > before {
+            kicks += 1;
+        }
+        send(&mut g, me, &mut seq, b.pos, b.on_ground);
+        if k % 2 == 0 {
+            g.tick(TICK_DT);
+        }
+    }
+    assert!(kicks > 0, "never kicked off the wall");
+    assert_eq!(corrections(&g), 0, "a kick off a wall was pulled back");
 }

@@ -126,6 +126,8 @@ pub struct Player {
     /// The height of the last place they stood on, and the highest point of the fall
     /// they are in (None: not falling, or it does not count — a parachute, a car).
     pub support_y: f32,
+    /// Been by a wall since the feet left the ground (kicks off walls lift further).
+    pub by_wall: bool,
     pub fall_top: Option<f32>,
     fall_life: u16,
     /// Backpack actions left (refills; nobody needs to drop things a hundred times a second).
@@ -310,6 +312,7 @@ impl Player {
             chat_budget: 5.0,
             lying: Default::default(),
             support_y: f32::MAX,
+            by_wall: false,
             fall_top: None,
             fall_life: 0,
             item_budget: 12.0,
@@ -1653,8 +1656,9 @@ impl Game {
             p.fall_top = None;
             return;
         }
-        // (how high this server's tuning lets anybody jump)
-        let jump = self.tuning.jump_height();
+        // (how high this server's tuning lets anybody jump; by a wall, with the kicks off
+        // it too)
+        let (jump, kicks) = (self.tuning.jump_height(), self.tuning.air_rise());
         let new = Vec3::from_array(inp.pos);
         if !new.is_finite() {
             return;
@@ -1673,8 +1677,13 @@ impl Game {
             || world.ladder_at(new).is_some()
             || world.ground(new.x, new.z).is_some_and(|g| new.y - g < 0.6)
             || world.floor_below(new + vec3(0.0, 0.1, 0.0), 0.7).is_some();
-        // nobody rises higher than a jump above where they last stood
-        if ok && !skydiving && !supported && new.y > p.support_y + jump + MAX_AIR_RISE {
+        // nobody rises higher than a jump above where they last stood (or than a jump
+        // and its kicks, once by a wall)
+        if !supported && toon_shared::physics::wall_beside(world, new).is_some() {
+            p.by_wall = true;
+        }
+        let rise = if p.by_wall { kicks } else { jump };
+        if ok && !skydiving && !supported && new.y > p.support_y + rise + MAX_AIR_RISE {
             ok = false;
         }
         let mut fell = 0.0;
@@ -1703,6 +1712,7 @@ impl Game {
                     fell = top - new.y;
                 }
                 p.support_y = new.y;
+                p.by_wall = false;
             } else {
                 let from = if p.support_y == f32::MAX {
                     new.y
