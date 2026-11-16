@@ -215,7 +215,6 @@ fn window_conf(a: &Args, vsync: bool, fullscreen: bool) -> macroquad::conf::Conf
             // the 3D world is drawn into its own target (with its own smoothing and a
             // precise depth buffer); the window itself needs neither
             sample_count: 1,
-            ..Default::default()
         },
         draw_call_vertex_capacity: 24000,
         draw_call_index_capacity: 36000,
