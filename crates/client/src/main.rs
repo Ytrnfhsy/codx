@@ -201,6 +201,12 @@ fn window_conf(a: &Args, vsync: bool, fullscreen: bool) -> macroquad::conf::Conf
         miniquad_conf: macroquad::miniquad::conf::Conf {
             platform,
             window_title: "Toon Warfare".to_owned(),
+            // the game's icon (assets/icon/icon.svg) in the title bar and the task bar
+            icon: Some(macroquad::miniquad::conf::Icon {
+                small: *include_bytes!("../../../assets/icon/icon-16.rgba"),
+                medium: *include_bytes!("../../../assets/icon/icon-32.rgba"),
+                big: *include_bytes!("../../../assets/icon/icon-64.rgba"),
+            }),
             window_width: a.width,
             window_height: a.height,
             high_dpi: false,

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Toon Warfare: the monogram in the game's colours, a bullet hole through the W -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff7a5c"/>
+      <stop offset="1" stop-color="#e2453a"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#bg)" stroke="#070a14" stroke-width="16"/>
+  <path d="M24 372 L488 212 L488 316 L24 476 Z" fill="#070a14" opacity=".16"/>
+  <text x="266" y="340" font-family="DejaVu Sans, sans-serif" font-weight="bold" font-size="226" text-anchor="middle" letter-spacing="-10" fill="#070a14">TW</text>
+  <text x="254" y="328" font-family="DejaVu Sans, sans-serif" font-weight="bold" font-size="226" text-anchor="middle" letter-spacing="-10" fill="#ffc94a" stroke="#070a14" stroke-width="16" paint-order="stroke">TW</text>
+  <g stroke="#070a14" stroke-width="7" stroke-linecap="round">
+    <circle cx="358" cy="196" r="22" fill="#2a2a34"/>
+    <circle cx="358" cy="196" r="9" fill="#070a14"/>
+    <path d="M358 196 l28 -18 M358 196 l26 22 M358 196 l-12 -28" fill="none"/>
+    <circle cx="146" cy="404" r="16" fill="#2a2a34"/>
+    <circle cx="146" cy="404" r="6" fill="#070a14"/>
+  </g>
+</svg>
