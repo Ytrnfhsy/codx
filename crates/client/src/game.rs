@@ -2339,10 +2339,11 @@ impl GameClient {
             if self.winded && (!key(Action::Sprint) || self.stamina >= self.sprint_max() * 0.35) {
                 self.winded = false;
             }
-            // Shift gets you up off your knees or belly (and running once you are up),
-            // but never while aiming: a sniper lying down holds his breath with it, and
-            // presses it together with the right button
-            if pressed(Action::Sprint)
+            // Shift with a movement key gets you up off your knees or belly (and running
+            // once you are up); Shift alone does not (a sniper lying down holds his
+            // breath with it), nor anything while aiming
+            if key(Action::Sprint)
+                && (fwd != 0.0 || right != 0.0)
                 && !downed
                 && self.body.stance != Stance::Stand
                 && !ads_held
