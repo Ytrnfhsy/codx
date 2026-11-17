@@ -318,7 +318,8 @@ impl Ragdoll {
     }
 
     /// Draws the body: the soldier's model follows the joints.
-    pub fn draw(&self, m: &mut ToonMesh, look: u8, now: f32) {
+    /// (`team`: the colours it is shown in)
+    pub fn draw(&self, m: &mut ToonMesh, look: u8, now: f32, team: Team) {
         let sink = ((self.age - (LIFETIME - 1.5)) / 1.5).clamp(0.0, 1.0) * 0.7;
         let p: [Vec3; N] = std::array::from_fn(|i| self.p[i] - vec3(0.0, sink, 0.0));
         let joints = RagdollJoints {
@@ -330,7 +331,7 @@ impl Ragdoll {
             foot: [p[LFOOT], p[RFOOT]],
             hand: [p[LHAND], p[RHAND]],
         };
-        soldier::add_ragdoll(m, self.team, look, &joints);
+        soldier::add_ragdoll(m, team, look, &joints);
         if self.dizzy && self.age < 3.5 {
             let up = (p[HEAD] - p[CHEST]).normalize_or(Vec3::Y);
             let a0 = up.any_orthonormal_vector();

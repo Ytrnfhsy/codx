@@ -2,7 +2,6 @@
 
 use crate::binds::{key, Action};
 use crate::game::{GameClient, Overlay, Pick};
-use crate::models::team_color;
 use crate::render::{NameTag, View};
 use crate::settings::Settings;
 use crate::ui::*;
@@ -162,7 +161,7 @@ impl GameClient {
                         t.name.clone()
                     };
                     let tw = ui.width(&label, 15, true);
-                    ui.shadowed(&label, sp.x - tw / 2.0, sp.y, 15, team_color(self.team));
+                    ui.shadowed(&label, sp.x - tw / 2.0, sp.y, 15, self.tcol(self.team));
                 }
             } else if (sp - vec2(cx, cy)).length() < 50.0
                 && self
@@ -997,7 +996,7 @@ impl GameClient {
             } else {
                 toon_shared::lang::t("ПІДІРВАТИ", "DESTROY")
             };
-            let c = if ours { team_color(me) } else { BAD };
+            let c = if ours { self.tcol(me) } else { BAD };
             let planted_here = b.planted_at == Some(t);
             let r = if planted_here && (self.now * 4.0).fract() < 0.5 {
                 20.0
@@ -1028,7 +1027,7 @@ impl GameClient {
                         sp.x,
                         sp.y - 24.0,
                         13,
-                        team_color(me),
+                        self.tcol(me),
                     );
                 }
             }
@@ -1289,7 +1288,7 @@ impl GameClient {
                     p.x,
                     p.y,
                     8.0,
-                    if t == self.team { team_color(t) } else { BAD },
+                    if t == self.team { self.tcol(t) } else { BAD },
                 );
                 let l = if t == Team::Allies { "A" } else { "B" };
                 ui.bold(l, p.x - 5.0, p.y + 5.0, 13, WHITE);
@@ -1331,7 +1330,7 @@ impl GameClient {
                     p + d * 7.0,
                     p - d * 4.0 + perp * 5.0,
                     p - d * 4.0 - perp * 5.0,
-                    team_color(self.team),
+                    self.tcol(self.team),
                 );
             } else if r.flags & flags::ON_RADAR != 0 {
                 let pulse = 5.0 + ((self.now * 6.0).sin() as f32) * 1.0;
@@ -1364,7 +1363,7 @@ impl GameClient {
                     continue;
                 }
                 let p = to_map(Vec3::from_array(*pos));
-                let c = if friendly { team_color(*team) } else { BAD };
+                let c = if friendly { self.tcol(*team) } else { BAD };
                 draw_rectangle(p.x - 4.0, p.y - 4.0, 8.0, 8.0, BLACK);
                 draw_rectangle(p.x - 3.0, p.y - 3.0, 6.0, 6.0, c);
             }
@@ -1385,7 +1384,7 @@ impl GameClient {
                     12.0,
                     12.0,
                     if *team == self.team {
-                        team_color(*team)
+                        self.tcol(*team)
                     } else {
                         BAD
                     },
@@ -2405,14 +2404,14 @@ impl GameClient {
             (self.scores[0], self.scores[1])
         };
         let my_c = if my.is_playing() {
-            team_color(my)
+            self.tcol(my)
         } else {
-            team_color(Team::Allies)
+            self.tcol(Team::Allies)
         };
         let en_c = if my.is_playing() {
-            team_color(my.enemy())
+            self.tcol(my.enemy())
         } else {
-            team_color(Team::Axis)
+            self.tcol(Team::Axis)
         };
         let limit = match self.mode {
             Mode::Tdm | Mode::Br => self.gs.score_limit,
@@ -2520,7 +2519,7 @@ impl GameClient {
     /// yellow and everybody else in red.
     fn feed_color(&self, team: Team, me: bool) -> Color {
         if !self.mode.solo() {
-            team_color(team)
+            self.tcol(team)
         } else if me {
             ACCENT
         } else {
@@ -2566,7 +2565,7 @@ impl GameClient {
         let total = kw + vw + iw + 40.0;
         let mut x = cx - total / 2.0;
         let y = h - bar * 0.5 + 8.0;
-        ui.shadowed(&info.killer_name, x, y, 22, team_color(info.killer_team));
+        ui.shadowed(&info.killer_name, x, y, 22, self.tcol(info.killer_team));
         x += kw + 20.0;
         x += draw_cause_icon(info.cause, x, y - 8.0, ih, 1.0);
         if info.headshot {
@@ -2580,7 +2579,7 @@ impl GameClient {
             .find(|r| r.id == info.victim)
             .map(|r| r.team)
             .unwrap_or(Team::Spectator);
-        ui.shadowed(&info.victim_name, x, y, 22, team_color(vteam));
+        ui.shadowed(&info.victim_name, x, y, 22, self.tcol(vteam));
         if !k.final_cam {
             let hint = if self.me.respawn_in > 0.0 {
                 tr!(
@@ -2847,7 +2846,7 @@ impl GameClient {
         for (i, team) in [Team::Allies, Team::Axis].iter().enumerate() {
             let x = x0 + 12.0 + i as f32 * (col_w + 16.0);
             let y = top + 80.0;
-            let c = team_color(*team);
+            let c = self.tcol(*team);
             ui.bold(
                 &format!("{}  {}", team.name(), self.scores[team.index()]),
                 x,
@@ -3114,7 +3113,7 @@ impl GameClient {
                     y + 100.0,
                     pw - 48.0,
                     50.0,
-                    team_color(Team::Allies),
+                    self.tcol(Team::Allies),
                 ) {
                     self.join_team(Some(Team::Allies));
                 }
@@ -3124,7 +3123,7 @@ impl GameClient {
                     y + 160.0,
                     pw - 48.0,
                     50.0,
-                    team_color(Team::Axis),
+                    self.tcol(Team::Axis),
                 ) {
                     self.join_team(Some(Team::Axis));
                 }
@@ -3808,7 +3807,7 @@ impl GameClient {
                             p.y,
                             6.0,
                             if r.team == self.team {
-                                team_color(self.team)
+                                self.tcol(self.team)
                             } else {
                                 BAD
                             },

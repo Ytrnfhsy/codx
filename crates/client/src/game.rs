@@ -1118,7 +1118,7 @@ impl GameClient {
                 } else if from == "Адмін" || from == "Admin" {
                     crate::ui::ACCENT
                 } else {
-                    crate::models::team_color(team)
+                    self.tcol(team)
                 };
                 self.push_chat(line, color);
             }
@@ -1686,7 +1686,7 @@ impl GameClient {
 
     /// Sleeve and hand colours for a first-person view.
     pub fn vm_colors(&self, id: u8, team: Team) -> ([u8; 3], [u8; 3]) {
-        crate::soldier::arm_colors(team, id)
+        crate::soldier::arm_colors(self.seen_team(team), id)
     }
 
     /// Battle royale: we are out of the round and fly around watching (a few seconds
@@ -3243,6 +3243,24 @@ impl GameClient {
     }
 
     /// On our side: our team, or in the battle royale our squad.
+    /// The colours a team is shown in: ours always blue, the enemy always red, whichever
+    /// side we play (so nobody sees the other side any better than the other). Spectators
+    /// and the battle royale (its own looks) see the real ones.
+    pub fn seen_team(&self, team: Team) -> Team {
+        if self.mode.solo() || !self.team.is_playing() || !team.is_playing() {
+            team
+        } else if team == self.team {
+            Team::Allies
+        } else {
+            Team::Axis
+        }
+    }
+
+    /// A team's colour as we see it (see [`Self::seen_team`]).
+    pub fn tcol(&self, team: Team) -> macroquad::color::Color {
+        crate::models::team_color(self.seen_team(team))
+    }
+
     pub fn is_friend(&self, r: &Remote) -> bool {
         if self.mode.solo() {
             self.squad != 0 && r.squad == self.squad

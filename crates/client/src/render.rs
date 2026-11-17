@@ -451,14 +451,20 @@ pub fn render_world(
                 let at = Vec3::from_array(*pos);
                 match kind {
                     VehicleKind::Fpv => {
-                        models::add_fpv(&mut m, at, *yaw, *pitch, *team, now as f32)
+                        models::add_fpv(&mut m, at, *yaw, *pitch, g.seen_team(*team), now as f32)
                     }
                     VehicleKind::Bomber => {
-                        models::add_bomber(&mut m, at, *yaw, *team, now as f32, 6)
+                        models::add_bomber(&mut m, at, *yaw, g.seen_team(*team), now as f32, 6)
                     }
-                    VehicleKind::Nrk => {
-                        models::add_nrk(&mut m, at, *yaw, *pitch, *team, now as f32, *auto)
-                    }
+                    VehicleKind::Nrk => models::add_nrk(
+                        &mut m,
+                        at,
+                        *yaw,
+                        *pitch,
+                        g.seen_team(*team),
+                        now as f32,
+                        *auto,
+                    ),
                 }
             }
             EntSnap::Drop { id, pos } => {
@@ -467,9 +473,13 @@ pub fn render_world(
             EntSnap::Smoke { id, pos, age } => {
                 models::add_smoke_cloud(&mut m, Vec3::from_array(*pos), *age, *id, now as f32)
             }
-            EntSnap::Heli { pos, yaw, team, .. } => {
-                models::add_heli(&mut m, Vec3::from_array(*pos), *yaw, *team, now as f32)
-            }
+            EntSnap::Heli { pos, yaw, team, .. } => models::add_heli(
+                &mut m,
+                Vec3::from_array(*pos),
+                *yaw,
+                g.seen_team(*team),
+                now as f32,
+            ),
             EntSnap::Plane { pos, yaw, .. } => {
                 models::add_jet(&mut m, Vec3::from_array(*pos), look_dir(*yaw, 0.0))
             }
@@ -527,9 +537,15 @@ pub fn render_world(
     // our own vehicle; the bomber also marks where a bomb would land
     if let (Some(p), None) = (&g.piloting, kc) {
         match p.kind {
-            VehicleKind::Nrk => {
-                models::add_nrk(&mut m, p.pos, p.yaw, p.pitch, g.team, now as f32, false)
-            }
+            VehicleKind::Nrk => models::add_nrk(
+                &mut m,
+                p.pos,
+                p.yaw,
+                p.pitch,
+                g.seen_team(g.team),
+                now as f32,
+                false,
+            ),
             VehicleKind::Bomber => {
                 let at = p.bomb_landing(g);
                 let pulse = 1.0 + 0.15 * ((now * 5.0).sin() as f32);
@@ -612,7 +628,7 @@ pub fn render_world(
             yaw: a.yaw,
             pitch: a.pitch,
             stance: a.stance,
-            team: a.team,
+            team: g.seen_team(a.team),
             weapon: a.weapon,
             look: a.id,
             time: now as f32,
@@ -636,7 +652,7 @@ pub fn render_world(
         blob_shadow(&mut shadows, vec3(a.pos.x, floor + 0.03, a.pos.z), 0.5);
         if a.protected && a.team == my_team && kc.is_none() {
             // spawn protection: a soft pulsing bubble in team colour
-            let c = crate::models::team_look(a.team).helmet;
+            let c = crate::models::team_look(g.seen_team(a.team)).helmet;
             let pulse = 0.5 + 0.5 * ((now * 5.0) as f32).sin();
             let centre = a.pos + vec3(0.0, a.stance.height() * 0.5, 0.0);
             let m = Mat4::from_translation(centre) * Mat4::from_scale(vec3(1.0, 1.25, 1.0));
@@ -675,7 +691,7 @@ pub fn render_world(
         None => &g.ragdolls,
     };
     for (id, r) in ragdolls {
-        r.draw(&mut m, *id, now as f32);
+        r.draw(&mut m, *id, now as f32, g.seen_team(r.team));
 
         let c = r.centre();
         if let Some(f) = g.world.floor_below(c + vec3(0.0, 0.2, 0.0), 2.5) {
@@ -1273,7 +1289,7 @@ pub fn draw_model_gallery(mats: &Materials) {
     for _ in 0..90 {
         rd.update(&world, 1.0 / 60.0);
     }
-    rd.draw(&mut m, 3, 0.0);
+    rd.draw(&mut m, 3, 0.0, rd.team);
     mats.draw_toon(&m);
     set_default_camera();
 }
