@@ -92,6 +92,11 @@ const HELI_HIT_RADIUS: f32 = 2.6;
 
 impl Game {
     fn combat_allowed(&self) -> bool {
+        // the battle royale lobby is peaceful: dozens wait there side by side for the
+        // plane, and somebody shot down in it would miss the round
+        if self.mode == Mode::Br {
+            return self.state == MatchState::Playing && self.br.running;
+        }
         matches!(self.state, MatchState::Warmup | MatchState::Playing)
     }
 
@@ -506,6 +511,9 @@ impl Game {
                         .flatten()
                         .any(|o| o.id != victim && o.squad == v.squad && o.alive && !o.downed)
             });
+        if solo && !self.combat_allowed() && cause != Cause::World {
+            return;
+        }
         let Some(v) = self.pm(victim) else { return };
         if !v.alive {
             return;
