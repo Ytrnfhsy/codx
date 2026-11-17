@@ -2315,10 +2315,21 @@ impl GameClient {
             if downed {
                 self.want_stance = Stance::Prone;
             }
-            let ads_held = can_act && binds::down(Action::Aim) && !downed;
+            // (a click shorter than a frame still counts)
+            let ads_held =
+                can_act && (binds::down(Action::Aim) || binds::pressed(Action::Aim)) && !downed;
             let reloading = self.reload_until.is_some();
             if self.winded && (!key(Action::Sprint) || self.stamina >= self.sprint_max() * 0.35) {
                 self.winded = false;
+            }
+            // Shift gets you up off your knees or belly (and running once you are up),
+            // unless it holds a scoped rifle's breath
+            if pressed(Action::Sprint)
+                && !downed
+                && self.body.stance != Stance::Stand
+                && !(scoped_weapon && self.ads_t > 0.5)
+            {
+                self.want_stance = Stance::Stand;
             }
             let want_sprint = key(Action::Sprint)
                 && !downed
@@ -2368,11 +2379,13 @@ impl GameClient {
                 && !reloading
                 && now >= self.switch_until
                 && now >= self.melee_until;
+            // up at the gun's pace, down at once (a released button drops the sight
+            // straight away, so quick clicks never leave it hanging)
             let speed = 1.0 / def.ads_time.max(0.05);
             self.ads_t = if ads_ok {
                 (self.ads_t + dt * speed).min(1.0)
             } else {
-                (self.ads_t - dt * speed * 1.5).max(0.0)
+                (self.ads_t - dt * speed.max(1.0 / 0.08) * 1.5).max(0.0)
             };
 
             let inp = MoveInput {
