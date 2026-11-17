@@ -5,6 +5,8 @@ on:
     branches: ["**"]
     tags: ["v*"]
   pull_request:
+  # (a build of every platform by hand, without a release)
+  workflow_dispatch:
 
 jobs:
   test:
@@ -16,7 +18,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --release
 
+  # Every platform only for a release tag or when started by hand: on ordinary pushes the
+  # tests are enough, and each build's archives would fill the Actions storage
   build:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test
     strategy:
       fail-fast: false
@@ -74,15 +79,20 @@ jobs:
           else
             tar czf ../release/toon-warfare-${{ matrix.name }}.tar.gz toon-warfare-${{ matrix.name }}
           fi
-      - uses: actions/upload-artifact@v4
+      # (artifacts only carry the files to the release job, or to a download after a run
+      # by hand: a day is enough, the release itself keeps them for good)
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
         with:
           name: toon-warfare-${{ matrix.name }}
           path: dist/toon-warfare-${{ matrix.name }}
+          retention-days: 1
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.name }}
           path: release
+          retention-days: 1
 
   # A v* tag publishes a GitHub release: archives for people, bare binaries for the updater
   release:
