@@ -2340,11 +2340,13 @@ impl GameClient {
                 self.winded = false;
             }
             // Shift gets you up off your knees or belly (and running once you are up),
-            // unless it holds a scoped rifle's breath
+            // but never while aiming: a sniper lying down holds his breath with it, and
+            // presses it together with the right button
             if pressed(Action::Sprint)
                 && !downed
                 && self.body.stance != Stance::Stand
-                && !(scoped_weapon && self.ads_t > 0.5)
+                && !ads_held
+                && self.ads_t <= 0.0
             {
                 self.want_stance = Stance::Stand;
             }
