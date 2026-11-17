@@ -14,7 +14,8 @@ use toon_shared::consts::*;
 use toon_shared::net::Channel;
 use toon_shared::protocol::{C2S, S2C};
 
-const TIMEOUT: f64 = 12.0;
+/// A silent client is dropped after this long (its game waits as long for us).
+const TIMEOUT: f64 = 30.0;
 
 struct Conn {
     chan: Channel,
@@ -183,7 +184,23 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                                 }
                             }
                             (None, C2S::Lang(l)) => conn.lang = l,
-                            (None, _) => {}
+                            (None, C2S::Disconnect) => {}
+                            (None, _) => {
+                                // a client still playing on a connection this server already
+                                // dropped (it was silent too long): tell it to come back in
+                                // properly. Unreliably: its reliable stream is long past
+                                // where this fresh channel starts
+                                if conn.closing.is_none() {
+                                    let text = toon_shared::lang::with(conn.lang, || {
+                                        toon_shared::lang::t(
+                                            "З'єднання з сервером обірвалося — підключись знову",
+                                            "The connection to the server was lost — join again",
+                                        )
+                                    });
+                                    conn.chan.send_unreliable(&S2C::Reject(text.into()));
+                                    conn.closing = Some(now + 1.0);
+                                }
+                            }
                             (Some(id), C2S::Disconnect) => {
                                 game.remove_player(id, None);
                                 conn.id = None;

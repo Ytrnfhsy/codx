@@ -99,7 +99,11 @@ impl NetClient {
                         continue;
                     }
                     if let Some(msgs) = self.chan.receive::<S2C>(&buf[..n]) {
-                        self.last_recv = Instant::now();
+                        // (bare acks do not count: a server that has dropped us still
+                        // answers those)
+                        if !msgs.is_empty() {
+                            self.last_recv = Instant::now();
+                        }
                         out.extend(msgs);
                     }
                 }

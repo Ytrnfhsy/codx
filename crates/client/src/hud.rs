@@ -46,6 +46,32 @@ impl GameClient {
             return self.draw_overlay(ui, settings);
         }
 
+        if self.net_lost() {
+            let (w, h) = (screen_width(), screen_height());
+            let left = (crate::game::NET_GIVE_UP - self.net_silence())
+                .max(0.0)
+                .ceil();
+            draw_rectangle(0.0, h * 0.6, w, 74.0, Color::new(0.0, 0.0, 0.0, 0.6));
+            ui.centered(
+                t(
+                    "Зв'язок із сервером втрачено",
+                    "Lost connection to the server",
+                ),
+                w / 2.0,
+                h * 0.6 + 30.0,
+                28,
+                BAD,
+            );
+            let more = format!(
+                "{} {left:.0} {}",
+                t(
+                    "Чекаємо на з'єднання… ще",
+                    "Waiting for the connection… another"
+                ),
+                t("с, потім — головне меню", "s, then the main menu")
+            );
+            ui.centered(&more, w / 2.0, h * 0.6 + 58.0, 16, TEXT);
+        }
         if self.scoped() && self.alive {
             self.draw_scope();
             // the rangefinder: how far off is what the crosshair rests on

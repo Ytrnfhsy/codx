@@ -439,8 +439,8 @@ impl MeshBuilder {
 pub struct ToonMesh {
     pub fill: MeshBuilder,
     pub outline: MeshBuilder,
-    /// Flat ground paint (roads, pads). Each decal is lifted a few millimetres above the
-    /// previous one in creation order, so overlapping paint never z-fights.
+    /// Flat ground paint (roads, pads), a few millimetres over its own height (paint over
+    /// paint lies a little higher in the map itself).
     pub decals: MeshBuilder,
     /// Level of detail for spheres (1 = coarse … 5+ = smooth).
     pub detail: u32,

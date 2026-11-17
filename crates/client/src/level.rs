@@ -43,9 +43,12 @@ pub fn boxes_mesh<'a>(
         ];
         let size = b.max - b.min;
         if !b.solid && size.y <= 0.035 && b.min.y < 0.3 {
-            // flat paint on the ground: just the top face, drawn as a decal
-            decal_layer += 1;
-            let y = b.max.y + decal_layer as f32 * 0.004;
+            // flat paint on the ground: just the top face, drawn as a decal. Paint
+            // laid over paint is told apart by its own height; the few millimetres on top
+            // (cycling, never adding up over a whole map's worth of decals: that once put
+            // a road half a metre up in the air) only keep same-height decals apart
+            decal_layer = (decal_layer + 1) % 4;
+            let y = b.max.y + 0.002 + decal_layer as f32 * 0.001;
             let col = crate::mesh::shade(c, Vec3::Y);
             m.decals.add_quad_ex(
                 [

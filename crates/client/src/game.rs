@@ -162,6 +162,12 @@ pub struct Welcome {
     pub nonce: u64,
 }
 
+/// Silence from the server after which we stop and wait for it.
+pub const NET_LOST_AFTER: f32 = 1.5;
+/// Silence after which we give up and go back to the menu (the server drops a silent
+/// player after as long).
+pub const NET_GIVE_UP: f32 = 30.0;
+
 pub struct GameClient {
     pub net: NetClient,
     pub my_id: u8,
@@ -754,7 +760,18 @@ impl GameClient {
     }
 
     pub fn frozen(&self) -> bool {
-        matches!(self.state, MatchState::PreRound | MatchState::PostMatch)
+        matches!(self.state, MatchState::PreRound | MatchState::PostMatch) || self.net_lost()
+    }
+
+    /// Seconds since the server last said anything.
+    pub fn net_silence(&self) -> f32 {
+        self.net.last_recv.elapsed().as_secs_f32()
+    }
+
+    /// The server has gone quiet: we stand where we are (nobody else moves either) and
+    /// wait for it, up to [`NET_GIVE_UP`] seconds.
+    pub fn net_lost(&self) -> bool {
+        self.net_silence() > NET_LOST_AFTER
     }
 
     /// Server time we render remote players at.
@@ -2153,7 +2170,7 @@ impl GameClient {
             .retain(|(_, r)| r.age < crate::ragdoll::LIFETIME);
         self.blows.retain(|_, b| now - b.1 < 3.0);
         self.explosions.retain(|e| now - e.1 < 2.0);
-        if self.net.last_recv.elapsed().as_secs_f32() > 10.0 {
+        if self.net_silence() > NET_GIVE_UP {
             self.leave = Some(
                 toon_shared::lang::t(
                     "З'єднання з сервером втрачено",
