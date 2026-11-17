@@ -2452,6 +2452,22 @@ impl GameClient {
             if snap.abs() < 1.5 {
                 self.cam_smooth.y -= snap;
             }
+            // sunk into something solid (a correction, a stance change in a tight spot):
+            // out onto the floor above at once, and the view with it
+            if !toon_shared::physics::fits(&self.world, self.body.pos, self.body.stance) {
+                let up = self.body.pos + vec3(0.0, 2.0, 0.0);
+                if let Some(y) = self.world.floor_below(up, 2.0) {
+                    let np = vec3(self.body.pos.x, y + 0.001, self.body.pos.z);
+                    if y > self.body.pos.y
+                        && y - self.body.pos.y < 1.7
+                        && toon_shared::physics::fits(&self.world, np, self.body.stance)
+                    {
+                        self.body.pos = np;
+                        self.cam_smooth = Vec3::ZERO;
+                    }
+                }
+            }
+            self.cam_smooth.y = self.cam_smooth.y.clamp(-1.3, 1.3);
             if self.body.stance != self.want_stance && self.want_stance == Stance::Stand {
                 // blocked from standing up — keep trying silently
             }
@@ -3343,11 +3359,11 @@ impl GameClient {
                 * self.walk_amount
                 * (1.0 - self.ads_t)
                 * self.tuning.movement.view_bob;
-            return (
-                self.eye() + self.cam_smooth + vec3(0.0, bob, 0.0),
-                self.yaw + s.x + shake.x,
-                self.pitch + s.y + shake.y,
-            );
+            // (the smoothing never takes the view below the knees: whatever glides, the
+            // camera stays up out of the floor)
+            let mut cam = self.eye() + self.cam_smooth + vec3(0.0, bob, 0.0);
+            cam.y = cam.y.max(self.body.pos.y + PRONE_EYE * 0.8);
+            return (cam, self.yaw + s.x + shake.x, self.pitch + s.y + shake.y);
         }
         if self.br_out() {
             if let Some(r) = self.spectate.and_then(|t| self.remotes.get(&t)) {
