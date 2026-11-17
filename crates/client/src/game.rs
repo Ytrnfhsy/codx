@@ -1924,6 +1924,22 @@ impl GameClient {
         ) * k
     }
 
+    /// The scope's rangefinder: how far off is what the crosshair rests on (a player or
+    /// the world), up to 2 km.
+    pub fn scope_range(&self) -> Option<f32> {
+        const MAX: f32 = 2000.0;
+        let eye = self.eye();
+        let dir = self.aim_dir();
+        let mut best = self.world.raycast(eye, dir, MAX).map(|h| h.0);
+        for r in self.remotes.values().filter(|r| r.alive) {
+            let len = best.unwrap_or(MAX);
+            if let Some((t, _)) = ray_player(eye, dir, r.pos, r.yaw, r.stance, len) {
+                best = Some(t);
+            }
+        }
+        best
+    }
+
     pub fn aim_dir(&self) -> Vec3 {
         let s = self.sway_offset();
         look_dir(self.yaw + s.x, self.pitch + s.y)

@@ -48,6 +48,17 @@ impl GameClient {
 
         if self.scoped() && self.alive {
             self.draw_scope();
+            // the rangefinder: how far off is what the crosshair rests on
+            {
+                let (w, h) = (screen_width(), screen_height());
+                let label = match self.scope_range() {
+                    Some(d) => format!("{d:.0} {}", t("м", "m")),
+                    None => format!("--- {}", t("м", "m")),
+                };
+                let (x, y) = (w / 2.0 - h * 0.3, h / 2.0 + h * 0.36);
+                ui.centered(&label, x, y, 22, ACCENT);
+                ui.centered(t("відстань", "range"), x, y + 20.0, 13, MUTED);
+            }
             // a variable scope says what it is set to, and how to turn it
             if toon_shared::inventory::sight_variable(self.sight()) {
                 let (w, h) = (screen_width(), screen_height());

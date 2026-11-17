@@ -357,26 +357,16 @@ pub fn depot_dressed() -> (Map, [Dressed; 2]) {
         b.push_detail(-HALF_X, 0.09, z - 0.07, HALF_X, 0.2, z + 0.07, pal::METAL);
     }
     for sx in [-1.0f32, 1.0] {
-        let (r0, r1) = (sx * 32.0 - 4.0, sx * 32.0 + 4.0);
-        b.decal(r0, -HALF_Z, r1, HALF_Z, 0.06, pal::ASPHALT);
-        b.decal(r0, -3.4, r1, 3.4, 0.2, pal::ASPHALT);
-        // (the planked crossing lies level with the rails' tops)
-        b.decal(
-            sx * 32.0 - 0.08,
-            -HALF_Z,
-            sx * 32.0 + 0.08,
-            -4.0,
-            0.09,
-            pal::WALL_WHITE,
-        );
-        b.decal(
-            sx * 32.0 - 0.08,
-            4.0,
-            sx * 32.0 + 0.08,
-            HALF_Z,
-            0.09,
-            pal::WALL_WHITE,
-        );
+        // the road runs along the sheds' outer walls (not in under them), level with
+        // the yard's dirt
+        let c = sx * 31.0;
+        b.decal(c - 3.0, -HALF_Z, c + 3.0, HALF_Z, 0.03, pal::ASPHALT);
+        // the crossing: a solid slab up to the rails' tops, walked over (not a sheet
+        // floating over the ballast)
+        b.cbox(c, 0.0, 6.0, 6.8, 0.0, 0.23, pal::ASPHALT);
+        for (z0, z1) in [(-HALF_Z, -3.4), (3.4, HALF_Z)] {
+            b.decal(c - 0.08, z0, c + 0.08, z1, 0.05, pal::WALL_WHITE);
+        }
     }
 
     // the train on the line: an engine and wagons either side of the middle and beyond
