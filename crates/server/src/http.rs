@@ -8,7 +8,6 @@ use std::sync::mpsc::{channel, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server};
-use toon_shared::rng::Rng;
 
 const ADMIN_HTML: &str = include_str!("../web/admin.html");
 const INDEX_HTML: &str = include_str!("../web/index.html");
@@ -19,7 +18,14 @@ struct Ctx {
     admin: Sender<AdminMsg>,
     tokens: HashMap<String, Instant>,
     fails: HashMap<String, (u32, Instant)>,
-    rng: Rng,
+}
+
+/// A session token: 128 bits from the operating system's secure random source (not the
+/// game's generator, whose state could be worked out from when the server started).
+fn new_token() -> Option<String> {
+    let mut b = [0u8; 16];
+    getrandom::getrandom(&mut b).ok()?;
+    Some(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
 fn header(k: &str, v: &str) -> Header {
@@ -106,7 +112,9 @@ fn handle(ctx: &mut Ctx, mut req: Request) {
             let ok = ask(ctx, |tx| AdminMsg::CheckRcon(pass, tx)).unwrap_or(false);
             if ok {
                 ctx.fails.remove(&ip);
-                let token = format!("{:016x}{:016x}", ctx.rng.next_u64(), ctx.rng.next_u64());
+                let Some(token) = new_token() else {
+                    return json_resp(req, 500, json!({"error": "Немає джерела випадкових чисел"}));
+                };
                 ctx.tokens.insert(token.clone(), now);
                 println!("[http] адмін увійшов з {ip}");
                 json_resp(req, 200, json!({ "token": token }))
@@ -173,7 +181,6 @@ pub fn spawn(bind: &str, port: u16, admin: Sender<AdminMsg>) -> Result<JoinHandl
                 admin,
                 tokens: HashMap::new(),
                 fails: HashMap::new(),
-                rng: Rng::from_time(),
             };
             for req in server.incoming_requests() {
                 handle(&mut ctx, req);

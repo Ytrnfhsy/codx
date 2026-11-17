@@ -1074,6 +1074,7 @@ name = "toon_server"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "getrandom 0.2.17",
  "glam",
  "self-replace",
  "serde",
