@@ -67,6 +67,8 @@ pub struct VmState {
     pub knife: Option<f32>,
     pub throwing: bool,
     pub flash: bool,
+    /// Battle royale, no gun in this hand: only the knife.
+    pub bare: bool,
 }
 
 fn smooth(x: f32) -> f32 {
@@ -823,7 +825,6 @@ pub fn render_viewmodel(
         Some(_) => return,
         None if g.alive
             && !g.scoped()
-            && !g.hand_empty()
             && g.piloting.is_none()
             && g.me.seat.is_none()
             && !g.body.swimming(&g.world) =>
@@ -975,7 +976,7 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     let base = trs(pos, yaw, pitch, roll) * Mat4::from_scale(Vec3::splat(0.85));
     let mut m = ToonMesh::new();
     let ow = if settings.outlines { 0.004 } else { 0.0 };
-    for p in parts {
+    for p in parts.iter().filter(|_| !vm.bare) {
         let c = if p.mag {
             p.c + mag_off
         } else if p.pump {
@@ -997,10 +998,15 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
             .unwrap_or(fore_rest)
     };
     let fore = base.transform_point3(fore_rest.lerp(mag_spot, hand_to_mag));
-    for (hand, shoulder) in [
-        (grip, vec3(0.38, -0.55, -0.1)),
-        (fore, vec3(-0.3, -0.6, -0.2)),
-    ] {
+    let gun_hands: &[(Vec3, Vec3)] = if vm.bare {
+        &[]
+    } else {
+        &[
+            (grip, vec3(0.38, -0.55, -0.1)),
+            (fore, vec3(-0.3, -0.6, -0.2)),
+        ]
+    };
+    for &(hand, shoulder) in gun_hands {
         let mid = (hand + shoulder) * 0.5;
         let d = hand - shoulder;
         let rot = Quat::from_rotation_arc(Vec3::NEG_Z, d.normalize());
@@ -1023,7 +1029,8 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     }
     // knife slash: a sweeping arc from right to left
     let mut swoosh = crate::mesh::MeshBuilder::new();
-    if let Some(t) = knife {
+    if knife.is_some() || vm.bare {
+        let t = knife.unwrap_or(0.0);
         let knife_at = |t: f32| {
             let e = smooth(t * 1.15);
             let s = (e * PI).sin();
@@ -1032,7 +1039,14 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
                 0.9 - 1.8 * e,
             )
         };
-        let (kp, ky) = knife_at(t);
+        // (empty-handed: the knife held ready, low on the right)
+        let (kp, ky) = match knife {
+            Some(_) => knife_at(t),
+            None => (
+                vec3(0.2, -0.12, -0.5) + vec3(0.0, (vm.bob_phase * 2.0).sin() * 0.01 * vm.bob, 0.0),
+                0.35,
+            ),
+        };
         let kb = trs(kp, ky, -0.15, -0.5);
         m.boxed(&kb, vec3(0.012, 0.025, 0.12), [220, 225, 235], ow);
         m.boxed(
@@ -1061,7 +1075,7 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
             ow,
         );
         // motion trail
-        if (0.1..0.75).contains(&t) {
+        if knife.is_some() && (0.1..0.75).contains(&t) {
             let n = 8;
             for i in 0..n {
                 let a = t - 0.2 * (i as f32 / n as f32);

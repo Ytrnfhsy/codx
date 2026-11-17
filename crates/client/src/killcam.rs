@@ -666,6 +666,7 @@ impl Killcam {
             knife: Some(since(self.knife_at) / 0.45).filter(|k| (0.0..1.0).contains(k)),
             throwing: false,
             flash: since(self.muzzle_at) < 0.05,
+            bare: false,
         }
     }
 }

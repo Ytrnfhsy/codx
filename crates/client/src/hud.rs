@@ -73,16 +73,16 @@ impl GameClient {
         }
         if self.scoped() && self.alive {
             self.draw_scope();
-            // the rangefinder: how far off is what the crosshair rests on
+            // the rangefinder: how far off is what the crosshair rests on, over the
+            // right arm of the cross
             {
                 let (w, h) = (screen_width(), screen_height());
                 let label = match self.scope_range() {
                     Some(d) => format!("{d:.0} {}", t("м", "m")),
                     None => format!("--- {}", t("м", "m")),
                 };
-                let (x, y) = (w / 2.0 - h * 0.3, h / 2.0 + h * 0.36);
-                ui.centered(&label, x, y, 22, ACCENT);
-                ui.centered(t("відстань", "range"), x, y + 20.0, 13, MUTED);
+                let (x, y) = (w / 2.0 + h * 0.46 * 0.42, h / 2.0 - 30.0);
+                ui.centered(&label, x, y, 22, TEXT);
             }
             // a variable scope says what it is set to, and how to turn it
             if toon_shared::inventory::sight_variable(self.sight()) {
@@ -2707,9 +2707,9 @@ impl GameClient {
             Color::new(0.0, 0.0, 0.0, 0.35),
         );
         if self.hand_empty() {
-            ui.shadowed(t("Без зброї", "Unarmed"), x, y + 36.0, 30, MUTED);
+            ui.shadowed(t("Ніж", "Knife"), x, y + 36.0, 30, TEXT);
             ui.shadowed(
-                t("знайдіть зброю в будинках", "find a gun in the houses"),
+                t("зброю знайдете в будинках", "find a gun in the houses"),
                 x,
                 y + 66.0,
                 16,

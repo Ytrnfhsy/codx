@@ -38,6 +38,8 @@ pub struct HistEntry {
 }
 
 pub struct Player {
+    /// The battle royale has no classes: their perks do not count there.
+    pub no_perks: bool,
     pub id: u8,
     pub name: String,
     /// Language the server writes to this player in.
@@ -230,6 +232,7 @@ impl Player {
     pub fn new(id: u8, name: String, addr: Option<SocketAddr>, now: f64) -> Player {
         let l = DEFAULT_CLASSES[0].1;
         Player {
+            no_perks: false,
             id,
             name,
             lang: Lang::Uk,
@@ -342,10 +345,10 @@ impl Player {
         &mut self.weapons[self.slot as usize & 1]
     }
     pub fn has_perk2(&self, p: Perk2) -> bool {
-        self.loadout.perk2 == p
+        !self.no_perks && self.loadout.perk2 == p
     }
     pub fn has_perk3(&self, p: Perk3) -> bool {
-        self.loadout.perk3 == p
+        !self.no_perks && self.loadout.perk3 == p
     }
     /// Position/yaw/stance at a past time (lag compensation).
     pub fn rewound(&self, t: f64) -> (Vec3, f32, Stance) {
@@ -1335,6 +1338,7 @@ impl Game {
             p.loadout = l;
         }
         let l = p.loadout;
+        p.no_perks = self.mode == Mode::Br;
         p.alive = true;
         p.hp = MAX_HEALTH;
         p.body = Body {

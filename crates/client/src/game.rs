@@ -1221,7 +1221,7 @@ impl GameClient {
 
     fn sprint_max(&self) -> f32 {
         let t = self.tuning.movement.sprint_time;
-        if self.loadout.perk3 == Perk3::ExtremeConditioning {
+        if self.perks() && self.loadout.perk3 == Perk3::ExtremeConditioning {
             t * 2.0
         } else {
             t
@@ -1809,6 +1809,7 @@ impl GameClient {
                 .then(|| (1.0 - ((self.melee_until - now) / 0.45) as f32).clamp(0.0, 1.0)),
             throwing: self.cooking.is_some() || now < self.throw_until,
             flash: now - self.muzzle_flash < 0.05,
+            bare: self.hand_empty(),
         }
     }
 
@@ -1817,7 +1818,7 @@ impl GameClient {
     fn current_spread(&self) -> f32 {
         let def = self.ws();
         let mut hip = def.hip_spread;
-        if self.loadout.perk3 == Perk3::SteadyAim {
+        if self.perks() && self.loadout.perk3 == Perk3::SteadyAim {
             hip *= 0.65;
         }
         hip *= match self.body.stance {
@@ -1845,7 +1846,12 @@ impl GameClient {
         s.tan() / (fovy * 0.5).tan() * screen_height() * 0.5
     }
 
-    /// Battle royale: no gun in hand (everybody lands empty-handed).
+    /// Class perks count (the battle royale has no classes).
+    pub fn perks(&self) -> bool {
+        self.mode != Mode::Br
+    }
+
+    /// Battle royale: no gun in hand (everybody lands with just a knife).
     pub fn hand_empty(&self) -> bool {
         self.br
             .as_ref()
@@ -2083,7 +2089,7 @@ impl GameClient {
         if self.reload_until.is_some() || mag >= self.mag_cap() || res == 0 {
             return;
         }
-        let k = if self.loadout.perk2 == Perk2::SleightOfHand {
+        let k = if self.perks() && self.loadout.perk2 == Perk2::SleightOfHand {
             0.5
         } else {
             1.0
@@ -2738,7 +2744,10 @@ impl GameClient {
                     a.play(Sfx::Knife, 0.4);
                 }
             }
-            if !shielded && pressed(Action::Knife) && now >= self.melee_ready {
+            // (empty-handed in the battle royale the knife is the weapon: the trigger
+            // stabs with it too)
+            let stab = pressed(Action::Knife) || self.hand_empty() && pressed(Action::Fire);
+            if !shielded && stab && now >= self.melee_ready {
                 self.melee_ready = now + MELEE_COOLDOWN as f64;
                 self.melee_until = now + 0.45;
                 self.reload_until = None;

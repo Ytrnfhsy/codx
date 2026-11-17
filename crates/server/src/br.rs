@@ -1025,6 +1025,7 @@ impl Game {
         // empty hands: whatever you fight with, you find (one medkit to start with)
         p.inv.medkits = 1;
         p.empty = 0b11;
+        p.no_perks = true;
         p.body = Body {
             pos,
             vel: p.body.vel,
