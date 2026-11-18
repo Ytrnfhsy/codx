@@ -50,7 +50,7 @@ fn main() {
                 .get(i + 1)
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(toon_shared::consts::MASTER_PORT);
-            if let Err(e) = toon_server::master::run_master("0.0.0.0", port) {
+            if let Err(e) = toon_server::master::run_master("::", port) {
                 eprintln!("Не вдалося запустити каталог: {e}");
                 std::process::exit(1);
             }

@@ -33,9 +33,26 @@ struct Listed {
 type List = Arc<Mutex<HashMap<SocketAddr, Listed>>>;
 
 /// The master: serves the list on `bind:port` (TCP) until the process ends.
+/// (`bind` "::" listens on IPv6 and, where the system allows it, IPv4 at once: a tunnel or
+/// proxy that reaches "localhost" over either finds it; on a system without IPv6 it falls
+/// back to IPv4 alone.)
 pub fn run_master(bind: &str, port: u16) -> Result<(), String> {
-    let server = Server::http(format!("{bind}:{port}")).map_err(|e| e.to_string())?;
-    println!("[master] каталог серверів слухає TCP {bind}:{port}");
+    let at = |b: &str| {
+        if b.contains(':') {
+            format!("[{b}]:{port}")
+        } else {
+            format!("{b}:{port}")
+        }
+    };
+    let (server, used) = match Server::http(at(bind)) {
+        Ok(s) => (s, at(bind)),
+        Err(_) if bind == "::" => (
+            Server::http(at("0.0.0.0")).map_err(|e| e.to_string())?,
+            at("0.0.0.0"),
+        ),
+        Err(e) => return Err(e.to_string()),
+    };
+    println!("[master] каталог серверів слухає TCP {used}");
     let list: List = Default::default();
     for req in server.incoming_requests() {
         let list = list.clone();
