@@ -56,16 +56,32 @@ fn json_resp(req: Request, code: u16, v: Value) {
     );
 }
 
-/// Where a request came from (behind a proxy on this machine, the address it passes on).
+/// The list's address as a URL: "https://host" or "http://host:port" as given, a bare
+/// "host:port" over plain HTTP.
+pub fn base_url(master: &str) -> String {
+    let m = master.trim().trim_end_matches('/');
+    if m.contains("://") {
+        m.to_string()
+    } else {
+        format!("http://{m}")
+    }
+}
+
+/// Where a request came from. Behind a proxy or a Cloudflare tunnel on this machine, the
+/// address it passes on (Cloudflare's own header first: it cannot be set by the sender).
 fn client_ip(req: &Request) -> Option<IpAddr> {
     let direct = req.remote_addr()?.ip();
     if direct.is_loopback() {
-        let fwd = req
-            .headers()
-            .iter()
-            .find(|h| h.field.equiv("X-Forwarded-For") || h.field.equiv("X-Real-IP"))
-            .and_then(|h| h.value.as_str().split(',').next()?.trim().parse().ok());
-        if let Some(ip) = fwd {
+        let header = |name: &'static str| -> Option<IpAddr> {
+            req.headers()
+                .iter()
+                .find(|h| h.field.equiv(name))
+                .and_then(|h| h.value.as_str().split(',').next()?.trim().parse().ok())
+        };
+        if let Some(ip) = header("CF-Connecting-IP")
+            .or_else(|| header("X-Real-IP"))
+            .or_else(|| header("X-Forwarded-For"))
+        {
             return Some(ip);
         }
     }
@@ -174,7 +190,7 @@ pub fn announcer(master: String, port: u16, on: Arc<AtomicBool>) {
             let mut last: Option<bool> = None;
             loop {
                 if on.load(Ordering::Relaxed) {
-                    let url = format!("http://{master}/announce");
+                    let url = format!("{}/announce", base_url(&master));
                     let body = json!({ "port": port, "protocol": PROTOCOL_VERSION }).to_string();
                     let result = ureq::post(&url)
                         .timeout(Duration::from_secs(10))
@@ -210,7 +226,7 @@ pub fn announcer(master: String, port: u16, on: Arc<AtomicBool>) {
 
 /// The game's browser: the servers the master lists (for this game's protocol).
 pub fn fetch_list(master: &str) -> Result<Vec<String>, String> {
-    let url = format!("http://{master}/servers");
+    let url = format!("{}/servers", base_url(master));
     let text = ureq::get(&url)
         .timeout(Duration::from_secs(5))
         .call()

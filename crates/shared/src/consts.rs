@@ -11,8 +11,9 @@ pub const MAX_REWIND: f32 = 0.35;
 pub const DEFAULT_PORT: u16 = 27015;
 /// The public server list (`toon-server --master` serves it on this TCP port).
 pub const MASTER_PORT: u16 = 27900;
-/// Where game servers announce themselves and the game finds them.
-pub const MASTER_DEFAULT: &str = "master.pagani.com.ua:27900";
+/// Where game servers announce themselves and the game finds them (a URL, or "host:port"
+/// for plain HTTP).
+pub const MASTER_DEFAULT: &str = "https://master.pagani.com.ua";
 pub const PROTOCOL_VERSION: u16 = 37;
 /// Version of the game build: the release tag (`TW_VERSION`, set by CI for `v*` tags,
 /// without the `v`); for builds made by hand the nearest `v*` git tag (see build.rs), or

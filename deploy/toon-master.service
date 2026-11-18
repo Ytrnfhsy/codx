@@ -1,8 +1,9 @@
 # The public server list (master) every game finds servers through.
 # Copy to /etc/systemd/system/toon-master.service, then:
 #   sudo systemctl enable --now toon-master
-# It listens on TCP 27900: open it (sudo ufw allow 27900/tcp) and point the DNS name in
-# toon_shared::consts::MASTER_DEFAULT (master.pagani.com.ua) at this machine.
+# It listens on TCP 27900 on this machine. Publish it as https://master.pagani.com.ua (the
+# address in toon_shared::consts::MASTER_DEFAULT): through a Cloudflare tunnel to
+# http://localhost:27900, or behind nginx/Caddy with HTTPS.
 [Unit]
 Description=Toon Warfare public server list
 After=network-online.target
