@@ -847,6 +847,7 @@ impl Game {
                 .unwrap_or_default(),
             _ => Default::default(),
         };
+        self.record_fight(victim, attacker, cause, headshot, dist as f32);
         self.broadcast(S2C::Kill {
             killer: attacker,
             victim,
@@ -874,6 +875,64 @@ impl Game {
         if self.mode == Mode::Br {
             self.br_on_death(victim);
         }
+    }
+
+    /// A death in the admin's player records: the victim's, and the killer's kill (not a
+    /// team kill).
+    fn record_fight(
+        &mut self,
+        victim: u8,
+        attacker: Option<u8>,
+        cause: Cause,
+        headshot: bool,
+        dist: f32,
+    ) {
+        if let Some(k) = self
+            .p(victim)
+            .filter(|p| !p.is_bot())
+            .map(|p| p.stats_key())
+        {
+            let own = attacker.is_none_or(|a| a == victim);
+            let f = self.registry.fight(&k);
+            f.deaths += 1;
+            if own {
+                f.suicides += 1;
+            }
+            *f.killed_by.entry(cause.name().to_string()).or_default() += 1;
+        }
+        let Some(a) = attacker.filter(|a| *a != victim) else {
+            return;
+        };
+        if self.allied_ids(a, victim) {
+            return;
+        }
+        let Some((k, multi, streak)) = self
+            .p(a)
+            .filter(|p| !p.is_bot())
+            .map(|p| (p.stats_key(), p.multi, p.streak))
+        else {
+            return;
+        };
+        let f = self.registry.fight(&k);
+        f.kills += 1;
+        f.headshots += headshot as u32;
+        match cause {
+            Cause::Knife => f.knife_kills += 1,
+            Cause::Grenade | Cause::Fire => f.grenade_kills += 1,
+            Cause::Airstrike
+            | Cause::Helicopter
+            | Cause::Artillery
+            | Cause::Fpv
+            | Cause::Drop
+            | Cause::Nrk => f.streak_kills += 1,
+            _ => {}
+        }
+        f.longest = f.longest.max(dist);
+        f.best_streak = f.best_streak.max(streak);
+        if multi >= 2 {
+            f.multi[(multi as usize - 2).min(3)] += 1;
+        }
+        *f.by_weapon.entry(cause.name().to_string()).or_default() += 1;
     }
 
     pub fn start_reload(&mut self, id: u8) {

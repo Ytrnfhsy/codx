@@ -412,6 +412,11 @@ impl Game {
         if let Some(p) = self.pm(id) {
             p.key = key;
         }
+        // (the visit starts here: the key is what it is kept under)
+        if let Some(p) = self.p(id).filter(|p| !p.is_bot()) {
+            let (k, name, ip) = (p.stats_key(), p.name.clone(), p.ip.clone());
+            self.registry.join(&k, &name, &ip);
+        }
     }
 }
 
@@ -546,6 +551,8 @@ pub struct Game {
     pub bans: crate::admin::Bans,
     /// Battle royale records between matches.
     pub br_stats: crate::stats::BrStats,
+    /// Who played here (for the admin's player pages).
+    pub registry: crate::registry::Registry,
     /// Players to disconnect (id, reason) — handled by the network layer.
     pub kicked: Vec<(u8, String)>,
     pub next_housekeeping: f64,
@@ -580,6 +587,7 @@ impl Game {
         }
         let bans = crate::admin::Bans::load(&cfg.data_dir);
         let br_stats = crate::stats::BrStats::load(&cfg.data_dir);
+        let registry = crate::registry::Registry::load(&cfg.data_dir, cfg.geoip);
         let sab = Sab {
             pos: map.bomb,
             carrier: None,
@@ -642,6 +650,7 @@ impl Game {
             log: VecDeque::new(),
             bans,
             br_stats,
+            registry,
             kicked: Vec::new(),
             next_housekeeping: 0.0,
             match_started: false,
@@ -929,6 +938,7 @@ impl Game {
             self.sab.dropped_since = self.time;
         }
         if !p.is_bot() {
+            self.registry.leave(&p.stats_key());
             let text = match reason {
                 Some(r) => format!("{} покинув гру ({r})", p.name),
                 None => format!("{} покинув гру", p.name),
@@ -1763,7 +1773,9 @@ impl Game {
             return;
         }
         p.chat_budget -= 1.0;
-        let (from, team) = (p.name.clone(), p.team);
+        let (from, team, key) = (p.name.clone(), p.team, p.stats_key());
+        let place = format!("{} · {}", self.map.name, self.mode.name());
+        self.registry.chat(&key, &from, &text, team_only, &place);
         self.logf(format!(
             "{}{from}: {text}",
             if team_only { "(команда) " } else { "" }
@@ -2044,6 +2056,9 @@ impl Game {
                 })
                 .collect();
             for (key, name, won, kills, deaths, longest) in rows {
+                let f = self.registry.fight(&key);
+                f.matches += 1;
+                f.wins += won as u32;
                 let news = self
                     .br_stats
                     .record_match(&key, &name, won, kills, deaths, longest);
@@ -2283,6 +2298,7 @@ impl Game {
     pub fn tick(&mut self, dt: f32) {
         self.time += dt as f64;
         self.tick = self.tick.wrapping_add(1);
+        self.registry.tick(self.time);
         self.path_budget = PATHS_PER_TICK;
         self.update_state(dt);
         self.update_bullets();

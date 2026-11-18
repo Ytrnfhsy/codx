@@ -2617,7 +2617,25 @@ impl GameClient {
             .take(if open { 14 } else { 6 })
             .collect();
         for l in lines {
-            ui.shadowed(&l.text, 16.0, y, 16, l.color);
+            // a dark strip under each line, and the colour lifted towards white: chat
+            // stays readable over the sky, sand and snow alike
+            let fade = if open {
+                1.0
+            } else {
+                (10.0 - (self.now - l.time) as f32).clamp(0.0, 1.0)
+            };
+            let w = ui.width(&l.text, 16, true);
+            crate::ui::soft_rect(
+                10.0,
+                y - 16.0,
+                w + 12.0,
+                21.0,
+                Color::new(0.0, 0.0, 0.0, 0.5 * fade),
+            );
+            let c = l.color;
+            let lift = |v: f32| v + (1.0 - v) * 0.35;
+            let c = Color::new(lift(c.r), lift(c.g), lift(c.b), c.a * fade);
+            ui.shadowed(&l.text, 16.0, y, 16, c);
             y -= 21.0;
         }
         if let Some((text, team)) = &self.chat_input {

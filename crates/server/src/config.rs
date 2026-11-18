@@ -144,6 +144,9 @@ pub struct ServerConfig {
     pub require_same_version: bool,
     /// Directory for bans and logs.
     pub data_dir: String,
+    /// The admin's player list shows each address's country, asked of ip-api.com (the
+    /// players' addresses go to that service; false keeps them here).
+    pub geoip: bool,
     /// Fine tuning of movement and every weapon (see `tune` admin command).
     /// Missing fields fall back to factory defaults.
     pub tuning: serde_json::Value,
@@ -204,6 +207,7 @@ impl Default for ServerConfig {
             http_enabled: true,
             require_same_version: true,
             data_dir: "data".into(),
+            geoip: true,
             tuning: tuning_json(&Tuning::default()),
         }
     }

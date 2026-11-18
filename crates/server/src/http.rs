@@ -11,6 +11,7 @@ use tiny_http::{Header, Method, Request, Response, Server};
 
 const ADMIN_HTML: &str = include_str!("../web/admin.html");
 const INDEX_HTML: &str = include_str!("../web/index.html");
+const PLAYERS_HTML: &str = include_str!("../web/players.html");
 
 const TOKEN_TTL: Duration = Duration::from_secs(12 * 3600);
 
@@ -68,8 +69,42 @@ fn body_json(req: &mut Request) -> Value {
     serde_json::from_str(&s).unwrap_or(Value::Null)
 }
 
+/// A query string parameter, percent-decoded (`?key=%23ab12` gives "#ab12").
+fn query(url: &str, name: &str) -> Option<String> {
+    let q = url.split_once('?')?.1;
+    let raw = q.split('&').find_map(|kv| {
+        kv.split_once('=')
+            .filter(|(k, _)| *k == name)
+            .map(|(_, v)| v)
+    })?;
+    let b = raw.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' if i + 2 < b.len() => {
+                match u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).ok()?, 16) {
+                    Ok(v) => out.push(v),
+                    Err(_) => return None,
+                }
+                i += 3;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
 fn handle(ctx: &mut Ctx, mut req: Request) {
-    let url = req.url().split('?').next().unwrap_or("/").to_string();
+    let full_url = req.url().to_string();
+    let url = full_url.split('?').next().unwrap_or("/").to_string();
     let ip = req
         .remote_addr()
         .map(|a| a.ip().to_string())
@@ -83,6 +118,33 @@ fn handle(ctx: &mut Ctx, mut req: Request) {
         (Method::Get, "/") => respond(req, 200, "text/html; charset=utf-8", INDEX_HTML.to_string()),
         (Method::Get, "/admin") | (Method::Get, "/admin/") => {
             respond(req, 200, "text/html; charset=utf-8", ADMIN_HTML.to_string())
+        }
+        (Method::Get, "/admin/players") | (Method::Get, "/admin/players/") => respond(
+            req,
+            200,
+            "text/html; charset=utf-8",
+            PLAYERS_HTML.to_string(),
+        ),
+        (Method::Get, "/api/players") => {
+            if !token_ok(ctx, &req) {
+                return json_resp(req, 401, json!({"error": "unauthorized"}));
+            }
+            match ask(ctx, AdminMsg::Players) {
+                Some(v) => json_resp(req, 200, v),
+                None => json_resp(req, 503, json!({"error": "server busy"})),
+            }
+        }
+        (Method::Get, "/api/player") => {
+            if !token_ok(ctx, &req) {
+                return json_resp(req, 401, json!({"error": "unauthorized"}));
+            }
+            let Some(key) = query(&full_url, "key") else {
+                return json_resp(req, 400, json!({"error": "key?"}));
+            };
+            match ask(ctx, |tx| AdminMsg::Player(key, tx)) {
+                Some(v) => json_resp(req, 200, v),
+                None => json_resp(req, 503, json!({"error": "server busy"})),
+            }
         }
         (Method::Get, "/api/top") => match ask(ctx, AdminMsg::Top) {
             Some(v) => json_resp(req, 200, v),

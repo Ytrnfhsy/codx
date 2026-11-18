@@ -62,7 +62,7 @@ fn state_json_raw(g: &Game) -> serde_json::Value {
                 "id": p.id, "name": p.name, "team": p.team.name(), "team_id": p.team.index(),
                 "score": p.score, "kills": p.kills, "deaths": p.deaths, "assists": p.assists,
                 "ping": if p.is_bot() { 0 } else { (p.ping * 1000.0) as u32 },
-                "ip": p.ip, "bot": p.is_bot(), "alive": p.alive,
+                "ip": p.ip, "bot": p.is_bot(), "alive": p.alive, "key": p.stats_key(),
                 "in_plane": p.in_plane, "place": p.br_place, "squad": p.squad,
             })
         })
@@ -99,6 +99,78 @@ fn state_json_raw(g: &Game) -> serde_json::Value {
             "weapon": toon_shared::tuning::WeaponStats::FIELDS,
         },
         "weapon_names": toon_shared::weapons::WeaponId::all().map(|w| (w.key(), w.def().name)).collect::<Vec<_>>(),
+    })
+}
+
+/// Who is on the server now, by record key: (player id, seconds since joining).
+fn online(g: &Game) -> HashMap<String, u8> {
+    g.players
+        .iter()
+        .flatten()
+        .filter(|p| !p.is_bot())
+        .map(|p| (p.stats_key(), p.id))
+        .collect()
+}
+
+/// The admin's list of everybody who has played here, the latest first.
+pub fn players_json(g: &Game) -> serde_json::Value {
+    let on = online(g);
+    let now = crate::registry::unix_now();
+    let mut rows: Vec<_> = g
+        .registry
+        .players
+        .iter()
+        .map(|(key, e)| {
+            let ip = e.ips.iter().max_by_key(|s| s.last).map(|s| s.ip.clone()).unwrap_or_default();
+            let geo = g.registry.country(&ip).unwrap_or_default();
+            let play = e.play_secs + e.online_since.map_or(0, |s| now.saturating_sub(s));
+            json!({
+                "key": key, "name": e.name, "first": e.first_seen, "last": e.last_seen,
+                "sessions": e.sessions, "play": play, "ip": ip, "cc": geo.cc, "country": geo.country,
+                "kills": e.fight.kills, "deaths": e.fight.deaths, "chat": e.chat.len(),
+                "online": on.get(key).copied(),
+            })
+        })
+        .collect();
+    rows.sort_by_key(|r| {
+        std::cmp::Reverse((r["online"].is_number(), r["last"].as_u64().unwrap_or(0)))
+    });
+    json!({ "players": rows, "geoip": g.registry.lookup })
+}
+
+/// One player's whole record for the admin.
+pub fn player_json(g: &Game, key: &str) -> serde_json::Value {
+    let Some(e) = g.registry.players.get(key) else {
+        return json!({ "error": "not found" });
+    };
+    let now = crate::registry::unix_now();
+    let geo = |ip: &str| g.registry.country(ip).unwrap_or_default();
+    let mut ips = e.ips.clone();
+    ips.sort_by_key(|s| std::cmp::Reverse(s.last));
+    let live = online(g).get(key).and_then(|&id| g.p(id)).map(|p| {
+        json!({
+            "id": p.id, "team": p.team.name(), "score": p.score, "kills": p.kills,
+            "deaths": p.deaths, "ping": (p.ping * 1000.0) as u32, "alive": p.alive,
+        })
+    });
+    json!({
+        "key": key,
+        "name": e.name,
+        "names": e.names,
+        "first": e.first_seen,
+        "last": e.last_seen,
+        "sessions": e.sessions,
+        "play": e.play_secs + e.online_since.map_or(0, |s| now.saturating_sub(s)),
+        "online": live,
+        "ips": ips.iter().map(|s| {
+            let c = geo(&s.ip);
+            json!({ "ip": s.ip, "first": s.first, "last": s.last, "times": s.times, "cc": c.cc, "country": c.country })
+        }).collect::<Vec<_>>(),
+        "visits": e.visits.iter().rev().collect::<Vec<_>>(),
+        "chat": e.chat.iter().rev().collect::<Vec<_>>(),
+        "fight": e.fight,
+        "br": g.br_stats.by_name.get(key),
+        "banned": e.ips.iter().any(|s| g.bans.find(&s.ip).is_some()),
     })
 }
 
@@ -251,6 +323,12 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                         })
                         .collect();
                     let _ = reply.send(json!(boards));
+                }
+                AdminMsg::Players(reply) => {
+                    let _ = reply.send(players_json(&game));
+                }
+                AdminMsg::Player(key, reply) => {
+                    let _ = reply.send(player_json(&game, &key));
                 }
                 AdminMsg::CheckRcon(pass, reply) => {
                     let _ = reply

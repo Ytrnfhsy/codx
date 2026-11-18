@@ -43,7 +43,7 @@
 </style>
 </head>
 <body>
-<header><h1>🎯 TOON WARFARE</h1><span class="sub">панель адміністратора</span><span style="flex:1"></span><button id="logout" class="ghost" hidden>Вийти</button></header>
+<header><h1>🎯 TOON WARFARE</h1><span class="sub">панель адміністратора</span><span style="flex:1"></span><a id="plink" href="/admin/players" hidden style="color:var(--acc)">👥 Усі гравці: історія, IP, чат, статистика</a><button id="logout" class="ghost" hidden>Вийти</button></header>
 
 <div id="login" class="card">
   <h2>Вхід</h2>
@@ -147,8 +147,8 @@ async function api(path, body) {
   return r.json();
 }
 
-function showLogin() { $("login").hidden = false; $("app").hidden = true; $("logout").hidden = true; }
-function showApp() { $("login").hidden = true; $("app").hidden = false; $("logout").hidden = false; refresh(); }
+function showLogin() { $("login").hidden = false; $("app").hidden = true; $("logout").hidden = true; $("plink").hidden = true; }
+function showApp() { $("login").hidden = true; $("app").hidden = false; $("logout").hidden = false; $("plink").hidden = false; refresh(); }
 
 $("go").onclick = async () => {
   $("lerr").textContent = "";
@@ -204,6 +204,7 @@ async function refresh() {
     const b = (label, cmd, cls) => { const x = el("button", label, "small " + (cls || "ghost")); x.onclick = () => run(cmd); td.append(x, " "); };
     if (br) { b("→Грати", "team " + p.id + " allies"); b("→Глядачі", "team " + p.id + " spec"); }
     else { b("→Сині", "team " + p.id + " allies"); b("→Червоні", "team " + p.id + " axis"); b("→Глядачі", "team " + p.id + " spec"); }
+    if (!p.bot) { const pr = el("a", "Профіль"); pr.href = "/admin/players#" + encodeURIComponent(p.key); pr.style.color = "var(--acc)"; pr.style.marginRight = "6px"; td.append(pr); }
     b("Вбити", "kill " + p.id);
     const k = el("button", "Кік", "small danger"); k.onclick = () => { const r = prompt("Причина кіку:", ""); if (r !== null) run("kick " + p.id + " " + r); }; td.append(k, " ");
     if (!p.bot) { const bn = el("button", "Бан", "small danger"); bn.onclick = () => { const r = prompt("Причина бану:", ""); if (r !== null) run("ban " + p.id + " " + r); }; td.append(bn); }

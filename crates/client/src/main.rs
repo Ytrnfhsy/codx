@@ -310,6 +310,8 @@ async fn amain(args: Args) {
     let mut focus: Option<u32> = None;
     let mut grabbed = false;
     let mut fps = 60.0f32;
+    // a held Backspace keeps deleting (after a short pause, like any text box)
+    let mut backspace_next = 0.0f64;
     let start = get_time();
     let mut auto_done = false;
     let mut low_res: Option<(RenderTarget, i32)> = None;
@@ -419,11 +421,46 @@ async fn amain(args: Args) {
         toon_shared::lang::set(settings.lang);
         let dt = get_frame_time().min(0.1);
         fps = fps * 0.95 + (1.0 / dt.max(1e-4)) * 0.05;
+        // typed text, and Ctrl+V (Cmd+V, Shift+Insert) pastes the clipboard. With Ctrl
+        // held, the letters are shortcuts, not text (but AltGr, which is Ctrl+Alt on
+        // Windows, still types)
+        // (held, or pressed this very frame: a quick shortcut can go down and up between
+        // two frames)
+        let held = |k: KeyCode| is_key_down(k) || is_key_pressed(k);
+        let ctrl = held(KeyCode::LeftControl)
+            || held(KeyCode::RightControl)
+            || held(KeyCode::LeftSuper)
+            || held(KeyCode::RightSuper);
+        let alt = held(KeyCode::LeftAlt) || held(KeyCode::RightAlt);
+        let shift = held(KeyCode::LeftShift) || held(KeyCode::RightShift);
         let mut chars = Vec::new();
         while let Some(c) = get_char_pressed() {
-            chars.push(c);
+            if !(ctrl && !alt) {
+                chars.push(c);
+            }
         }
-        let backspace = is_key_pressed(KeyCode::Backspace);
+        if (ctrl && !alt && is_key_pressed(KeyCode::V))
+            || (shift && is_key_pressed(KeyCode::Insert))
+        {
+            if let Some(clip) = macroquad::miniquad::window::clipboard_get() {
+                chars.extend(
+                    clip.chars()
+                        .map(|c| if c.is_whitespace() { ' ' } else { c })
+                        .filter(|c| !c.is_control())
+                        .take(200),
+                );
+            }
+        }
+        let now_t = get_time();
+        let backspace = if is_key_pressed(KeyCode::Backspace) {
+            backspace_next = now_t + 0.45;
+            true
+        } else if is_key_down(KeyCode::Backspace) && now_t >= backspace_next {
+            backspace_next = now_t + 0.035;
+            true
+        } else {
+            false
+        };
         let enter = is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter);
         let (mx, my) = mouse_position();
 

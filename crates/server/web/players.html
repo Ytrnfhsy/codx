@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toon Warfare — гравці</title>
+<style>
+  :root { --bg:#1d2333; --panel:#283149; --panel2:#323d5a; --text:#f3f1ea; --muted:#a8b0c8; --acc:#ffc94a; --red:#ff6b5e; --blue:#5aa8ff; --green:#5ed38b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display:flex; align-items:center; gap:16px; padding:14px 20px; background:#141927; border-bottom:4px solid var(--acc); flex-wrap: wrap; }
+  header h1 { margin:0; font-size:22px; letter-spacing:1px; }
+  header a { color: var(--acc); }
+  .sub { color: var(--muted); }
+  main { padding: 18px; display:grid; gap:16px; grid-template-columns: minmax(320px, 1fr) minmax(320px, 2fr); align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border-radius: 14px; padding: 14px 16px; box-shadow: 0 4px 0 #0005; min-width: 0; }
+  .card h2 { margin: 0 0 10px; font-size: 17px; color: var(--acc); }
+  .card h3 { margin: 16px 0 8px; font-size: 15px; color: var(--acc); }
+  table { width:100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 6px 6px; text-align:left; border-bottom: 1px solid #ffffff14; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  #list tr { cursor: pointer; }
+  #list tr:hover td { background: #ffffff0a; }
+  #list tr.sel td { background: #ffc94a22; }
+  input, button { font: inherit; border-radius: 8px; border: 2px solid #0006; padding: 6px 10px; background: var(--panel2); color: var(--text); }
+  button { cursor:pointer; background: var(--acc); color:#222; font-weight:700; }
+  button.small { padding: 3px 8px; font-size: 12px; }
+  button.danger { background: var(--red); color:#fff; }
+  .row { display:flex; gap:8px; flex-wrap: wrap; align-items:center; margin-bottom: 8px; }
+  .on { color: var(--green); font-weight: 700; }
+  .tiles { display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+  .tile { background: var(--panel2); border-radius: 10px; padding: 8px 10px; }
+  .tile b { display:block; font-size: 20px; color: var(--acc); }
+  .tile span { color: var(--muted); font-size: 12px; }
+  .scroll { max-height: 360px; overflow: auto; }
+  .team { color: var(--blue); font-size: 12px; }
+  .muted { color: var(--muted); }
+  .err { color: var(--red); }
+  code { color: var(--acc); }
+  .bars div { display:flex; align-items:center; gap:8px; margin: 3px 0; font-size: 13px; }
+  .bars i { display:inline-block; height: 10px; background: var(--acc); border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎯 ГРАВЦІ</h1>
+  <span class="sub">усі, хто грав на цьому сервері</span>
+  <span style="flex:1"></span>
+  <a href="/admin">← до панелі</a>
+</header>
+
+<main>
+  <section class="card">
+    <div class="row"><input id="q" placeholder="Пошук: ім'я, IP, країна, ключ" style="flex:1"></div>
+    <div class="sub" id="count"></div>
+    <div class="scroll" style="max-height: 75vh">
+      <table><thead><tr><th>Гравець</th><th>Країна</th><th>Востаннє</th><th>В/С</th></tr></thead><tbody id="list"></tbody></table>
+    </div>
+  </section>
+  <section class="card" id="detail"><p class="sub">Обери гравця зліва.</p></section>
+</main>
+
+<script>
+"use strict";
+const token = sessionStorage.getItem("tw_token") || "";
+if (!token) location.href = "/admin";
+const $ = (id) => document.getElementById(id);
+const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined && text !== null) e.textContent = String(text); if (cls) e.className = cls; return e; };
+
+async function api(path, body) {
+  const opt = { method: body ? "POST" : "GET", headers: { "X-Token": token } };
+  if (body) { opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
+  const r = await fetch(path, opt);
+  if (r.status === 401) { location.href = "/admin"; throw new Error("unauthorized"); }
+  return r.json();
+}
+
+const flag = (cc) => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : "";
+const when = (t) => t ? new Date(t * 1000).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" }) : "—";
+const ago = (t) => {
+  if (!t) return "—";
+  const s = Math.max(0, Date.now() / 1000 - t);
+  if (s < 90) return "щойно";
+  if (s < 3600) return Math.round(s / 60) + " хв тому";
+  if (s < 86400) return Math.round(s / 3600) + " год тому";
+  return Math.round(s / 86400) + " дн тому";
+};
+const span = (s) => {
+  s = Math.round(s || 0);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return h ? h + " год " + m + " хв" : m ? m + " хв" : s + " с";
+};
+
+let all = [], selected = location.hash ? decodeURIComponent(location.hash.slice(1)) : null, geoip = true;
+
+async function load() {
+  let r;
+  try { r = await api("/api/players"); } catch (e) { return; }
+  all = r.players || []; geoip = r.geoip;
+  draw();
+  if (selected) show(selected, true);
+}
+
+function draw() {
+  const q = $("q").value.trim().toLowerCase();
+  const rows = all.filter(p => !q || [p.name, p.ip, p.country, p.cc, p.key].some(x => String(x || "").toLowerCase().includes(q)));
+  $("count").textContent = rows.length + " з " + all.length + (all.filter(p => p.online !== null).length ? " · у грі: " + all.filter(p => p.online !== null).length : "");
+  const tb = $("list"); tb.replaceChildren();
+  for (const p of rows) {
+    const tr = el("tr"); if (p.key === selected) tr.className = "sel";
+    const n = el("td"); n.append(el("div", p.name));
+    if (p.online !== null) n.append(el("span", "● у грі", "on")); else n.append(el("span", p.ip, "muted"));
+    tr.append(n);
+    tr.append(el("td", (flag(p.cc) + " " + (p.country || (p.ip ? "?" : ""))).trim()));
+    tr.append(el("td", p.online !== null ? "зараз" : ago(p.last)));
+    tr.append(el("td", p.kills + "/" + p.deaths));
+    tr.onclick = () => { selected = p.key; draw(); show(p.key); };
+    tb.append(tr);
+  }
+}
+$("q").addEventListener("input", draw);
+
+function table(heads, rows) {
+  const t = el("table"); const th = el("tr"); heads.forEach(h => th.append(el("th", h))); const thead = el("thead"); thead.append(th); t.append(thead);
+  const tb = el("tbody"); rows.forEach(r => { const tr = el("tr"); r.forEach(c => { const td = el("td"); if (c instanceof Node) td.append(c); else td.textContent = c ?? ""; tr.append(td); }); tb.append(tr); }); t.append(tb);
+  return t;
+}
+function tile(label, value) { const d = el("div", null, "tile"); d.append(el("b", value), el("span", label)); return d; }
+function bars(obj) {
+  const box = el("div", null, "bars");
+  const items = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
+  const max = items.length ? items[0][1] : 1;
+  for (const [k, v] of items) { const d = el("div"); const i = el("i"); i.style.width = Math.max(4, 160 * v / max) + "px"; d.append(i, el("span", k + " — " + v)); box.append(d); }
+  if (!items.length) box.append(el("span", "—", "muted"));
+  return box;
+}
+
+async function cmd(c) {
+  const r = await api("/api/cmd", { cmd: c });
+  alert(r.output ?? r.error ?? "");
+  load();
+}
+
+async function show(key, quiet) {
+  const box = $("detail");
+  let p;
+  try { p = await api("/api/player?key=" + encodeURIComponent(key)); } catch (e) { return; }
+  if (p.error) { if (!quiet) box.replaceChildren(el("p", "Не знайдено", "err")); return; }
+  box.replaceChildren();
+  const h = el("h2", p.name); box.append(h);
+  const meta = el("div", null, "sub");
+  meta.append(el("div", "Ключ: " + p.key));
+  if (p.names.length) meta.append(el("div", "Раніше: " + p.names.join(", ")));
+  meta.append(el("div", "Уперше: " + when(p.first) + " · востаннє: " + when(p.last)));
+  meta.append(el("div", "Візитів: " + p.sessions + " · на сервері загалом: " + span(p.play) + (p.banned ? " · ⛔ є в банах" : "")));
+  box.append(meta);
+
+  const act = el("div", null, "row"); act.style.marginTop = "10px";
+  if (p.online) {
+    act.append(el("span", "● у грі зараз: #" + p.online.id + ", " + p.online.team + ", " + p.online.kills + "/" + p.online.deaths + ", пінг " + p.online.ping + " мс", "on"));
+    const k = el("button", "Кік", "small danger"); k.onclick = () => { const r = prompt("Причина кіку:", ""); if (r !== null) cmd("kick " + p.online.id + " " + r); };
+    act.append(k);
+  }
+  if (p.ips.length) {
+    const b = el("button", "Бан за IP " + p.ips[0].ip, "small danger");
+    b.onclick = () => { const r = prompt("Причина бану для " + p.ips[0].ip + ":", ""); if (r !== null) cmd("banip " + p.ips[0].ip + " " + r); };
+    act.append(b);
+  }
+  box.append(act);
+
+  const f = p.fight;
+  box.append(el("h3", "Статистика"));
+  const tiles = el("div", null, "tiles");
+  const kd = f.deaths ? (f.kills / f.deaths).toFixed(2) : String(f.kills);
+  [["Вбивств", f.kills], ["Смертей", f.deaths], ["В/С", kd],
+   ["Хедшотів", f.headshots + (f.kills ? " (" + Math.round(100 * f.headshots / f.kills) + "%)" : "")],
+   ["Найдовше, м", Math.round(f.longest)], ["Найкраща серія", f.best_streak],
+   ["Ніж", f.knife_kills], ["Гранати/вогонь", f.grenade_kills], ["Кілстріки", f.streak_kills],
+   ["Самогубств", f.suicides], ["Матчів (команди)", f.matches], ["Перемог", f.wins],
+   ["Дабл-кілів", f.multi[0]], ["Тріпл-кілів", f.multi[1]], ["Квадро-кілів", f.multi[2]], ["5+ підряд", f.multi[3]],
+  ].forEach(([l, v]) => tiles.append(tile(l, v)));
+  box.append(tiles);
+  if (p.br) {
+    box.append(el("h3", "Королівська битва"));
+    const t2 = el("div", null, "tiles");
+    [["Раундів", p.br.matches], ["Перемог", p.br.wins], ["Найкраще місце", p.br.best || "—"], ["Вбивств", p.br.kills],
+     ["Шкоди", Math.round(p.br.damage)], ["Найдовше, м", Math.round(p.br.longest)]].forEach(([l, v]) => t2.append(tile(l, v)));
+    box.append(t2);
+  }
+  box.append(el("h3", "Вбивав чим"), bars(f.by_weapon));
+  box.append(el("h3", "Гинув від"), bars(f.killed_by));
+
+  box.append(el("h3", "Адреси" + (geoip ? "" : " (країни вимкнено: geoip=false)")));
+  box.append(table(["IP", "Країна", "Уперше", "Востаннє", "Разів"], p.ips.map(s => [s.ip, (flag(s.cc) + " " + (s.country || "—")).trim(), when(s.first), when(s.last), s.times])));
+
+  box.append(el("h3", "Візити (останні " + p.visits.length + ")"));
+  const vs = el("div", null, "scroll");
+  vs.append(table(["Зайшов", "Вийшов", "Скільки", "Ім'я", "IP"], p.visits.map(v => [when(v.join), v.leave ? when(v.leave) : (p.online ? "у грі" : "—"), v.leave ? span(v.leave - v.join) : "", v.name, v.ip])));
+  box.append(vs);
+
+  box.append(el("h3", "Чат (останні " + p.chat.length + ")"));
+  const cs = el("div", null, "scroll");
+  cs.append(table(["Коли", "Повідомлення", "Де"], p.chat.map(c => { const m = el("span", c.text); if (c.team) { const t = el("span", " [команді]", "team"); const w = el("span"); w.append(m, t); return [when(c.at), w, c.map]; } return [when(c.at), m, c.map]; })));
+  box.append(cs);
+}
+
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>

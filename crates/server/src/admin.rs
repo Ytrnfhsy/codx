@@ -59,6 +59,7 @@ pub const HELP: &str = "Команди:
   say <текст>                — повідомлення всім
   kick <id|ім'я> [причина]   — вигнати гравця
   ban <id|ім'я> [причина]    — заблокувати за IP
+  banip <ip> [причина]       — заблокувати адресу (і вигнати всіх, хто з неї грає)
   unban <ip>                 — розблокувати
   banlist                    — список банів
   map <wreck|site|depot|market|cargo|island> [tdm|sab|br] — змінити карту (і режим)
@@ -230,6 +231,52 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 text: msg.clone(),
                 team_only: false,
             });
+            g.logf(msg.clone());
+            msg
+        }
+        "banip" => {
+            let Some(ip) = args.next().map(str::to_string) else {
+                return "Використання: banip <ip> [причина]".into();
+            };
+            if ip.parse::<std::net::IpAddr>().is_err() {
+                return format!("«{ip}» — не IP-адреса");
+            }
+            let reason: String = args.collect::<Vec<_>>().join(" ");
+            let reason = if reason.is_empty() {
+                "без причини".to_string()
+            } else {
+                reason
+            };
+            if g.bans.find(&ip).is_some() {
+                return format!("{ip} уже в списку банів");
+            }
+            // (the name it was last played under, for the ban list)
+            let name = g
+                .registry
+                .players
+                .values()
+                .filter(|e| e.ips.iter().any(|s| s.ip == ip))
+                .max_by_key(|e| e.last_seen)
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
+            g.bans.list.push(crate::admin::Ban {
+                ip: ip.clone(),
+                name: name.clone(),
+                reason: reason.clone(),
+            });
+            g.bans.save();
+            let here: Vec<u8> = g
+                .players
+                .iter()
+                .flatten()
+                .filter(|p| !p.is_bot() && p.ip == ip)
+                .map(|p| p.id)
+                .collect();
+            for id in here {
+                g.kicked
+                    .push((id, format!("Заблоковано адміністратором: {reason}")));
+            }
+            let msg = format!("{ip} ({name}) заблоковано: {reason}");
             g.logf(msg.clone());
             msg
         }

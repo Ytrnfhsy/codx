@@ -14,6 +14,7 @@ pub mod http;
 pub mod nav;
 pub mod netserver;
 pub mod pickups;
+pub mod registry;
 pub mod sab;
 pub mod stats;
 pub mod update;
@@ -35,6 +36,10 @@ pub enum AdminMsg {
     /// The leaderboards, for the public page.
     Top(Sender<serde_json::Value>),
     CheckRcon(String, Sender<bool>),
+    /// Everybody who has played here (the admin's player list).
+    Players(Sender<serde_json::Value>),
+    /// One player's whole record, by key.
+    Player(String, Sender<serde_json::Value>),
 }
 
 pub struct ServerHandle {
