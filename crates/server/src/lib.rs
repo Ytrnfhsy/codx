@@ -11,6 +11,7 @@ pub mod config;
 pub mod doors;
 pub mod game;
 pub mod http;
+pub mod master;
 pub mod nav;
 pub mod netserver;
 pub mod pickups;
@@ -99,7 +100,13 @@ pub fn start(cfg: ServerConfig, cfg_path: Option<PathBuf>) -> Result<ServerHandl
     let http_enabled = cfg.http_enabled;
     let bind = cfg.bind.clone();
     let port = cfg.port;
+    // the public list: announced while `public` is on (the admin can switch it)
+    let public = Arc::new(AtomicBool::new(cfg.public == Some(true)));
+    if !cfg.master.trim().is_empty() {
+        master::announcer(cfg.master.trim().to_string(), port, public.clone());
+    }
     let mut game = game::Game::new(cfg);
+    game.public = public;
     game.cfg_path = cfg_path;
     let http_port = if http_enabled {
         match http::spawn(&bind, port, tx.clone()) {

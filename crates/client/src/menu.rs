@@ -494,7 +494,7 @@ pub fn draw_menu(
                 46.0,
             ) {
                 st.page = Page::Browser;
-                st.browser.refresh(&s.servers_to_ask());
+                st.browser.refresh(&s.servers_to_ask(), &s.master);
             }
             if ui.button2(t("Налаштування", "Settings"), x + 24.0, y + 356.0, bw, 46.0)
             {
@@ -799,8 +799,8 @@ pub fn draw_menu(
             ui.bold(t("Сервери", "Servers"), x + 24.0, y + 40.0, 26, ACCENT);
             ui.text(
                 t(
-                    "★ обрані · локальна мережа · нещодавні",
-                    "★ favourites · local network · recent",
+                    "★ обрані · загальний каталог · локальна мережа · нещодавні",
+                    "★ favourites · public list · local network · recent",
                 ),
                 x + 190.0,
                 y + 40.0,
@@ -905,7 +905,7 @@ pub fn draw_menu(
                     s.save();
                 }
                 st.fav_input.clear();
-                st.browser.refresh(&s.servers_to_ask());
+                st.browser.refresh(&s.servers_to_ask(), &s.master);
             }
             if ui.button(
                 t("Оновити", "Refresh"),
@@ -914,7 +914,7 @@ pub fn draw_menu(
                 176.0,
                 44.0,
             ) {
-                st.browser.refresh(&s.servers_to_ask());
+                st.browser.refresh(&s.servers_to_ask(), &s.master);
             }
             if ui.button2(t("Назад", "Back"), x + 24.0, y + 474.0, 140.0, 44.0) {
                 st.page = Page::Main;

@@ -158,7 +158,8 @@ pub struct Browser {
     /// Addresses we asked (as typed) and where they resolved to, so a reply is listed
     /// under the name the player knows it by (a domain stays a domain). Filled by
     /// background threads: looking up a domain can take seconds.
-    asked: std::sync::Arc<std::sync::Mutex<Vec<(SocketAddr, String)>>>,
+    /// (and when each was asked, for its ping).
+    asked: std::sync::Arc<std::sync::Mutex<Vec<(SocketAddr, String, Instant)>>>,
 }
 
 impl Browser {
@@ -176,8 +177,9 @@ impl Browser {
         }
     }
 
-    /// Queries the given addresses and broadcasts on the LAN.
-    pub fn refresh(&mut self, addrs: &[String]) {
+    /// Queries the given addresses, the public list's servers (from `master`, unless
+    /// empty) and broadcasts on the LAN.
+    pub fn refresh(&mut self, addrs: &[String], master: &str) {
         self.results.clear();
         // a fresh list: answers to an earlier refresh still being looked up are dropped
         self.asked = Default::default();
@@ -190,7 +192,29 @@ impl Browser {
             std::thread::spawn(move || {
                 if let Ok(sa) = resolve(&a) {
                     if let Ok(mut l) = asked.lock() {
-                        l.push((sa, a.trim().to_string()));
+                        l.push((sa, a.trim().to_string(), Instant::now()));
+                    }
+                    let _ = sock.send_to(QUERY_MAGIC, sa);
+                }
+            });
+        }
+        let master = master.trim().to_string();
+        if let (false, Ok(sock)) = (master.is_empty(), s.try_clone()) {
+            let asked = self.asked.clone();
+            std::thread::spawn(move || {
+                let Ok(list) = toon_server::master::fetch_list(&master) else {
+                    return;
+                };
+                for a in list {
+                    let Ok(sa) = a.parse::<SocketAddr>() else {
+                        continue;
+                    };
+                    if let Ok(mut l) = asked.lock() {
+                        // (one we already asked by name keeps its name)
+                        if l.iter().any(|(x, _, _)| *x == sa) {
+                            continue;
+                        }
+                        l.push((sa, a.clone(), Instant::now()));
                     }
                     let _ = sock.send_to(QUERY_MAGIC, sa);
                 }
@@ -215,11 +239,13 @@ impl Browser {
                 continue;
             };
             let port = v["port"].as_u64().unwrap_or(from.port() as u64);
-            let typed = self
-                .asked
-                .lock()
-                .ok()
-                .and_then(|l| l.iter().find(|(sa, _)| *sa == from).map(|(_, t)| t.clone()));
+            let asked = self.asked.lock().ok().and_then(|l| {
+                l.iter()
+                    .find(|(sa, _, _)| *sa == from)
+                    .map(|(_, t, at)| (t.clone(), *at))
+            });
+            let typed = asked.as_ref().map(|a| a.0.clone());
+            let ping_ms = asked.map_or(self.sent, |a| a.1).elapsed().as_millis() as u32;
             // one row per server: a LAN broadcast answer may come before the direct one
             if let Some(r) = self.results.iter_mut().find(|r| r.from == Some(from)) {
                 if let Some(t) = typed {
@@ -239,7 +265,7 @@ impl Browser {
                 bots: v["bots"].as_u64().unwrap_or(0),
                 max: v["max_players"].as_u64().unwrap_or(0),
                 password: v["password"].as_bool().unwrap_or(false),
-                ping_ms: self.sent.elapsed().as_millis() as u32,
+                ping_ms,
                 from: Some(from),
             });
         }

@@ -59,6 +59,7 @@ pub const HELP: &str = "Команди:
   say <текст>                — повідомлення всім
   kick <id|ім'я> [причина]   — вигнати гравця
   ban <id|ім'я> [причина]    — заблокувати за IP
+  public on|off              — показувати сервер у загальному каталозі гри
   banip <ip> [причина]       — заблокувати адресу (і вигнати всіх, хто з неї грає)
   unban <ip>                 — розблокувати
   banlist                    — список банів
@@ -233,6 +234,31 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             });
             g.logf(msg.clone());
             msg
+        }
+        "public" => {
+            use std::sync::atomic::Ordering;
+            match args.next() {
+                Some("on" | "1" | "true" | "так") => {
+                    g.cfg.public = Some(true);
+                    g.public.store(true, Ordering::Relaxed);
+                    "Сервер буде в загальному каталозі (за хвилину). save — щоб запам'ятати".into()
+                }
+                Some("off" | "0" | "false" | "ні") => {
+                    g.cfg.public = Some(false);
+                    g.public.store(false, Ordering::Relaxed);
+                    "Сервер прибрано з загального каталогу (зникне за 3 хв). save — щоб запам'ятати"
+                        .into()
+                }
+                _ => format!(
+                    "Загальний каталог ({}): {}. Використання: public on|off",
+                    g.cfg.master,
+                    if g.public.load(Ordering::Relaxed) {
+                        "сервер у ньому"
+                    } else {
+                        "сервера в ньому немає"
+                    }
+                ),
+            }
         }
         "banip" => {
             let Some(ip) = args.next().map(str::to_string) else {

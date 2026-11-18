@@ -17,6 +17,8 @@ fn usage() {
   --bots <n>          заповнювати ботами до n гравців
   --map <карта>       wreck | site | depot | market | cargo | island
   --mode <режим>      tdm | sab | br (королівська битва, на карті island)
+  --public <yes|no>   показувати сервер у загальному каталозі гри (запам'ятовується)
+  --master [порт]     запустити не гру, а загальний каталог серверів (TCP, типово 27900)
   --check-update      показати, чи вийшла новіша версія, і вийти
   --update            завантажити новішу версію сервера з GitHub замість цієї й вийти
                       (потім перезапусти сервер; гравцям гра запропонує оновитися сама)
@@ -40,6 +42,18 @@ fn main() {
         }
         if a == "--version" {
             println!("toon-server {}", toon_shared::consts::GAME_VERSION);
+            return;
+        }
+        if a == "--master" {
+            // the public server list instead of a game
+            let port = args
+                .get(i + 1)
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(toon_shared::consts::MASTER_PORT);
+            if let Err(e) = toon_server::master::run_master("0.0.0.0", port) {
+                eprintln!("Не вдалося запустити каталог: {e}");
+                std::process::exit(1);
+            }
             return;
         }
         if a == "--check-update" || a == "--update" {
@@ -74,6 +88,13 @@ fn main() {
             "rcon" => cfg.rcon_password = v,
             "password" => cfg.password = v,
             "bots" => bots = v.parse().ok(),
+            "public" => {
+                cfg.public = Some(matches!(
+                    v.as_str(),
+                    "yes" | "y" | "так" | "true" | "1" | "on"
+                ));
+                let _ = cfg.save(&cfg_path);
+            }
             "map" => first.get_or_insert((String::new(), String::new())).0 = v,
             "mode" => first.get_or_insert((String::new(), String::new())).1 = v,
             _ => {
@@ -101,6 +122,46 @@ fn main() {
             cfg.br.max_players = cfg.br.max_players.max(n);
         } else {
             cfg.bots = n;
+        }
+    }
+    // the first start: ask whether the server goes on the public list (and remember)
+    if cfg.public.is_none() {
+        use std::io::{IsTerminal, Write};
+        if std::io::stdin().is_terminal() {
+            println!();
+            println!("Показувати цей сервер у загальному каталозі гри?");
+            println!(
+                "  Його побачать усі гравці в «Знайти сервери» (каталог {}).",
+                cfg.master
+            );
+            println!(
+                "  Для цього сервер має бути доступний з інтернету (відкритий UDP-порт {}).",
+                cfg.port
+            );
+            print!("Додати в каталог? [Т/н]: ");
+            let _ = std::io::stdout().flush();
+            let mut answer = String::new();
+            let _ = std::io::stdin().read_line(&mut answer);
+            let a = answer.trim().to_lowercase();
+            let yes = a.is_empty() || ["т", "так", "y", "yes", "д", "да"].contains(&a.as_str());
+            cfg.public = Some(yes);
+            match cfg.save(&cfg_path) {
+                Ok(()) => println!(
+                    "{} Змінити потім: \"public\" у {} або команда public on|off.",
+                    if yes {
+                        "Додаю в каталог."
+                    } else {
+                        "Сервер не буде в каталозі."
+                    },
+                    cfg_path.display()
+                ),
+                Err(e) => eprintln!("Не вдалося зберегти відповідь: {e}"),
+            }
+        } else {
+            println!(
+                "ℹ  Сервер не в загальному каталозі гри. Щоб додати: \"public\": true у {} (або --public yes, або команда public on).",
+                cfg_path.display()
+            );
         }
     }
     if cfg.rcon_password.is_empty() {

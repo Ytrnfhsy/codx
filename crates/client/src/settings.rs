@@ -119,6 +119,8 @@ pub struct Settings {
     pub binds: crate::binds::Binds,
     /// Favourite servers, as typed (an IP or a domain, with or without the port).
     pub favorites: Vec<String>,
+    /// The public server list ("host:port"; empty = only the LAN and the servers above).
+    pub master: String,
     pub host: HostSettings,
 }
 
@@ -176,6 +178,7 @@ impl Settings {
             last_class: 0,
             recent: Vec::new(),
             favorites: Vec::new(),
+            master: toon_shared::consts::MASTER_DEFAULT.into(),
             binds: Default::default(),
             host: HostSettings::default(),
         }

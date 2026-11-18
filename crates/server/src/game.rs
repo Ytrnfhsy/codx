@@ -553,6 +553,8 @@ pub struct Game {
     pub br_stats: crate::stats::BrStats,
     /// Who played here (for the admin's player pages).
     pub registry: crate::registry::Registry,
+    /// On the public server list (shared with the announcing thread).
+    pub public: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Players to disconnect (id, reason) — handled by the network layer.
     pub kicked: Vec<(u8, String)>,
     pub next_housekeeping: f64,
@@ -651,6 +653,7 @@ impl Game {
             bans,
             br_stats,
             registry,
+            public: Default::default(),
             kicked: Vec::new(),
             next_housekeeping: 0.0,
             match_started: false,

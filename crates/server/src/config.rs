@@ -144,6 +144,11 @@ pub struct ServerConfig {
     pub require_same_version: bool,
     /// Directory for bans and logs.
     pub data_dir: String,
+    /// On the public server list everybody's game shows: `null` until the owner is asked
+    /// (on the first start in a console), then true or false.
+    pub public: Option<bool>,
+    /// The public list's address ("host:port").
+    pub master: String,
     /// The admin's player list shows each address's country, asked of ip-api.com (the
     /// players' addresses go to that service; false keeps them here).
     pub geoip: bool,
@@ -208,6 +213,8 @@ impl Default for ServerConfig {
             require_same_version: true,
             data_dir: "data".into(),
             geoip: true,
+            public: None,
+            master: toon_shared::consts::MASTER_DEFAULT.into(),
             tuning: tuning_json(&Tuning::default()),
         }
     }
