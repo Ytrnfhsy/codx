@@ -69,6 +69,9 @@ pub struct Player {
     pub melee_ready: f64,
     pub last_damage: f64,
     pub last_shot: f64,
+    /// When this player could last see each other player (by id): enemies they cannot
+    /// see are left out of their snapshots (see `Game::update_visibility`).
+    pub seen_at: [f64; toon_shared::consts::MAX_PLAYERS],
     /// Last time an input had the sprint flag (weapon raise delay).
     pub last_sprint: f64,
     /// Invulnerable until this time (spawn protection).
@@ -273,6 +276,7 @@ impl Player {
             melee_ready: 0.0,
             last_damage: -100.0,
             last_shot: -100.0,
+            seen_at: [f64::NEG_INFINITY; toon_shared::consts::MAX_PLAYERS],
             last_sprint: -100.0,
             protected_until: 0.0,
             shots_fired: 0,
@@ -419,6 +423,10 @@ impl Game {
         }
     }
 }
+
+/// An enemy stays in a player's snapshots this long after they could last see them (no
+/// popping in and out at a corner, and room for the time the check runs at).
+const SEEN_LINGER: f64 = 0.6;
 
 /// In the air nobody gets higher than this above where they last stood, beyond a jump
 /// (1.1 m with the default tuning, more when the server's tuning jumps higher).
@@ -2324,6 +2332,7 @@ impl Game {
         self.registry.tick(self.time);
         self.path_budget = PATHS_PER_TICK;
         self.update_state(dt);
+        self.update_visibility();
         self.update_bullets();
         self.update_pickups();
 
@@ -2566,6 +2575,109 @@ impl Game {
         Some(pts)
     }
 
+    /// Whether `t` may be left out of `viewer`'s snapshots when out of their sight: an
+    /// enemy, alive on the ground, not given away anyway (radar, gunfire on the radar, a
+    /// car, the sky, footsteps close enough to hear) and not the one being watched.
+    fn hideable(&self, viewer: &Player, t: &Player) -> bool {
+        if t.id == viewer.id || !viewer.team.is_playing() || !t.team.is_playing() {
+            return false;
+        }
+        if !t.alive || self.allied(viewer, t) || viewer.spectating == Some(t.id) {
+            return false;
+        }
+        if t.in_plane || t.body.chute != toon_shared::physics::Chute::None {
+            return false;
+        }
+        if self.seat_of(t.id).is_some() {
+            return false;
+        }
+        if !self.mode.solo() {
+            let team = viewer.team.index();
+            let uav = self.uav_until[team] > self.time && !t.has_perk2(Perk2::UavJammer);
+            let pinged = self.time - t.last_shot < RADAR_PING_TIME as f64;
+            if uav || pinged {
+                return false;
+            }
+        }
+        // footsteps: someone walking or running near enough is heard (and shown where)
+        let speed = vec2(t.body.vel.x, t.body.vel.z).length();
+        if t.body.stance == toon_shared::physics::Stance::Stand
+            && speed > 1.5
+            && !t.has_perk3(Perk3::DeadSilence)
+        {
+            let hear = if speed > 6.0 { 34.0 } else { 22.0 };
+            if viewer.body.pos.distance(t.body.pos) < hear {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Ten times a second: for every real player, which of the enemies they could hide
+    /// from them are in sight. A line from their eyes (and where their eyes will be in a
+    /// moment) to the enemy's head, body, feet, sides or where they are heading, none of it
+    /// through a wall, a floor or the ground. Bots read the world directly and need none.
+    fn update_visibility(&mut self) {
+        if !self.tick.is_multiple_of(3) {
+            return;
+        }
+        let now = self.time;
+        let mut seen: Vec<(u8, u8)> = Vec::new();
+        for v in self.players.iter().flatten() {
+            if v.is_bot() || !v.team.is_playing() {
+                continue;
+            }
+            // watching somebody after death: through their eyes
+            let from = v
+                .spectating
+                .and_then(|w| self.p(w))
+                .filter(|_| !v.alive)
+                .unwrap_or(v);
+            let eye = from.eye();
+            let ahead = if from.body.vel.is_finite() {
+                eye + from.body.vel.clamp_length_max(12.0) * 0.15
+            } else {
+                eye
+            };
+            for t in self.players.iter().flatten() {
+                if !self.hideable(v, t) || t.body.pos.distance(eye) > Self::SCOPE_RANGE + 50.0 {
+                    continue;
+                }
+                if Self::can_see(&self.world, [eye, ahead], t) {
+                    seen.push((v.id, t.id));
+                }
+            }
+        }
+        for (v, t) in seen {
+            if let Some(p) = self.pm(v) {
+                p.seen_at[t as usize] = now;
+            }
+        }
+    }
+
+    fn can_see(world: &World, eyes: [Vec3; 2], t: &Player) -> bool {
+        let base = t.body.pos;
+        let h = t.body.stance.height();
+        let flat = vec3(base.x - eyes[0].x, 0.0, base.z - eyes[0].z).normalize_or_zero();
+        let side = vec3(-flat.z, 0.0, flat.x) * 0.55;
+        let chest = base + vec3(0.0, h * 0.6, 0.0);
+        let going = if t.body.vel.is_finite() {
+            chest + t.body.vel.clamp_length_max(12.0) * 0.25
+        } else {
+            chest
+        };
+        let points = [
+            base + vec3(0.0, h + 0.15, 0.0),
+            chest,
+            base + vec3(0.0, 0.3, 0.0),
+            chest + side,
+            chest - side,
+            going,
+        ];
+        eyes.iter()
+            .any(|e| points.iter().any(|p| world.line_of_sight(*e, *p)))
+    }
+
     pub fn snapshot_for(&self, id: u8) -> Snapshot {
         let me = self.p(id);
         let my_team = me.map(|p| p.team).unwrap_or(Team::Spectator);
@@ -2608,6 +2720,15 @@ impl Game {
                     || my_squad != 0 && p.squad == my_squad
                     || watched == Some(p.id)
                     || near(p.body.pos, INTEREST_RANGE)
+            })
+            // an enemy behind walls is not sent at all: there is nothing for a cheat to show
+            .filter(|p| {
+                // (bots get no snapshots: theirs are only ever asked for in tests)
+                me.is_none_or(|m| {
+                    m.is_bot()
+                        || !self.hideable(m, p)
+                        || self.time - m.seen_at[p.id as usize] < SEEN_LINGER
+                })
             })
             .map(|p| {
                 let mut f = p.flags;
