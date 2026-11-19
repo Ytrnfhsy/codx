@@ -29,15 +29,19 @@ Modes:
   barracks, containers and towers on the corners; the zone scales with the map) or on the
   "Market". You jump from the plane (the haze thins out high up so you can see where to land;
   the minimap shows where the plane flies), open the parachute, loot, the zone closes in, and
-  the last one alive wins. On the map (`M`) you can put a marker: it shows on the minimap and
-  over the ground with its distance. In the plane you see how many players have not jumped
+  the last one alive wins. On the map (`M`) you can put a marker (a yellow pin): it shows on the
+  minimap and over the ground with its distance, and goes away by itself once you are within
+  15 m of it. In the plane you see how many players have not jumped
   yet. Through a sniper or any other magnifying scope the fog draws back (up to 2.5 times
   further), and the server sends the players in the scope's view up to 850 m away. Over the
   right arm of the scope's cross there is a rangefinder: the distance to whatever the
   crosshair rests on (a player or a wall, up to 2 km).
   **Squads** ("Create server" → "Squads": everyone on their own / duos / fours; on a server
-  `brsquad <1|2|4>` or `br.squad` in the config): the real players in a squad are together (in
-  the order they joined, bots fill up), squadmates do not hurt each other, see each other's
+  `brsquad <1|2|4>` or `br.squad` in the config). Before the match, during the warmup, the
+  **squad lobby** is open (`F2`, or "Squad" in the pause menu): a list of players with an "Ask to
+  team up" button; once the player you asked presses "Accept", you land together (the squad
+  stays for the next matches too, "Leave" splits it), then "Ready". Players who picked no squad
+  fill the incomplete ones in the order they joined, then bots. Squadmates do not hurt each other, see each other's
   names and marks, their markers on the map, the squad panel on the left with their health and
   each other on the minimap, and team chat (`Y`) reaches the squad only. A deadly hit while
   somebody in the squad is still on their feet only **knocks the player down**: they crawl,
@@ -371,12 +375,22 @@ clipboard, and a held `Backspace` keeps deleting.
 | Inventory (battle royale) | `I` |
 | Bandage / energy drink / what to throw (battle royale) | `B` / `N` / `X` |
 | Map (battle royale): LMB puts a marker, RMB removes it | `M` |
+| Ping what you look at; twice quickly: "enemy here" | middle mouse button |
+| Squad lobby (battle royale, before the start) | `F2` |
 | Ready for the match / break (before the match starts) | `F1` |
 | Use a killstreak | `5` (or `4`) |
 | Scoreboard | `Tab` |
 | Chat: all / team (the squad in the battle royale) | `T` / `Y` |
 | Change class | `M` |
 | Menu (class, team, settings, leave) | `Esc` |
+
+**Pings.** The middle mouse button points out what the crosshair rests on, and your side (the
+team, in the battle royale the squad) sees it: an **enemy**, a red diamond over them for a few
+seconds; an **item** (a gun, a medkit, a vest, a helmet, a backpack, a sight, ammo), a death box,
+a supply drop or a car, a diamond with the item's icon, seen through walls until somebody takes
+it; just a **place**, a diamond on a stem, "Over here". Twice quickly on the same place: "Enemy
+here!" (red). Pings are on the minimap and the big map too, a new one makes a sound and the chat
+says who pinged what. A map marker (`M`) is a different thing: a yellow pin.
 
 ## Classes, perks, killstreaks
 

@@ -17,6 +17,7 @@ pub mod netserver;
 pub mod pickups;
 pub mod registry;
 pub mod sab;
+pub mod social;
 pub mod stats;
 pub mod update;
 pub mod vehicles;

@@ -381,7 +381,7 @@ impl Game {
         if size < 2 {
             return;
         }
-        let mut ids: Vec<u8> = self
+        let ids: Vec<u8> = self
             .players
             .iter()
             .flatten()
@@ -399,10 +399,12 @@ impl Game {
             let j = self.rng.below(k + 1);
             bots.swap(k, j);
         }
-        ids.extend(bots);
-        for (k, id) in ids.into_iter().enumerate() {
-            if let Some(p) = self.pm(id) {
-                p.squad = (k / size) as u8 + 1;
+        let groups = self.squads_from_parties(&ids, &bots, size);
+        for (k, g) in groups.into_iter().enumerate() {
+            for id in g {
+                if let Some(p) = self.pm(id) {
+                    p.squad = (k + 1).min(255) as u8;
+                }
             }
         }
     }

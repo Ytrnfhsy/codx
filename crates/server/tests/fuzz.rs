@@ -8,7 +8,7 @@ use toon_server::game::Game;
 use toon_shared::consts::TICK_DT;
 use toon_shared::map::MapId;
 use toon_shared::net::Channel;
-use toon_shared::protocol::{InputState, C2S};
+use toon_shared::protocol::{InputState, MarkAt, PartyCmd, C2S};
 use toon_shared::rng::Rng;
 use toon_shared::weapons::{Loadout, WeaponId, DEFAULT_CLASSES};
 use toon_shared::{Mode, Team};
@@ -137,7 +137,23 @@ fn random_br_msg(rng: &mut Rng, g: &Game) -> C2S {
         AmmoType::Sniper,
         AmmoType::Lmg,
     ][rng.below(6)];
-    match rng.below(22) {
+    match rng.below(26) {
+        22 => C2S::Mark(match rng.below(4) {
+            0 => MarkAt::Spot {
+                pos: wild_v3(rng),
+                danger: rng.chance(0.5),
+            },
+            1 => MarkAt::Thing(any(rng, loot)),
+            2 => MarkAt::Enemy(small(rng)),
+            _ => MarkAt::Clear,
+        }),
+        23 => C2S::Party(PartyCmd::Ask(small(rng))),
+        24 => C2S::Party(if rng.chance(0.5) {
+            PartyCmd::Accept(small(rng))
+        } else {
+            PartyCmd::Decline(small(rng))
+        }),
+        25 => C2S::Party(PartyCmd::Leave),
         0 => C2S::UseMedkit,
         1 => C2S::UseBandage,
         2 => C2S::UseDrink,

@@ -93,6 +93,10 @@ pub struct Player {
     pub ready: bool,
     /// Battle royale squad (0 = on your own).
     pub squad: u8,
+    /// The squad chosen in the lobby (0 = none): kept from match to match.
+    pub party: u8,
+    /// When they last pinged.
+    pub last_ping: f64,
     /// Battle royale: knocked down (crawling, `hp` bleeds out) and who did it.
     pub downed: bool,
     pub downed_by: Option<u8>,
@@ -292,6 +296,8 @@ impl Player {
             life: 0,
             ping: 0.05,
             ready: false,
+            party: 0,
+            last_ping: f64::NEG_INFINITY,
             squad: 0,
             downed: false,
             downed_by: None,
@@ -426,7 +432,7 @@ impl Game {
 
 /// An enemy stays in a player's snapshots this long after they could last see them (no
 /// popping in and out at a corner, and room for the time the check runs at).
-const SEEN_LINGER: f64 = 0.6;
+pub(crate) const SEEN_LINGER: f64 = 0.6;
 
 /// In the air nobody gets higher than this above where they last stood, beyond a jump
 /// (1.1 m with the default tuning, more when the server's tuning jumps higher).
@@ -531,6 +537,11 @@ pub struct Game {
     pub pickups: Vec<crate::pickups::Pickup>,
     pub blasts: Vec<PendingBlast>,
     pub next_ent: u16,
+    /// Pings up now, and the id of the last one.
+    pub pings: Vec<crate::social::Ping>,
+    pub next_ping: u16,
+    /// Lobby requests: (who asks, whom).
+    pub party_asks: Vec<(u8, u8)>,
     ent_wrapped: bool,
     pub uav_until: [f64; 2],
     /// Enemies bots have just spotted: (where, when, the team that saw them) — what a
@@ -642,6 +653,9 @@ impl Game {
             pickups: Vec::new(),
             blasts: Vec::new(),
             next_ent: 1,
+            pings: Vec::new(),
+            next_ping: 0,
+            party_asks: Vec::new(),
             ent_wrapped: false,
             uav_until: [0.0; 2],
             intel: Vec::new(),
@@ -943,6 +957,7 @@ impl Game {
         let Some(p) = self.players[id as usize].take() else {
             return;
         };
+        self.party_forget(id);
         if self.sab.carrier == Some(id) {
             self.sab.carrier = None;
             self.sab.pos = p.body.pos;
@@ -1541,6 +1556,8 @@ impl Game {
                     brake,
                 } => self.car_drive(id, throttle, steer, brake),
             },
+            C2S::Mark(at) => self.on_mark(id, at),
+            C2S::Party(cmd) => self.on_party(id, cmd),
             C2S::Marker(m) => {
                 if let Some(p) = self.pm(id) {
                     p.marker = m.filter(|m| m[0].is_finite() && m[1].is_finite());
@@ -2189,6 +2206,7 @@ impl Game {
         self.reset_bomb();
         self.br = Default::default();
         self.intel.clear();
+        self.pings.clear();
         for p in self.players.iter_mut().flatten() {
             p.in_plane = false;
             p.alive = false;
@@ -2333,6 +2351,7 @@ impl Game {
         self.path_budget = PATHS_PER_TICK;
         self.update_state(dt);
         self.update_visibility();
+        self.update_pings();
         self.update_bullets();
         self.update_pickups();
 
@@ -2578,7 +2597,7 @@ impl Game {
     /// Whether `t` may be left out of `viewer`'s snapshots when out of their sight: an
     /// enemy, alive on the ground, not given away anyway (radar, gunfire on the radar, a
     /// car, the sky, footsteps close enough to hear) and not the one being watched.
-    fn hideable(&self, viewer: &Player, t: &Player) -> bool {
+    pub(crate) fn hideable(&self, viewer: &Player, t: &Player) -> bool {
         if t.id == viewer.id || !viewer.team.is_playing() || !t.team.is_playing() {
             return false;
         }
@@ -2916,6 +2935,8 @@ impl Game {
                     .map_or(0, |t| (t - self.time).max(0.0).ceil() as u16);
                 ((humans - self.unready()) as u8, humans as u8, me, left)
             }),
+            pings: self.pings_for(id),
+            lobby: self.lobby_for(id),
         }
     }
 }

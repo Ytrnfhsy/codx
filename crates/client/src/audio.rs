@@ -81,6 +81,8 @@ pub enum Sfx {
     MagOutOf(WeaponId),
     MagInOf(WeaponId),
     BoltOf(WeaponId),
+    /// Somebody on our side pointed something out: two quick rising notes.
+    Ping,
 }
 
 impl Sfx {
@@ -1411,6 +1413,13 @@ impl Synth {
             Sfx::Beep => mono(&Synth::tone(0.12, 1760.0, 14.0, &[0.7, 0.15])),
             Sfx::Jet => self.jet(),
             Sfx::Click => mono(&Synth::tone(0.04, 1100.0, 80.0, &[0.6, 0.2])),
+            Sfx::Ping => {
+                let mut b = Synth::tone(0.22, 1320.0, 18.0, &[0.5, 0.12]);
+                let up = Synth::tone(0.16, 1980.0, 20.0, &[0.45, 0.1]);
+                Synth::mix(&mut b, &up, 0.07, 1.0);
+                Synth::norm(&mut b, 0.5);
+                mono(&b)
+            }
             Sfx::Hurt => {
                 let b = self.hurt();
                 mono(&b)
@@ -1499,6 +1508,7 @@ fn all() -> Vec<Sfx> {
         Sfx::StepSoft,
         Sfx::Door,
         Sfx::DoorShut,
+        Sfx::Ping,
     ]);
     for w in WeaponId::all() {
         v.extend([Sfx::MagOutOf(w), Sfx::MagInOf(w), Sfx::BoltOf(w)]);

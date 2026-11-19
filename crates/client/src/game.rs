@@ -150,6 +150,8 @@ pub enum Overlay {
     DeathBox,
     /// The server's leaderboards.
     Leaders,
+    /// The squad lobby before a battle royale match.
+    Squad,
 }
 
 pub struct Welcome {
@@ -167,6 +169,8 @@ pub const NET_LOST_AFTER: f32 = 1.5;
 /// Silence after which we give up and go back to the menu (the server drops a silent
 /// player after as long).
 pub const NET_GIVE_UP: f32 = 30.0;
+/// The map marker goes away once we get this close to it (metres).
+const MARKER_REACHED: f32 = 15.0;
 
 pub struct GameClient {
     pub net: NetClient,
@@ -200,6 +204,14 @@ pub struct GameClient {
     pub big_map: bool,
     /// A marker put on the big map (x, z), shown on the minimap and in the world.
     pub marker: Option<Vec2>,
+    /// Pings of our side (and ours), as last sent.
+    pub pings: Vec<PingSnap>,
+    /// The squad lobby (a battle royale in squads, before the match).
+    pub lobby: Option<LobbySnap>,
+    seen_pings: std::collections::HashSet<u16>,
+    /// The last ping key press: when, and the place it pointed at (a second press there
+    /// right after means «enemy here»).
+    last_ping: (f64, Option<Vec3>),
     /// Before the match: (players ready, players, am I ready).
     pub ready: Option<(u8, u8, bool, u16)>,
     /// Battle royale squad (0 = on our own).
@@ -528,6 +540,10 @@ impl GameClient {
             door_swing: Vec::new(),
             big_map: false,
             marker: None,
+            pings: Vec::new(),
+            lobby: None,
+            seen_pings: Default::default(),
+            last_ping: (f64::NEG_INFINITY, None),
             ready: None,
             squad: 0,
             cars: HashMap::new(),
@@ -1361,6 +1377,27 @@ impl GameClient {
         }
         self.br = s.br;
         self.ready = s.ready;
+        // somebody on our side pointed something out: a note and a line in the chat
+        let mut heard = false;
+        for p in &s.pings {
+            if self.seen_pings.insert(p.id) && p.age < 1.5 {
+                heard = true;
+                if p.from != self.my_id {
+                    let who = self.name_of(p.from).unwrap_or("?").to_string();
+                    let c = self.ping_color(p);
+                    self.push_chat(format!("{who}: {}", ping_label(p.what)), c);
+                }
+            }
+        }
+        if heard {
+            if let Some(a) = audio {
+                a.play(Sfx::Ping, 0.5);
+            }
+        }
+        self.seen_pings
+            .retain(|id| s.pings.iter().any(|p| p.id == *id));
+        self.pings = s.pings;
+        self.lobby = s.lobby;
         let w = self.br.as_ref().map_or(Weather::Clear, |b| b.weather);
         if w != self.weather {
             self.weather = w;
@@ -1963,6 +2000,115 @@ impl GameClient {
         best
     }
 
+    /// The ping key: points out what the crosshair rests on (an enemy, something on the
+    /// ground, a place); pressed twice on a place, «enemy here».
+    fn ping(&mut self) {
+        let now = self.now;
+        let Some(at) = self.ping_target() else { return };
+        if let MarkAt::Spot { pos, .. } = at {
+            if let (true, Some(prev)) = (now - self.last_ping.0 < 0.45, self.last_ping.1) {
+                self.net.send(C2S::Mark(MarkAt::Spot {
+                    pos: prev.to_array(),
+                    danger: true,
+                }));
+                self.last_ping = (f64::NEG_INFINITY, None);
+                return;
+            }
+            self.last_ping = (now, Some(Vec3::from_array(pos)));
+        } else {
+            self.last_ping = (now, None);
+        }
+        self.net.send(C2S::Mark(at));
+    }
+
+    /// What a ping would point at now.
+    pub fn ping_target(&self) -> Option<MarkAt> {
+        const FAR: f32 = 1500.0;
+        let eye = self.eye();
+        let dir = look_dir(self.yaw, self.pitch);
+        let wall = self.world.raycast(eye, dir, FAR).map(|h| h.0);
+        let limit = wall.unwrap_or(FAR);
+        let clear = |to: Vec3| {
+            let d = to.length();
+            d > 0.01
+                && self
+                    .world
+                    .raycast(eye, to / d, (d - 0.4).max(0.0))
+                    .is_none()
+        };
+        // an enemy in the crosshair, or nearly (a couple of degrees, in sight)
+        let mut enemy: Option<(f32, u8)> = None;
+        for (&id, r) in self
+            .remotes
+            .iter()
+            .filter(|(_, r)| r.alive && !self.is_friend(r))
+        {
+            if let Some((t, _)) = ray_player(eye, dir, r.pos, r.yaw, r.stance, limit) {
+                if enemy.is_none_or(|e| t < e.0) {
+                    enemy = Some((t, id));
+                }
+            }
+        }
+        if enemy.is_none() {
+            let mut best = 0.035f32;
+            for (&id, r) in self
+                .remotes
+                .iter()
+                .filter(|(_, r)| r.alive && !self.is_friend(r))
+            {
+                let to = r.pos + vec3(0.0, 1.0, 0.0) - eye;
+                let d = to.length();
+                let ang = dir.dot(to / d).clamp(-1.0, 1.0).acos();
+                if d < limit + 2.0 && ang < best && clear(to) {
+                    best = ang;
+                    enemy = Some((d, id));
+                }
+            }
+        }
+        if let Some((_, id)) = enemy {
+            return Some(MarkAt::Enemy(id));
+        }
+        // something lying about, a crate or a car
+        let mut thing: Option<(f32, u16)> = None;
+        for e in self.ents.iter().chain(self.lying.values()) {
+            let (id, pos, lift) = match e {
+                EntSnap::Weapon { id, pos, .. }
+                | EntSnap::Loot { id, pos, .. }
+                | EntSnap::DeathBox { id, pos } => (*id, *pos, 0.25),
+                EntSnap::AirDrop { id, pos, .. } | EntSnap::Car { id, pos, .. } => (*id, *pos, 0.8),
+                _ => continue,
+            };
+            let to = Vec3::from_array(pos) + vec3(0.0, lift, 0.0) - eye;
+            let d = to.length();
+            if !(0.5..=250.0).contains(&d) || d > limit + 3.0 {
+                continue;
+            }
+            let tol = (0.8 / d).atan().max(0.03);
+            let k = dir.dot(to / d).clamp(-1.0, 1.0).acos() / tol;
+            if k < 1.0 && thing.is_none_or(|t| k < t.0) && clear(to) {
+                thing = Some((k, id));
+            }
+        }
+        if let Some((_, id)) = thing {
+            return Some(MarkAt::Thing(id));
+        }
+        // a place
+        wall.map(|t| MarkAt::Spot {
+            pos: (eye + dir * t).to_array(),
+            danger: false,
+        })
+    }
+
+    /// A ping's colour: red for enemies, otherwise whoever put it.
+    pub fn ping_color(&self, p: &PingSnap) -> Color {
+        match p.what {
+            PingWhat::Enemy | PingWhat::Danger => Color::new(1.0, 0.3, 0.25, 1.0),
+            _ if self.br.is_some() => self.mate_color(p.from),
+            _ if p.from == self.my_id => Color::new(1.0, 0.85, 0.15, 1.0),
+            _ => Color::new(0.45, 0.85, 1.0, 1.0),
+        }
+    }
+
     pub fn aim_dir(&self) -> Vec3 {
         let s = self.sway_offset();
         look_dir(self.yaw + s.x, self.pitch + s.y)
@@ -2204,6 +2350,18 @@ impl GameClient {
                     self.marker = None;
                     self.net.send(C2S::Marker(None));
                 }
+            }
+        }
+        // reached the marker: it has done its job
+        if let Some(mk) = self.marker {
+            let at = self
+                .seat()
+                .and_then(|_| self.seated_at(self.my_id))
+                .map_or(self.body.pos, |s| s.0);
+            let here = vec2(at.x, at.z);
+            if self.alive && here.distance(mk) < MARKER_REACHED {
+                self.marker = None;
+                self.net.send(C2S::Marker(None));
             }
         }
         // ---- mouse look
@@ -2786,6 +2944,12 @@ impl GameClient {
                 if pressed(Action::Ready) {
                     self.net.send(C2S::Ready(!me));
                 }
+            }
+            if pressed(Action::Ping) && self.alive {
+                self.ping();
+            }
+            if pressed(Action::Squad) && self.lobby.is_some() {
+                self.overlay = Overlay::Squad;
             }
             if self.mode == Mode::Br && pressed(Action::Heal) {
                 self.net.send(C2S::UseMedkit);
@@ -3464,4 +3628,19 @@ pub fn cone(rng: &mut Rng, dir: Vec3, a: f32) -> Vec3 {
     let r = a * rng.f32().sqrt();
     let t = rng.range(0.0, std::f32::consts::TAU);
     (dir + u * (r * t.cos()) + v * (r * t.sin())).normalize()
+}
+
+/// What a ping says, in words.
+pub fn ping_label(what: PingWhat) -> String {
+    use toon_shared::lang::t;
+    match what {
+        PingWhat::Spot => t("Сюди", "Over here").into(),
+        PingWhat::Danger => t("Тут ворог!", "Enemy here!").into(),
+        PingWhat::Enemy => t("Ворог!", "Enemy!").into(),
+        PingWhat::Loot(k, _) => k.name(),
+        PingWhat::Weapon(w) => w.def().name.to_string(),
+        PingWhat::DeathBox => t("Ящик із речами", "Death box").into(),
+        PingWhat::AirDrop => t("Скидання припасів", "Supply drop").into(),
+        PingWhat::Car(k) => k.name().into(),
+    }
 }

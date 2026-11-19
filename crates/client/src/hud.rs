@@ -178,6 +178,7 @@ impl GameClient {
         }
         if !self.big_map {
             self.draw_world_marker(ui, view);
+            self.draw_pings(ui, view);
             self.draw_squad_world(ui, view);
         }
         self.draw_squad_panel(ui);
@@ -395,6 +396,29 @@ impl GameClient {
                             MUTED,
                         );
                     }
+                }
+                // the squad lobby: whom to land with
+                if let Some(l) = &self.lobby {
+                    let (text, c) = match l.asking_me.first() {
+                        Some(&from) => (
+                            tr!(
+                                "{} хоче з тобою в загін — {}",
+                                "{} wants to team up with you — {}",
+                                self.name_of(from).unwrap_or("?"),
+                                key(Action::Squad)
+                            ),
+                            GOOD,
+                        ),
+                        None => (
+                            tr!(
+                                "{} — загін: обери, з ким висаджуватися",
+                                "{} — squad: pick whom to land with",
+                                key(Action::Squad)
+                            ),
+                            TEXT,
+                        ),
+                    };
+                    ui.centered(&text, cx, 196.0, 18, c);
                 }
             }
             MatchState::PreRound => {
@@ -681,6 +705,70 @@ impl GameClient {
         );
     }
 
+    /// Pings over the world, seen through walls: a diamond with what it points at, its
+    /// name and how far it is (on the screen's edge when it is behind or to the side).
+    fn draw_pings(&self, ui: &Ui, view: &View) {
+        use toon_shared::protocol::PingWhat;
+        let (w, h) = (screen_width(), screen_height());
+        let (eye, yaw, _) = self.camera();
+        let (cx, cy) = (w / 2.0, h / 2.0);
+        for pg in &self.pings {
+            let lift = match pg.what {
+                PingWhat::Enemy => 2.2,
+                PingWhat::Car(_) | PingWhat::AirDrop => 2.0,
+                PingWhat::Spot | PingWhat::Danger => 0.0,
+                _ => 0.7,
+            };
+            let at = Vec3::from_array(pg.pos) + vec3(0.0, lift, 0.0);
+            let c = self.ping_color(pg);
+            let on_screen = view
+                .project(at)
+                .filter(|p| p.x > 24.0 && p.x < w - 24.0 && p.y > 40.0 && p.y < h - 24.0);
+            let p = match on_screen {
+                Some(p) => p,
+                None => {
+                    let to = vec3(at.x - eye.x, 0.0, at.z - eye.z);
+                    let side = toon_shared::wrap_angle(toon_shared::yaw_of(to) - yaw);
+                    let x = w / 2.0 - (side / std::f32::consts::PI) * (w / 2.0 - 30.0);
+                    // (below the banners at the top)
+                    vec2(x.clamp(30.0, w - 30.0), h * 0.36)
+                }
+            };
+            // pops in, and fades out at the very end for enemies
+            let pop = (pg.age / 0.18).clamp(0.0, 1.0);
+            let k = 1.0 + (1.0 - pop) * 0.6;
+            // a stem down to the very place (places only, where it is on screen)
+            if on_screen.is_some() && matches!(pg.what, PingWhat::Spot | PingWhat::Danger) {
+                draw_line(p.x, p.y, p.x, p.y - 22.0, 2.0, c);
+                draw_circle_lines(p.x, p.y, 4.0, 1.5, c);
+            }
+            let top = if matches!(pg.what, PingWhat::Spot | PingWhat::Danger) && on_screen.is_some()
+            {
+                vec2(p.x, p.y - 36.0)
+            } else {
+                p
+            };
+            ping_diamond(top, 15.0 * k, c);
+            ping_glyph(pg.what, top, 15.0 * k, c);
+            // the name close to the crosshair (or for a moment after it went up), the
+            // distance always
+            let dist = at.distance(eye);
+            let d = if dist >= 1000.0 {
+                format!("{:.1} {}", dist / 1000.0, t("км", "km"))
+            } else {
+                format!("{:.0} {}", dist, t("м", "m"))
+            };
+            let near_aim = vec2(top.x - cx, top.y - cy).length() < 90.0;
+            let label = if near_aim || pg.age < 3.0 {
+                format!("{} · {d}", crate::game::ping_label(pg.what))
+            } else {
+                d
+            };
+            let tw = ui.width(&label, 14, true);
+            ui.shadowed(&label, top.x - tw / 2.0, top.y + 30.0, 14, c);
+        }
+    }
+
     /// Colour of a squadmate by their place in the squad (we are yellow, like our marker).
     pub fn mate_color(&self, id: u8) -> Color {
         const C: [Color; 4] = [
@@ -835,6 +923,239 @@ impl GameClient {
     }
 
     /// The squad on the left: names, health, who is down.
+    /// The squad lobby: who plays with whom in the coming battle royale, requests to and
+    /// from other players, and «Ready».
+    fn draw_squad_lobby(&mut self, ui: &mut Ui) {
+        use toon_shared::protocol::{PartyCmd, C2S};
+        let (w, h) = (screen_width(), screen_height());
+        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+        let Some(lobby) = self.lobby.clone() else {
+            self.overlay = Overlay::None;
+            return;
+        };
+        let pw = (w - 40.0).min(640.0);
+        let ph = (h - 40.0).min(620.0);
+        let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
+        ui.panel(x, y, pw, ph);
+        let size = lobby.size as usize;
+        let title = match size {
+            2 => t("Загін — дуо", "Squad — duos"),
+            _ => t("Загін — по 4", "Squad — fours"),
+        };
+        ui.bold(title, x + 24.0, y + 42.0, 26, ACCENT);
+        for (k, line) in [
+            t(
+                "Запроси гравця — коли він погодиться, ви висадитеся разом.",
+                "Ask a player — once they say yes, you land together.",
+            ),
+            t(
+                "Вільні місця займуть інші гравці або боти.",
+                "Free places go to other players or bots.",
+            ),
+        ]
+        .iter()
+        .enumerate()
+        {
+            ui.text(line, x + 24.0, y + 64.0 + k as f32 * 16.0, 13, MUTED);
+        }
+        let names_of: std::collections::HashMap<u8, String> = lobby
+            .parties
+            .iter()
+            .flatten()
+            .chain(lobby.asking_me.iter())
+            .map(|&id| {
+                let n = if id == self.my_id {
+                    t("Ти", "You").to_string()
+                } else {
+                    self.name_of(id).unwrap_or("?").to_string()
+                };
+                (id, n)
+            })
+            .collect();
+        let name = |id: u8| -> String { names_of.get(&id).cloned().unwrap_or_else(|| "?".into()) };
+        let mine: Vec<u8> = lobby
+            .parties
+            .iter()
+            .find(|g| g.contains(&self.my_id))
+            .cloned()
+            .unwrap_or_else(|| vec![self.my_id]);
+        let mut cy = y + 112.0;
+        // our squad
+        ui.bold(
+            &tr!("Мій загін ({}/{size})", "My squad ({}/{size})", mine.len()),
+            x + 24.0,
+            cy,
+            17,
+            TEXT,
+        );
+        cy += 10.0;
+        let names: Vec<String> = mine.iter().map(|&id| name(id)).collect();
+        crate::ui::soft_rect(
+            x + 24.0,
+            cy,
+            pw - 48.0,
+            40.0,
+            Color::new(0.0, 0.0, 0.0, 0.3),
+        );
+        ui.text(&names.join(", "), x + 36.0, cy + 26.0, 16, GOOD);
+        if mine.len() > 1
+            && ui.button_colored(
+                t("Вийти", "Leave"),
+                x + pw - 24.0 - 110.0,
+                cy + 4.0,
+                106.0,
+                32.0,
+                BAD,
+            )
+        {
+            self.net.send(C2S::Party(PartyCmd::Leave));
+        }
+        cy += 60.0;
+        // asking us
+        if !lobby.asking_me.is_empty() {
+            ui.bold(
+                t("Хочуть до тебе в загін", "Asking to join you"),
+                x + 24.0,
+                cy,
+                17,
+                GOOD,
+            );
+            cy += 10.0;
+            for &from in lobby.asking_me.iter().take(4) {
+                crate::ui::soft_rect(
+                    x + 24.0,
+                    cy,
+                    pw - 48.0,
+                    40.0,
+                    Color::new(0.1, 0.3, 0.1, 0.35),
+                );
+                ui.text(&name(from), x + 36.0, cy + 26.0, 16, TEXT);
+                if ui.button_colored(
+                    t("Прийняти", "Accept"),
+                    x + pw - 254.0,
+                    cy + 4.0,
+                    112.0,
+                    32.0,
+                    GOOD,
+                ) {
+                    self.net.send(C2S::Party(PartyCmd::Accept(from)));
+                }
+                if ui.button_colored(
+                    t("Відхилити", "Decline"),
+                    x + pw - 136.0,
+                    cy + 4.0,
+                    112.0,
+                    32.0,
+                    MUTED,
+                ) {
+                    self.net.send(C2S::Party(PartyCmd::Decline(from)));
+                }
+                cy += 46.0;
+            }
+            cy += 14.0;
+        }
+        // everybody else
+        ui.bold(t("Гравці", "Players"), x + 24.0, cy, 17, TEXT);
+        cy += 10.0;
+        let bottom = y + ph - 76.0;
+        let others: Vec<&Vec<u8>> = lobby
+            .parties
+            .iter()
+            .filter(|g| !g.contains(&self.my_id))
+            .collect();
+        if others.is_empty() {
+            ui.text(
+                t(
+                    "Поки нікого: зачекай, доки зайдуть інші",
+                    "Nobody yet: wait for others to come",
+                ),
+                x + 36.0,
+                cy + 24.0,
+                14,
+                MUTED,
+            );
+        }
+        for g in others {
+            if cy + 40.0 > bottom {
+                break;
+            }
+            crate::ui::soft_rect(
+                x + 24.0,
+                cy,
+                pw - 48.0,
+                40.0,
+                Color::new(0.0, 0.0, 0.0, 0.3),
+            );
+            let label = if g.len() > 1 {
+                let all: Vec<String> = g.iter().map(|&id| name(id)).collect();
+                tr!(
+                    "{} (загін {}/{size})",
+                    "{} (squad {}/{size})",
+                    all.join(", "),
+                    g.len()
+                )
+            } else {
+                name(g[0])
+            };
+            ui.text(&label, x + 36.0, cy + 26.0, 15, TEXT);
+            // one button for the whole squad: asking its first player is enough
+            let to = g[0];
+            let full = g.len() + mine.len() > size;
+            let asked = g.iter().any(|id| lobby.i_asked.contains(id));
+            let asking = g.iter().find(|id| lobby.asking_me.contains(id)).copied();
+            if let Some(from) = asking {
+                if ui.button_colored(
+                    t("Прийняти", "Accept"),
+                    x + pw - 24.0 - 170.0,
+                    cy + 4.0,
+                    166.0,
+                    32.0,
+                    GOOD,
+                ) {
+                    self.net.send(C2S::Party(PartyCmd::Accept(from)));
+                }
+                cy += 46.0;
+                continue;
+            }
+            let (text, c) = if asked {
+                (t("Запит надіслано", "Asked"), MUTED)
+            } else if full {
+                (t("Немає місця", "No room"), MUTED)
+            } else {
+                (t("Запросити", "Ask to team up"), ACCENT)
+            };
+            if ui.button_colored(text, x + pw - 24.0 - 170.0, cy + 4.0, 166.0, 32.0, c)
+                && !asked
+                && !full
+            {
+                self.net.send(C2S::Party(PartyCmd::Ask(to)));
+            }
+            cy += 46.0;
+        }
+        // ready, and back
+        let by = y + ph - 64.0;
+        let half = (pw - 60.0) / 2.0;
+        if let Some((n, of, me, _)) = self.ready {
+            let (label, c) = if me {
+                (tr!("Готовий ✓ ({n}/{of})", "Ready ✓ ({n}/{of})"), GOOD)
+            } else {
+                (tr!("Готовий ({n}/{of})", "Ready ({n}/{of})"), ACCENT)
+            };
+            if ui.button_colored(&label, x + 24.0, by, half, 44.0, c) {
+                self.net.send(C2S::Ready(!me));
+            }
+        }
+        if ui.button2(
+            t("Закрити (Esc)", "Close (Esc)"),
+            x + 36.0 + half,
+            by,
+            half,
+            44.0,
+        ) {
+            self.overlay = Overlay::None;
+        }
+    }
+
     fn draw_squad_panel(&self, ui: &Ui) {
         let Some(br) = &self.br else { return };
         if br.squad.len() < 2 {
@@ -890,8 +1211,7 @@ impl GameClient {
                 let ground = self.world.ground(mk[0], mk[1]).unwrap_or(0.0);
                 if let Some(p) = view.project(vec3(mk[0], ground + 2.0, mk[1])) {
                     if p.x > 0.0 && p.x < w && p.y > 0.0 && p.y < h {
-                        draw_circle(p.x, p.y - 14.0, 7.0, c);
-                        draw_circle_lines(p.x, p.y - 14.0, 7.0, 2.0, BLACK);
+                        draw_pin(p, 0.8, c);
                         let d = vec2(mk[0] - eye.x, mk[1] - eye.z).length();
                         let label = format!("{:.0} {}", d, t("м", "m"));
                         let tw = ui.width(&label, 13, true);
@@ -1238,9 +1558,20 @@ impl GameClient {
                 } else {
                     p
                 };
-                draw_circle(p.x, p.y, 5.0, self.mate_color(m.id));
-                draw_circle_lines(p.x, p.y, 5.0, 1.5, BLACK);
+                draw_pin(p, 0.6, self.mate_color(m.id));
             }
+        }
+        // pings: little diamonds
+        for pg in &self.pings {
+            let p = to_map(Vec3::from_array(pg.pos));
+            let r = size / 2.0 - 8.0;
+            let d = p - c;
+            let p = if d.length() > r {
+                c + d.normalize() * r
+            } else {
+                p
+            };
+            ping_diamond(p, 6.0, self.ping_color(pg));
         }
         // the marker (kept on the edge when it is further than the minimap shows)
         if let Some(mk) = self.marker {
@@ -2380,11 +2711,12 @@ impl GameClient {
             let p = to_map(mk.x, mk.y);
             draw_marker_pin(p, 1.0);
         }
+        for pg in &self.pings {
+            ping_diamond(to_map(pg.pos[0], pg.pos[2]), 7.0, self.ping_color(pg));
+        }
         for m in br.squad.iter().filter(|m| m.id != self.my_id) {
             if let Some(mk) = m.marker {
-                let p = to_map(mk[0], mk[1]);
-                draw_circle(p.x, p.y - 12.0, 7.0, self.mate_color(m.id));
-                draw_circle_lines(p.x, p.y - 12.0, 7.0, 2.0, BLACK);
+                draw_pin(to_map(mk[0], mk[1]), 0.9, self.mate_color(m.id));
             }
             if m.alive {
                 let p = to_map(m.pos[0], m.pos[2]);
@@ -3523,8 +3855,22 @@ impl GameClient {
                 } else {
                     t("Грати", "Play")
                 };
-                if ui.button2(team_label, x + 24.0, y + 202.0, bw, 46.0) {
+                // before a battle royale in squads: the lobby, next to it
+                let team_w = if self.lobby.is_some() { half } else { bw };
+                if ui.button2(team_label, x + 24.0, y + 202.0, team_w, 46.0) {
                     self.overlay = Overlay::Team;
+                }
+                if self.lobby.is_some() {
+                    let asks = self.lobby.as_ref().map_or(0, |l| l.asking_me.len());
+                    let label = if asks > 0 {
+                        tr!("Загін ({asks} запит)", "Squad ({asks} asking)")
+                    } else {
+                        t("Загін", "Squad").to_string()
+                    };
+                    let c = if asks > 0 { GOOD } else { ACCENT };
+                    if ui.button_colored(&label, x + 36.0 + half, y + 202.0, half, 46.0, c) {
+                        self.overlay = Overlay::Squad;
+                    }
                 }
                 if ui.button2(
                     t("Налаштування", "Settings"),
@@ -3556,6 +3902,10 @@ impl GameClient {
                 ) {
                     return Some(HudAction::Leave);
                 }
+                None
+            }
+            Overlay::Squad => {
+                self.draw_squad_lobby(ui);
                 None
             }
             Overlay::Leaders => {
@@ -4195,7 +4545,11 @@ pub fn big_map_rect() -> (f32, f32, f32) {
 
 /// The map marker: a yellow pin whose point is at `p`.
 fn draw_marker_pin(p: Vec2, k: f32) {
-    let c = Color::new(1.0, 0.85, 0.15, 1.0);
+    draw_pin(p, k, Color::new(1.0, 0.85, 0.15, 1.0));
+}
+
+/// A map marker's pin in a colour (a squadmate's).
+fn draw_pin(p: Vec2, k: f32, c: Color) {
     let top = p - vec2(0.0, 20.0 * k);
     draw_triangle(p, top + vec2(-7.0 * k, 0.0), top + vec2(7.0 * k, 0.0), c);
     draw_circle(top.x, top.y, 8.0 * k, c);
@@ -4330,6 +4684,79 @@ fn level_pips(cx: f32, cy: f32, level: u8) {
             draw_circle(x, cy, 4.0, lit);
         } else {
             draw_circle_lines(x, cy, 3.5, 1.5, Color::new(1.0, 1.0, 1.0, 0.25));
+        }
+    }
+}
+
+/// A ping's badge: a dark diamond with a coloured rim, `r` from the centre to a corner.
+fn ping_diamond(p: Vec2, r: f32, c: Color) {
+    let (n, e, s, w) = (
+        p + vec2(0.0, -r),
+        p + vec2(r, 0.0),
+        p + vec2(0.0, r),
+        p + vec2(-r, 0.0),
+    );
+    let o = r + 2.5;
+    let dark = Color::new(0.06, 0.07, 0.1, 0.85);
+    draw_triangle(p + vec2(0.0, -o), p + vec2(o, 0.0), p + vec2(0.0, o), BLACK);
+    draw_triangle(
+        p + vec2(0.0, -o),
+        p + vec2(-o, 0.0),
+        p + vec2(0.0, o),
+        BLACK,
+    );
+    draw_triangle(n, e, s, c);
+    draw_triangle(n, w, s, c);
+    let i = r * 0.72;
+    draw_triangle(p + vec2(0.0, -i), p + vec2(i, 0.0), p + vec2(0.0, i), dark);
+    draw_triangle(p + vec2(0.0, -i), p + vec2(-i, 0.0), p + vec2(0.0, i), dark);
+}
+
+/// What is inside a ping's badge.
+fn ping_glyph(what: toon_shared::protocol::PingWhat, p: Vec2, r: f32, c: Color) {
+    use toon_shared::protocol::{LootKind, PingWhat};
+    let sz = r * 1.05;
+    let bang = |col: Color| {
+        draw_rectangle(p.x - r * 0.1, p.y - r * 0.45, r * 0.2, r * 0.55, col);
+        draw_circle(p.x, p.y + r * 0.3, r * 0.11, col);
+    };
+    match what {
+        PingWhat::Spot => draw_circle(p.x, p.y, r * 0.22, c),
+        PingWhat::Danger | PingWhat::Enemy => bang(c),
+        PingWhat::Loot(k, _) => match k {
+            LootKind::Medkit | LootKind::Bandages | LootKind::Drink => {
+                draw_icon(Icon::Medkit, p.x, p.y, sz, c)
+            }
+            LootKind::Armor(_) => draw_icon(Icon::Vest, p.x, p.y, sz, c),
+            LootKind::Helmet(_) => draw_icon(Icon::Helmet, p.x, p.y, sz, c),
+            LootKind::Backpack(_) => draw_icon(Icon::Backpack, p.x, p.y, sz, c),
+            LootKind::Sight(1) => draw_icon(Icon::RedDot, p.x, p.y, sz, c),
+            LootKind::Sight(_) => draw_icon(Icon::Scope, p.x, p.y, sz, c),
+            LootKind::Ammo(_) => {
+                // three rounds side by side
+                for i in -1..=1 {
+                    let x = p.x + i as f32 * r * 0.28;
+                    draw_rectangle(x - r * 0.09, p.y - r * 0.2, r * 0.18, r * 0.5, c);
+                    draw_circle(x, p.y - r * 0.22, r * 0.09, c);
+                }
+            }
+            _ => {
+                // a grenade-like round thing
+                draw_circle(p.x, p.y + r * 0.05, r * 0.3, c);
+                draw_rectangle(p.x - r * 0.08, p.y - r * 0.42, r * 0.16, r * 0.18, c);
+            }
+        },
+        PingWhat::Weapon(w) => {
+            let gh = r * 0.55;
+            let (_, gw) = gun_rects(w, gh);
+            draw_cause_icon(Cause::Weapon(w), p.x - gw / 2.0, p.y, gh, 1.0);
+        }
+        PingWhat::DeathBox | PingWhat::AirDrop => draw_crate_icon(p, r / 14.0),
+        PingWhat::Car(_) => {
+            draw_rectangle(p.x - r * 0.45, p.y - r * 0.1, r * 0.9, r * 0.3, c);
+            draw_rectangle(p.x - r * 0.25, p.y - r * 0.32, r * 0.5, r * 0.24, c);
+            draw_circle(p.x - r * 0.25, p.y + r * 0.25, r * 0.12, c);
+            draw_circle(p.x + r * 0.25, p.y + r * 0.25, r * 0.12, c);
         }
     }
 }

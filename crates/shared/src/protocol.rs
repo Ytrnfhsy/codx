@@ -139,6 +139,77 @@ pub enum C2S {
         slot: u8,
         zoom: u8,
     },
+    /// Point something out to our side (the ping key): what the crosshair rests on.
+    Mark(MarkAt),
+    /// The squad lobby before a battle royale match.
+    Party(PartyCmd),
+}
+
+/// What a ping points at.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum MarkAt {
+    /// A place (`danger`: "enemy seen here", a second press right after the first).
+    Spot { pos: V3, danger: bool },
+    /// Something lying on the ground, a crate or a car (entity id).
+    Thing(u16),
+    /// An enemy in sight (player id).
+    Enemy(u8),
+    /// Take down our latest ping.
+    Clear,
+}
+
+/// The squad lobby: asking to be in somebody's squad, and the answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PartyCmd {
+    /// Ask this player to be in one squad with us.
+    Ask(u8),
+    /// Say yes to this player's request (they join our squad, or we join theirs).
+    Accept(u8),
+    /// Say no to it.
+    Decline(u8),
+    /// Leave the squad we are in.
+    Leave,
+}
+
+/// A ping, as our side sees it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PingSnap {
+    pub id: u16,
+    /// Who put it.
+    pub from: u8,
+    pub what: PingWhat,
+    pub pos: V3,
+    /// Seconds since it was put.
+    pub age: f32,
+}
+
+/// What a ping shows.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PingWhat {
+    /// "Going here" / "look here".
+    Spot,
+    /// "Enemy seen here".
+    Danger,
+    /// An enemy (where they were when pointed out).
+    Enemy,
+    Loot(LootKind, u16),
+    Weapon(WeaponId),
+    DeathBox,
+    AirDrop,
+    Car(crate::cars::CarKind),
+}
+
+/// The squad lobby, as one player sees it (battle royale in squads, before the match).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LobbySnap {
+    /// Players in one squad per entry (real players only; bots fill up when it starts).
+    pub parties: Vec<Vec<u8>>,
+    /// Who asks to be in one squad with us.
+    pub asking_me: Vec<u8>,
+    /// Whom we asked.
+    pub i_asked: Vec<u8>,
+    /// The squad size.
+    pub size: u8,
 }
 
 /// What was on the killer's gun (battle royale): the killcam shows it as it was.
@@ -629,6 +700,10 @@ pub struct Snapshot {
     /// Before the match starts: (players ready, players in total, am I ready, seconds
     /// until it starts anyway — 0: no countdown).
     pub ready: Option<(u8, u8, bool, u16)>,
+    /// Pings of our side (and our own).
+    pub pings: Vec<PingSnap>,
+    /// Before a battle royale match in squads: who plays with whom.
+    pub lobby: Option<LobbySnap>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

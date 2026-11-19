@@ -42,10 +42,14 @@ pub enum Action {
     Bandage,
     Drink,
     NextThrow,
+    /// Point out what the crosshair rests on to our side.
+    Ping,
+    /// The squad lobby before a battle royale match.
+    Squad,
 }
 
 impl Action {
-    pub const ALL: [Action; 29] = [
+    pub const ALL: [Action; 31] = [
         Action::Forward,
         Action::Back,
         Action::Left,
@@ -75,6 +79,8 @@ impl Action {
         Action::Bandage,
         Action::Drink,
         Action::NextThrow,
+        Action::Ping,
+        Action::Squad,
     ];
 
     pub fn name(self) -> &'static str {
@@ -111,6 +117,11 @@ impl Action {
                 "Що кидати (граната / молотов / світлошумова)",
                 "What to throw (grenade / molotov / flashbang)",
             ),
+            Action::Ping => t(
+                "Позначка (двічі — «тут ворог»)",
+                "Ping (twice: «enemy here»)",
+            ),
+            Action::Squad => t("Загін (перед матчем)", "Squad (before the match)"),
         }
     }
 
@@ -148,6 +159,8 @@ impl Action {
             Action::Bandage => [k(K::B), Bind::None],
             Action::Drink => [k(K::N), Bind::None],
             Action::NextThrow => [k(K::X), Bind::None],
+            Action::Ping => [Bind::Mouse(2), Bind::None],
+            Action::Squad => [k(K::F2), Bind::None],
         }
     }
 }
