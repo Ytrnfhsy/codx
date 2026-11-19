@@ -1776,7 +1776,7 @@ impl Game {
             return;
         }
         p.chat_budget -= 1.0;
-        let (from, team, key) = (p.name.clone(), p.team, p.stats_key());
+        let (from, team, key, squad) = (p.name.clone(), p.team, p.stats_key(), p.squad);
         let place = format!("{} · {}", self.map.name, self.mode.name());
         self.registry.chat(&key, &from, &text, team_only, &place);
         self.logf(format!(
@@ -1789,7 +1789,20 @@ impl Game {
             text,
             team_only,
         };
-        if team_only {
+        if team_only && self.mode.solo() {
+            // the battle royale: "team" is the squad (everybody there is on one side), and
+            // somebody on their own only talks to themselves
+            let to: Vec<u8> = self
+                .players
+                .iter()
+                .flatten()
+                .filter(|o| o.id == id || squad != 0 && o.squad == squad && !o.is_bot())
+                .map(|o| o.id)
+                .collect();
+            for t in to {
+                self.send(t, msg.clone());
+            }
+        } else if team_only {
             self.send_team(team, msg);
         } else {
             self.broadcast(msg);

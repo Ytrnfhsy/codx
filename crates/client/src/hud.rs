@@ -1338,6 +1338,30 @@ impl GameClient {
                 draw_circle(p.x, p.y, pulse, BAD);
             }
         }
+        // squadmates too far to be sent as players: where the squad list says they are,
+        // on the edge when beyond the minimap
+        for m in self
+            .br
+            .iter()
+            .flat_map(|b| b.squad.iter())
+            .filter(|m| m.id != self.my_id && m.alive && !self.remotes.contains_key(&m.id))
+        {
+            let p = to_map(Vec3::from_array(m.pos));
+            let r = size / 2.0 - 8.0;
+            let d = p - c;
+            let p = if d.length() > r {
+                c + d.normalize() * r
+            } else {
+                p
+            };
+            draw_circle(p.x, p.y, 6.0, BLACK);
+            draw_circle(
+                p.x,
+                p.y,
+                4.5,
+                if m.downed { BAD } else { self.mate_color(m.id) },
+            );
+        }
         // artillery about to land: a pulsing red ring
         for (t, r, at) in &self.artillery {
             let p = to_map(*t);

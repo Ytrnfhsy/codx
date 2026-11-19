@@ -1949,3 +1949,64 @@ fn the_island_is_for_the_battle_royale_only() {
     exec(&mut g, "set brmaxplayers 64");
     assert_eq!(g.cfg.br.max_players, 64);
 }
+
+/// Squad chat in the battle royale reaches the squad only (everybody there is on one side,
+/// so "the team" would be every player on the island).
+#[test]
+fn squad_chat_stays_in_the_squad() {
+    let cfg = ServerConfig {
+        ready_check: false,
+        data_dir: std::env::temp_dir()
+            .join("tw-br-chat")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Island, Mode::Br);
+    let ids: Vec<u8> = (0..3)
+        .map(|k| {
+            let id = g
+                .connect(
+                    format!("127.0.0.1:{}", 5100 + k).parse().unwrap(),
+                    &format!("Гравець{k}"),
+                    "",
+                    toon_shared::consts::PROTOCOL_VERSION,
+                )
+                .unwrap();
+            g.handle(id, C2S::JoinTeam(None));
+            id
+        })
+        .collect();
+    // the first two in one squad, the third on their own
+    for (k, &id) in ids.iter().enumerate() {
+        g.players[id as usize].as_mut().unwrap().squad = if k < 2 { 1 } else { 0 };
+    }
+    g.outbox.clear();
+    g.handle(
+        ids[0],
+        C2S::Chat {
+            text: "тримаймо дах".into(),
+            team_only: true,
+        },
+    );
+    let got: Vec<u8> = g
+        .outbox
+        .iter()
+        .filter(|(_, m, _)| {
+            matches!(
+                m,
+                S2C::Chat {
+                    team_only: true,
+                    ..
+                }
+            )
+        })
+        .map(|(d, _, _)| match d {
+            toon_server::game::Dest::One(t) => *t,
+            _ => panic!("squad chat went beyond one player"),
+        })
+        .collect();
+    assert!(got.contains(&ids[0]) && got.contains(&ids[1]), "{got:?}");
+    assert!(!got.contains(&ids[2]), "the stranger heard it: {got:?}");
+}
