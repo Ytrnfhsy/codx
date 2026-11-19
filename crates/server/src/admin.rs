@@ -81,7 +81,8 @@ pub const HELP: &str = "Команди:
   set <ключ> <значення>      — scorelimit, timelimit, sabtime, rounds, bombtimer, planttime,
                                defusetime, ff, autobalance, maxplayers, brmaxplayers (королівська
                                битва), password, name, motd,
-                               botskill (0..1 або easy/normal/hard/veteran), spawnprotect (секунди)
+                               botskill (0..1 або easy/normal/hard/veteran), spawnprotect (секунди),
+                               bleedtime, revivetime (с), revivehp — поранені в королівській битві
   save                       — зберегти налаштування у файл
   help                       — ця довідка";
 
@@ -621,6 +622,18 @@ fn set_var(g: &mut Game, key: &str, v: &str) -> String {
                 g.cfg.br.max_players = (n as usize).min(toon_shared::consts::MAX_PLAYERS);
                 g.cfg.br.bots = g.cfg.br.bots.min(g.cfg.br.max_players);
             }
+            _ => return bad(),
+        },
+        "bleedtime" => match num {
+            Ok(n) if (5.0..=600.0).contains(&n) => g.cfg.br.bleed_time = n,
+            _ => return bad(),
+        },
+        "revivetime" => match num {
+            Ok(n) if (0.5..=60.0).contains(&n) => g.cfg.br.revive_time = n,
+            _ => return bad(),
+        },
+        "revivehp" => match num {
+            Ok(n) if (1.0..=toon_shared::consts::MAX_HEALTH).contains(&n) => g.cfg.br.revive_hp = n,
             _ => return bad(),
         },
         "ff" | "friendlyfire" => match parse_bool(v) {

@@ -64,6 +64,12 @@ pub struct BrConfig {
     /// Weather each round: "random", or one of "clear", "evening", "overcast", "rain",
     /// "fog", "night".
     pub weather: String,
+    /// Seconds a knocked-down player lasts before bleeding out (left alone, unhurt).
+    pub bleed_time: f32,
+    /// Seconds a squadmate holds the use key to pick them up.
+    pub revive_time: f32,
+    /// Health they get up with.
+    pub revive_hp: f32,
 }
 
 impl Default for BrConfig {
@@ -73,6 +79,9 @@ impl Default for BrConfig {
             bots: 50,
             squad: 1,
             weather: "random".into(),
+            bleed_time: 40.0,
+            revive_time: 5.0,
+            revive_hp: 30.0,
         }
     }
 }
@@ -260,6 +269,12 @@ impl ServerConfig {
             .max_players
             .clamp(2, toon_shared::consts::MAX_PLAYERS);
         self.br.bots = self.br.bots.min(self.br.max_players);
+        self.br.bleed_time = self.br.bleed_time.clamp(5.0, 600.0);
+        self.br.revive_time = self.br.revive_time.clamp(0.5, 60.0);
+        self.br.revive_hp = self
+            .br
+            .revive_hp
+            .clamp(1.0, toon_shared::consts::MAX_HEALTH);
         self.bot_skill = self.bot_skill.clamp(0.0, 1.0);
         self.spawn_protection = self.spawn_protection.clamp(0.0, 30.0);
         self.min_players = self.min_players.max(1);

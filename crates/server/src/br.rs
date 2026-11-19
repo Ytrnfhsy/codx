@@ -24,14 +24,11 @@ pub const PLANE_HEIGHT: f32 = 230.0;
 pub const PLANE_SPEED: f32 = 75.0;
 /// Walking this close to supplies picks them up.
 const LOOT_RADIUS: f32 = 1.3;
-/// A knocked-down player's pool of health: it bleeds out over `BLEED_TIME` seconds and
-/// takes hits like normal health (no vest or helmet).
+/// A knocked-down player's pool of health: it bleeds out over the server's `br.bleed_time`
+/// seconds and takes hits like normal health (no vest or helmet). Picking them up takes
+/// `br.revive_time` seconds of a squadmate holding the use key; they get up with
+/// `br.revive_hp`.
 pub const DOWNED_HP: f32 = 100.0;
-pub const BLEED_TIME: f32 = 40.0;
-/// Seconds of holding the use key next to a downed squadmate to pick them up, and the
-/// health they get back.
-pub const REVIVE_TIME: f32 = 5.0;
-pub const REVIVE_HP: f32 = 30.0;
 
 /// How far sideways a skydiver gets from `height` metres above the ground: with the
 /// parachute opened right away, or in free fall until it opens by itself.
@@ -572,12 +569,17 @@ impl Game {
                 })
                 .map(|o| o.id);
             let now = self.time;
+            let (bleed, revive_time, revive_hp) = (
+                self.cfg.br.bleed_time.max(1.0),
+                self.cfg.br.revive_time.max(0.1),
+                self.cfg.br.revive_hp,
+            );
             let Some(v) = self.pm(id) else { continue };
             match reviver {
-                Some(_) => v.revive += dt / REVIVE_TIME,
+                Some(_) => v.revive += dt / revive_time,
                 None => {
                     v.revive = 0.0;
-                    v.hp -= DOWNED_HP / BLEED_TIME * dt;
+                    v.hp -= DOWNED_HP / bleed * dt;
                 }
             }
             let revive = v.revive;
@@ -585,7 +587,7 @@ impl Game {
                 v.downed = false;
                 v.downed_by = None;
                 v.revive = 0.0;
-                v.hp = REVIVE_HP;
+                v.hp = revive_hp;
                 v.last_damage = now;
                 let name = v.name.clone();
                 if let Some(r) = reviver {

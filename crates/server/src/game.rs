@@ -1715,7 +1715,14 @@ impl Game {
         if ok {
             p.move_budget = (p.move_budget - dh).max(0.0);
             p.body.pos = new;
-            p.body.vel = Vec3::from_array(inp.vel);
+            // (the client's word for its speed: finite and no faster than anything moves
+            // here, as grenades inherit it)
+            let vel = Vec3::from_array(inp.vel);
+            p.body.vel = if vel.is_finite() {
+                vel.clamp_length_max(80.0)
+            } else {
+                Vec3::ZERO
+            };
             p.body.stance = stance;
             p.body.on_ground = inp.flags & flags::ON_GROUND != 0;
             // falls: from the highest point since the feet left the ground

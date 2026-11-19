@@ -1006,7 +1006,17 @@ impl Game {
             eye
         };
         let gt = &self.tuning.grenade;
-        let vel = dir.normalize() * gt.throw_speed + p.body.vel * gt.inherit_velocity;
+        // (a huge direction would normalise to NaN, a broken speed spoil the throw)
+        let dir = dir.normalize_or_zero();
+        let own = if p.body.vel.is_finite() {
+            p.body.vel
+        } else {
+            Vec3::ZERO
+        };
+        let vel = dir * gt.throw_speed + own * gt.inherit_velocity;
+        if dir == Vec3::ZERO || !vel.is_finite() {
+            return;
+        }
         let (fuse, cook) = if smoke {
             (SMOKE_FUSE, 0.0)
         } else {
@@ -1055,7 +1065,17 @@ impl Game {
             eye
         };
         let gt = &self.tuning.grenade;
-        let vel = dir.normalize() * gt.throw_speed + p.body.vel * gt.inherit_velocity;
+        // (a huge direction would normalise to NaN, a broken speed spoil the throw)
+        let dir = dir.normalize_or_zero();
+        let own = if p.body.vel.is_finite() {
+            p.body.vel
+        } else {
+            Vec3::ZERO
+        };
+        let vel = dir * gt.throw_speed + own * gt.inherit_velocity;
+        if dir == Vec3::ZERO || !vel.is_finite() {
+            return;
+        }
         let gid = self.new_ent_id();
         self.grenades.push(Grenade {
             id: gid,
