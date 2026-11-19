@@ -7,7 +7,7 @@
 ![Режим «Саботаж» на карті «Ринок»](docs/screenshot-sab.png)
 
 **Повний посібник** — усі правила, налаштування, сервер, адміністрування й архітектура:
-[docs/GUIDE.md](docs/GUIDE.md).
+[docs/GUIDE.md](docs/GUIDE.md) (англійською — [docs/GUIDE.en.md](docs/GUIDE.en.md)).
 
 ## Режими
 
