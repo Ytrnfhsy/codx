@@ -527,9 +527,28 @@ pub fn render_world(
         }
     }
     // jeeps and boats
-    if kc.is_none() {
-        for c in g.cars.values() {
-            models::add_car(&mut m, c.kind, &c.state, c.hp, now as f32);
+    match kc {
+        None => {
+            for c in g.cars.values() {
+                models::add_car(&mut m, c.kind, &c.state, c.hp, now as f32);
+            }
+        }
+        // a replay: the cars as they were
+        Some(k) => {
+            for e in &k.ents {
+                if let EntSnap::Car {
+                    kind,
+                    pos,
+                    yaw,
+                    speed,
+                    hp,
+                    ..
+                } = e
+                {
+                    let st = crate::killcam::car_state(*pos, *yaw, *speed);
+                    models::add_car(&mut m, *kind, &st, *hp, now as f32);
+                }
+            }
         }
     }
     // the battle royale plane
@@ -643,6 +662,25 @@ pub fn render_world(
             outline: soldier::outline_at(a.pos.distance(view.pos)),
         };
         let muzzle = soldier::add_soldier(&mut m, &pose);
+        // knocked down: the shield they hold up in front
+        if kc.is_none() && g.remotes.get(&a.id).is_some_and(|r| r.downed) {
+            let f = toon_shared::look_dir(a.yaw, 0.0);
+            let fwd = vec3(f.x, 0.0, f.z).normalize_or_zero();
+            let right = vec3(fwd.z, 0.0, -fwd.x);
+            let at = a.pos + fwd * 0.85 + vec3(0.0, 0.38, 0.0);
+            let basis = Mat4::from_cols(
+                right.extend(0.0),
+                Vec3::Y.extend(0.0),
+                fwd.extend(0.0),
+                at.extend(1.0),
+            );
+            shadows.add_box_ex(&basis, vec3(0.42, 0.36, 0.03), [120, 200, 255], 150, true);
+            m.fill.add_box(
+                &(basis * Mat4::from_translation(vec3(0.0, -0.38, 0.0))),
+                vec3(0.45, 0.03, 0.05),
+                [60, 70, 90],
+            );
+        }
         if a.chute == 2 {
             models::add_parachute(&mut m, a.pos, a.yaw, now as f32 + a.id as f32);
         }

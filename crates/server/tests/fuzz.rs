@@ -145,6 +145,7 @@ fn random_br_msg(rng: &mut Rng, g: &Game) -> C2S {
             },
             1 => MarkAt::Thing(any(rng, loot)),
             2 => MarkAt::Enemy(small(rng)),
+            _ if rng.chance(0.5) => MarkAt::Remove(rng.below(65536) as u16),
             _ => MarkAt::Clear,
         }),
         23 => C2S::Party(PartyCmd::Ask(small(rng))),

@@ -133,7 +133,7 @@ pub fn status(g: &Game) -> String {
             " {:<3} {:<21} {:<9} {:<5} {}/{}/{:<5} {:<5} {}\n",
             p.id,
             p.name,
-            p.team.name(),
+            g.side_name(p),
             p.score,
             p.kills,
             p.deaths,

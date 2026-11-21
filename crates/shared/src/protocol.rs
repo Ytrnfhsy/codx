@@ -156,6 +156,8 @@ pub enum MarkAt {
     Enemy(u8),
     /// Take down our latest ping.
     Clear,
+    /// Take down this ping of ours (pinged again).
+    Remove(u16),
 }
 
 /// The squad lobby: asking to be in somebody's squad, and the answers.

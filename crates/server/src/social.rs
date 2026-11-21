@@ -64,6 +64,10 @@ impl Game {
         }
         let eye = me.body.pos;
         let (what, pos, ent, life) = match at {
+            MarkAt::Remove(pid) => {
+                self.pings.retain(|p| !(p.id == pid && p.from == id));
+                return;
+            }
             MarkAt::Clear => {
                 if let Some(k) = self.pings.iter().rposition(|p| p.from == id) {
                     self.pings.remove(k);

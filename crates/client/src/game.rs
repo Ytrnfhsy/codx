@@ -2004,6 +2004,27 @@ impl GameClient {
     /// ground, a place); pressed twice on a place, «enemy here».
     fn ping(&mut self) {
         let now = self.now;
+        // pinging one of our own pings again takes it down
+        let eye = self.eye();
+        let dir = look_dir(self.yaw, self.pitch);
+        let mine = self
+            .pings
+            .iter()
+            .filter(|p| p.from == self.my_id)
+            .map(|p| {
+                let to = Vec3::from_array(p.pos) + vec3(0.0, ping_lift(p.what), 0.0) - eye;
+                let d = to.length().max(0.1);
+                let tol = (1.2 / d).atan().max(0.06);
+                (p.id, dir.dot(to / d).clamp(-1.0, 1.0).acos() / tol)
+            })
+            .filter(|(_, k)| *k < 1.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((id, _)) = mine {
+            self.net.send(C2S::Mark(MarkAt::Remove(id)));
+            self.pings.retain(|p| p.id != id);
+            self.last_ping = (f64::NEG_INFINITY, None);
+            return;
+        }
         let Some(at) = self.ping_target() else { return };
         if let MarkAt::Spot { pos, .. } = at {
             if let (true, Some(prev)) = (now - self.last_ping.0 < 0.45, self.last_ping.1) {
@@ -3628,6 +3649,16 @@ pub fn cone(rng: &mut Rng, dir: Vec3, a: f32) -> Vec3 {
     let r = a * rng.f32().sqrt();
     let t = rng.range(0.0, std::f32::consts::TAU);
     (dir + u * (r * t.cos()) + v * (r * t.sin())).normalize()
+}
+
+/// How high over its point a ping's badge floats (metres).
+pub fn ping_lift(what: PingWhat) -> f32 {
+    match what {
+        PingWhat::Enemy => 2.2,
+        PingWhat::Car(_) | PingWhat::AirDrop => 2.0,
+        PingWhat::Spot | PingWhat::Danger => 0.0,
+        _ => 0.7,
+    }
 }
 
 /// What a ping says, in words.

@@ -1071,11 +1071,20 @@ impl Game {
             self.drop_bomb_if_carrier(id);
         }
         self.send(id, S2C::TeamSet(team));
+        let br = self.mode == Mode::Br;
         if notify {
             self.say(Dest::All, || S2C::Chat {
                 from: String::new(),
                 team,
-                text: format!("{name} → {}", team.name()),
+                text: if br {
+                    if team.is_playing() {
+                        toon_shared::tr!("{name} грає", "{name} plays")
+                    } else {
+                        toon_shared::tr!("{name} дивиться", "{name} watches")
+                    }
+                } else {
+                    format!("{name} → {}", team.name())
+                },
                 team_only: false,
             });
         }
@@ -1946,6 +1955,19 @@ impl Game {
             Some(t) => t.min(latest),
             None => latest,
         });
+    }
+
+    /// What side a player is on, as the admin sees it: the team, or in the battle royale
+    /// playing (in which squad) or watching.
+    pub fn side_name(&self, p: &Player) -> String {
+        if self.mode != Mode::Br || !p.team.is_playing() {
+            return p.team.name().to_string();
+        }
+        if p.squad != 0 {
+            toon_shared::tr!("загін {}", "squad {}", p.squad)
+        } else {
+            t("грає", "plays").to_string()
+        }
     }
 
     /// A real player has joined a side (not just watching).

@@ -90,6 +90,12 @@ const MAX_BULLETS: usize = 3000;
 /// Radius of a helicopter's hit sphere.
 const HELI_HIT_RADIUS: f32 = 2.6;
 
+/// A knocked-down player's shield: the share of damage that gets through from the front
+/// (within ~65° of where they look) and from anywhere else.
+pub const DOWNED_SHIELD_FRONT: f32 = 0.15;
+pub const DOWNED_SHIELD_REST: f32 = 0.5;
+const DOWNED_SHIELD_COS: f32 = 0.42;
+
 impl Game {
     fn combat_allowed(&self) -> bool {
         matches!(self.state, MatchState::Warmup | MatchState::Playing)
@@ -128,8 +134,13 @@ impl Game {
         t: f64,
     ) -> (f32, Hit) {
         let mut hit = Hit::None;
+        // (not the car the shooter sits in, nor the others in it: they shoot out of it)
+        let own = shooter.and_then(|s| self.seat_of(s)).map(|s| s.0);
         for p in self.players.iter().flatten() {
             if !p.alive || Some(p.id) == shooter || passed.contains(&p.id) {
+                continue;
+            }
+            if own.is_some() && self.seat_of(p.id).map(|s| s.0) == own {
                 continue;
             }
             // far from this piece of the path (rewinding moves nobody more than a few metres)
@@ -164,6 +175,9 @@ impl Game {
             }
         }
         for (i, c) in self.cars.iter().enumerate() {
+            if Some(i) == own {
+                continue;
+            }
             let (cc, r) = c.sphere();
             if let Some(dist) = ray_sphere(o, d, cc, r) {
                 if dist < best {
@@ -526,6 +540,20 @@ impl Game {
         if solo && !v.downed && !matches!(cause, Cause::Zone | Cause::Fall | Cause::World) {
             amount = v.inv.soak(amount, headshot);
             v.inv.healing = 0.0;
+        }
+        // knocked down: a shield in their hands takes most of what comes from the front,
+        // and the rest of them is harder to finish off too
+        if v.downed && !matches!(cause, Cause::Zone | Cause::Fall | Cause::World) {
+            let to = from - v.body.pos;
+            let facing = look_dir(v.yaw, 0.0);
+            let front = vec3(to.x, 0.0, to.z)
+                .normalize_or_zero()
+                .dot(vec3(facing.x, 0.0, facing.z).normalize_or_zero());
+            amount *= if front > DOWNED_SHIELD_COS {
+                DOWNED_SHIELD_FRONT
+            } else {
+                DOWNED_SHIELD_REST
+            };
         }
         let dealt = amount.min(v.hp.max(0.0));
         v.hp -= amount;

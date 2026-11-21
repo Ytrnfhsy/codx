@@ -59,7 +59,7 @@ fn state_json_raw(g: &Game) -> serde_json::Value {
         .flatten()
         .map(|p| {
             json!({
-                "id": p.id, "name": p.name, "team": p.team.name(), "team_id": p.team.index(),
+                "id": p.id, "name": p.name, "team": g.side_name(p), "team_id": p.team.index(),
                 "score": p.score, "kills": p.kills, "deaths": p.deaths, "assists": p.assists,
                 "ping": if p.is_bot() { 0 } else { (p.ping * 1000.0) as u32 },
                 "ip": p.ip, "bot": p.is_bot(), "alive": p.alive, "key": p.stats_key(),
@@ -152,7 +152,7 @@ pub fn player_json(g: &Game, key: &str) -> serde_json::Value {
     ips.sort_by_key(|s| std::cmp::Reverse(s.last));
     let live = online(g).get(key).and_then(|&id| g.p(id)).map(|p| {
         json!({
-            "id": p.id, "team": p.team.name(), "score": p.score, "kills": p.kills,
+            "id": p.id, "team": g.side_name(p), "score": p.score, "kills": p.kills,
             "deaths": p.deaths, "ping": (p.ping * 1000.0) as u32, "alive": p.alive,
         })
     });

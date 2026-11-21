@@ -437,13 +437,56 @@ impl Killcam {
                 }
             }
         }
+        // cars drive smoothly too, and whoever sits in one sits in it
+        for e in &mut self.ents {
+            if let EntSnap::Car { id, pos, yaw, .. } = e {
+                if let Some(EntSnap::Car {
+                    pos: pa, yaw: ya, ..
+                }) = fa
+                    .ents
+                    .iter()
+                    .find(|x| matches!(x, EntSnap::Car { id: i2, .. } if i2 == id))
+                {
+                    *pos = Vec3::from_array(*pa)
+                        .lerp(Vec3::from_array(*pos), k)
+                        .to_array();
+                    *yaw = ya + wrap_angle(*yaw - ya) * k;
+                }
+            }
+        }
+        let seated: Vec<(u8, Vec3, f32)> = self
+            .ents
+            .iter()
+            .filter_map(|e| match e {
+                EntSnap::Car {
+                    kind,
+                    pos,
+                    yaw,
+                    speed,
+                    seats,
+                    ..
+                } => Some((*kind, car_state(*pos, *yaw, *speed), *seats)),
+                _ => None,
+            })
+            .flat_map(|(kind, st, seats)| {
+                seats
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, id)| *id != 255)
+                    .map(move |(k, id)| (id, st.to_world(kind.seat(k)), st.yaw))
+            })
+            .collect();
         self.bomb = fb.bomb.clone();
         let mut actors = Vec::new();
         let mut deaths = Vec::new();
         let killer = self.info.killer;
         for b in &fb.players {
             let a = fa.players.iter().find(|p| p.id == b.id).unwrap_or(b);
-            let pos = Vec3::from_array(a.pos).lerp(Vec3::from_array(b.pos), k);
+            let seat = seated.iter().find(|s| s.0 == b.id);
+            let pos = match seat {
+                Some(s) => s.1,
+                None => Vec3::from_array(a.pos).lerp(Vec3::from_array(b.pos), k),
+            };
             let yaw = a.yaw + wrap_angle(b.yaw - a.yaw) * k;
             let pitch = a.pitch + (b.pitch - a.pitch) * k;
             let alive = if k < 0.5 { a.alive } else { b.alive };
@@ -486,7 +529,11 @@ impl Killcam {
                 _ => {}
             }
             if b.id == killer {
-                let eh = Stance::from_u8(b.stance & 3).eye();
+                let eh = if seat.is_some() {
+                    Stance::Crouch.eye()
+                } else {
+                    Stance::from_u8(b.stance & 3).eye()
+                };
                 let h = match self.eye_h {
                     Some(h) if dt > 0.0 => h + (eh - h) * (dt * 10.0).min(1.0),
                     _ => eh,
@@ -518,12 +565,16 @@ impl Killcam {
             if !alive {
                 continue;
             }
+            let (yaw, stance) = match seat {
+                Some(s) => (s.2, Stance::Crouch),
+                None => (yaw, Stance::from_u8(b.stance & 3)),
+            };
             actors.push(Actor {
                 id: b.id,
                 pos,
                 yaw,
                 pitch,
-                stance: Stance::from_u8(b.stance & 3),
+                stance,
                 team: b.team,
                 weapon: b.weapon,
                 flags: b.flags,
@@ -668,5 +719,15 @@ impl Killcam {
             flash: since(self.muzzle_at) < 0.05,
             bare: false,
         }
+    }
+}
+
+/// A car as a replay frame has it.
+pub fn car_state(pos: [f32; 3], yaw: f32, speed: f32) -> toon_shared::cars::CarState {
+    toon_shared::cars::CarState {
+        pos: Vec3::from_array(pos),
+        yaw,
+        speed,
+        ..Default::default()
     }
 }

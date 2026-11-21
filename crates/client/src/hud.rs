@@ -42,6 +42,7 @@ impl GameClient {
         if self.killcam.is_some() {
             self.draw_killcam(ui);
             self.draw_killfeed(ui);
+            self.draw_chat(ui);
             return self.draw_overlay(ui, settings);
         }
 
@@ -194,6 +195,15 @@ impl GameClient {
             );
         }
 
+        // a faint little cross always in the middle (to point at things and ping them)
+        if self.alive && self.ads_t < 0.5 && self.piloting.is_none() && !self.big_map {
+            let sh = Color::new(0.0, 0.0, 0.0, 0.45);
+            let c = Color::new(1.0, 1.0, 1.0, 0.7);
+            draw_rectangle(cx - 4.0, cy - 1.5, 8.0, 3.0, sh);
+            draw_rectangle(cx - 1.5, cy - 4.0, 3.0, 8.0, sh);
+            draw_rectangle(cx - 3.0, cy - 0.5, 6.0, 1.0, c);
+            draw_rectangle(cx - 0.5, cy - 3.0, 1.0, 6.0, c);
+        }
         // crosshair
         if self.alive
             && self.ads_t < 0.5
@@ -713,12 +723,7 @@ impl GameClient {
         let (eye, yaw, _) = self.camera();
         let (cx, cy) = (w / 2.0, h / 2.0);
         for pg in &self.pings {
-            let lift = match pg.what {
-                PingWhat::Enemy => 2.2,
-                PingWhat::Car(_) | PingWhat::AirDrop => 2.0,
-                PingWhat::Spot | PingWhat::Danger => 0.0,
-                _ => 0.7,
-            };
+            let lift = crate::game::ping_lift(pg.what);
             let at = Vec3::from_array(pg.pos) + vec3(0.0, lift, 0.0);
             let c = self.ping_color(pg);
             let on_screen = view
@@ -748,8 +753,13 @@ impl GameClient {
             } else {
                 p
             };
-            ping_diamond(top, 15.0 * k, c);
-            ping_glyph(pg.what, top, 15.0 * k, c);
+            if ping_is_thing(pg.what) {
+                // a thing: its own picture, as in the inventory, only smaller
+                ping_thing(pg.what, top, 15.0 * k, c);
+            } else {
+                ping_diamond(top, 15.0 * k, c);
+                ping_glyph(pg.what, top, 15.0 * k, c);
+            }
             // the name close to the crosshair (or for a moment after it went up), the
             // distance always
             let dist = at.distance(eye);
@@ -1246,8 +1256,8 @@ impl GameClient {
             );
             ui.centered(
                 t(
-                    "Повзи в укриття — напарник може підняти (тримаючи дію)",
-                    "Crawl to cover — a squadmate can pick you up (holding use)",
+                    "Повзи в укриття, щит тримай до ворога — напарник може підняти (тримаючи дію)",
+                    "Crawl to cover, shield towards the enemy — a squadmate can pick you up (holding use)",
                 ),
                 w / 2.0,
                 h * 0.62 + 26.0,
@@ -1642,11 +1652,25 @@ impl GameClient {
             }
         }
         // players
-        for r in self.remotes.values() {
+        let edge = size / 2.0 - 8.0;
+        for (&rid, r) in &self.remotes {
             if !r.alive {
                 continue;
             }
             let p = to_map(r.pos);
+            // ours beyond the minimap: a dot on its edge, in their direction
+            let off = p - c;
+            if self.is_friend(r) && off.length() > edge {
+                let p = c + off.normalize() * edge;
+                let col = match (r.downed, self.br.is_some()) {
+                    (true, _) => BAD,
+                    (false, true) => self.mate_color(rid),
+                    (false, false) => self.tcol(self.team),
+                };
+                draw_circle(p.x, p.y, 6.0, BLACK);
+                draw_circle(p.x, p.y, 4.5, col);
+                continue;
+            }
             // battle royale: only the squad is on our side
             if self.is_friend(r) && r.downed {
                 draw_circle(p.x, p.y, 6.0, BLACK);
@@ -3253,7 +3277,13 @@ impl GameClient {
                 } else {
                     format!("☠ {}", r.name)
                 };
-                ui.text(&name, x, yy, 16, if r.alive { TEXT } else { MUTED });
+                let c = match (r.bot, r.alive) {
+                    (false, true) => HUMAN,
+                    (false, false) => with_alpha(HUMAN, 0.6),
+                    (true, true) => TEXT,
+                    (true, false) => MUTED,
+                };
+                ui.text(&name, x, yy, 16, c);
                 let ping = if r.bot {
                     t("БОТ", "BOT").to_string()
                 } else {
@@ -3368,7 +3398,15 @@ impl GameClient {
             while name.chars().count() > 3 && ui.width(&name, 15, false) > col_w - 80.0 {
                 name.pop();
             }
-            ui.text(&name, x + 30.0, yy, 15, colour);
+            // real players stand out from the bots
+            let name_c = if r.bot {
+                colour
+            } else if r.place == 0 {
+                HUMAN
+            } else {
+                with_alpha(HUMAN, 0.6)
+            };
+            ui.text(&name, x + 30.0, yy, 15, name_c);
             ui.text(&r.kills.to_string(), x + col_w - 40.0, yy, 15, colour);
         }
         let specs: Vec<String> = self
@@ -4688,6 +4726,9 @@ fn level_pips(cx: f32, cy: f32, level: u8) {
     }
 }
 
+/// Real players' names in the tables (the bots stay white).
+const HUMAN: Color = Color::new(0.45, 0.9, 1.0, 1.0);
+
 /// A ping's badge: a dark diamond with a coloured rim, `r` from the centre to a corner.
 fn ping_diamond(p: Vec2, r: f32, c: Color) {
     let (n, e, s, w) = (
@@ -4710,6 +4751,112 @@ fn ping_diamond(p: Vec2, r: f32, c: Color) {
     let i = r * 0.72;
     draw_triangle(p + vec2(0.0, -i), p + vec2(i, 0.0), p + vec2(0.0, i), dark);
     draw_triangle(p + vec2(0.0, -i), p + vec2(-i, 0.0), p + vec2(0.0, i), dark);
+}
+
+/// A ping on a thing (not a place or an enemy).
+fn ping_is_thing(what: toon_shared::protocol::PingWhat) -> bool {
+    use toon_shared::protocol::PingWhat;
+    !matches!(what, PingWhat::Spot | PingWhat::Danger | PingWhat::Enemy)
+}
+
+/// A ping on a thing: a dark round tile with a rim in the pinger's colour and the thing's
+/// own picture in its own colours (a medkit red, a vest blue...), `r` the tile's radius.
+fn ping_thing(what: toon_shared::protocol::PingWhat, p: Vec2, r: f32, ring: Color) {
+    use toon_shared::protocol::{LootKind, PingWhat};
+    draw_circle(p.x, p.y, r + 3.0, BLACK);
+    draw_circle(p.x, p.y, r + 1.5, ring);
+    draw_circle(p.x, p.y, r - 1.0, Color::new(0.07, 0.08, 0.11, 0.92));
+    let sz = r * 1.35;
+    let red = Color::new(1.0, 0.4, 0.4, 1.0);
+    let blue = Color::new(0.45, 0.65, 1.0, 1.0);
+    let sight = Color::new(1.0, 0.45, 0.35, 1.0);
+    match what {
+        PingWhat::Loot(k, _) => match k {
+            LootKind::Medkit => draw_icon(Icon::Medkit, p.x, p.y, sz, red),
+            LootKind::Bandages => draw_icon(Icon::Medkit, p.x, p.y, sz * 0.8, WHITE),
+            LootKind::Drink => {
+                // a can
+                crate::ui::round_rect(p.x - r * 0.3, p.y - r * 0.5, r * 0.6, r, r * 0.12, ACCENT);
+                draw_rectangle(p.x - r * 0.3, p.y - r * 0.1, r * 0.6, r * 0.2, BLACK);
+            }
+            LootKind::Armor(_) => draw_icon(Icon::Vest, p.x, p.y, sz, blue),
+            LootKind::Helmet(_) => draw_icon(Icon::Helmet, p.x, p.y, sz, blue),
+            LootKind::Backpack(_) => draw_icon(Icon::Backpack, p.x, p.y, sz, ACCENT),
+            LootKind::Sight(1) => draw_icon(Icon::RedDot, p.x, p.y, sz, sight),
+            LootKind::Sight(_) => draw_icon(Icon::Scope, p.x, p.y, sz, sight),
+            LootKind::Ammo(_) => {
+                let brass = Color::new(0.95, 0.75, 0.3, 1.0);
+                for i in -1..=1 {
+                    let x = p.x + i as f32 * r * 0.36;
+                    draw_rectangle(x - r * 0.12, p.y - r * 0.2, r * 0.24, r * 0.65, brass);
+                    draw_circle(x, p.y - r * 0.22, r * 0.12, Color::new(0.8, 0.5, 0.25, 1.0));
+                }
+            }
+            LootKind::Mod(_) => {
+                draw_rectangle(
+                    p.x - r * 0.55,
+                    p.y - r * 0.15,
+                    r * 1.1,
+                    r * 0.3,
+                    Color::new(0.7, 0.7, 0.75, 1.0),
+                );
+                draw_rectangle(
+                    p.x - r * 0.15,
+                    p.y - r * 0.45,
+                    r * 0.3,
+                    r * 0.9,
+                    Color::new(0.55, 0.55, 0.6, 1.0),
+                );
+            }
+            LootKind::Molotov => {
+                draw_circle(
+                    p.x,
+                    p.y + r * 0.15,
+                    r * 0.4,
+                    Color::new(0.4, 0.7, 0.35, 1.0),
+                );
+                draw_rectangle(
+                    p.x - r * 0.1,
+                    p.y - r * 0.6,
+                    r * 0.2,
+                    r * 0.4,
+                    Color::new(1.0, 0.55, 0.15, 1.0),
+                );
+            }
+            _ => {
+                // grenades and flashbangs
+                let c = if k == LootKind::Flash {
+                    WHITE
+                } else {
+                    Color::new(0.4, 0.6, 0.3, 1.0)
+                };
+                draw_circle(p.x, p.y + r * 0.1, r * 0.42, c);
+                draw_rectangle(
+                    p.x - r * 0.1,
+                    p.y - r * 0.55,
+                    r * 0.2,
+                    r * 0.25,
+                    Color::new(0.6, 0.6, 0.6, 1.0),
+                );
+            }
+        },
+        PingWhat::Weapon(w) => {
+            // as big as fits the tile
+            let (_, w0) = gun_rects(w, r * 0.7);
+            let gh = r * 0.7 * (r * 1.6 / w0).min(1.0);
+            let (_, gw) = gun_rects(w, gh);
+            draw_cause_icon(Cause::Weapon(w), p.x - gw / 2.0, p.y, gh, 1.0);
+        }
+        PingWhat::DeathBox | PingWhat::AirDrop => draw_crate_icon(p, r / 11.0),
+        PingWhat::Car(_) => {
+            let c = Color::new(0.55, 0.65, 0.4, 1.0);
+            draw_rectangle(p.x - r * 0.6, p.y - r * 0.1, r * 1.2, r * 0.35, c);
+            draw_rectangle(p.x - r * 0.3, p.y - r * 0.4, r * 0.6, r * 0.32, c);
+            draw_circle(p.x - r * 0.32, p.y + r * 0.3, r * 0.16, BLACK);
+            draw_circle(p.x + r * 0.32, p.y + r * 0.3, r * 0.16, BLACK);
+        }
+        _ => {}
+    }
 }
 
 /// What is inside a ping's badge.
