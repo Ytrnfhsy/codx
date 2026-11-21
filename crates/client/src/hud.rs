@@ -45,6 +45,20 @@ impl GameClient {
             self.draw_chat(ui);
             return self.draw_overlay(ui, settings);
         }
+        // the battle royale lobby: its own screen until the plane takes off
+        if self.in_br_lobby() {
+            let leave = if self.overlay == Overlay::None {
+                self.draw_br_lobby(ui, settings)
+            } else {
+                None
+            };
+            self.draw_killfeed(ui);
+            self.draw_chat(ui);
+            if leave.is_some() {
+                return leave;
+            }
+            return self.draw_overlay(ui, settings);
+        }
 
         if self.net_lost() {
             let (w, h) = (screen_width(), screen_height());
@@ -933,10 +947,295 @@ impl GameClient {
     }
 
     /// The squad on the left: names, health, who is down.
+    /// The battle royale lobby, Apex-style: we and our squad on podiums in the middle (drawn
+    /// before the HUD), names and «Ready» under them, the squad on the left, the character,
+    /// achievements and the rest on the right, a big «Ready» at the bottom.
+    fn draw_br_lobby(&mut self, ui: &mut Ui, settings: &mut Settings) -> Option<HudAction> {
+        use toon_shared::protocol::C2S;
+        let (w, h) = (screen_width(), screen_height());
+        let lobby = self.lobby.clone()?;
+        let size = lobby.size as usize;
+        // the title
+        ui.centered(
+            t("КОРОЛІВСЬКА БИТВА", "BATTLE ROYALE"),
+            w / 2.0,
+            50.0,
+            32,
+            ACCENT,
+        );
+        let kind = match size {
+            1 => t("Соло", "Solo"),
+            2 => t("Дуо", "Duos"),
+            _ => t("Четвірки", "Fours"),
+        };
+        ui.centered(
+            &format!("{kind} · {} · {}", self.map.id.name(), self.server_name),
+            w / 2.0,
+            76.0,
+            16,
+            MUTED,
+        );
+        // names (and who is ready) under the players
+        for (k, (id, _)) in self.lobby_cast(settings.skin).iter().enumerate().take(4) {
+            let (x, z) = crate::render::LOBBY_SPOTS[k];
+            // (over their heads: under them is the «Ready» button)
+            let p = crate::render::lobby_screen_pos(vec3(x, 2.25, z)) - vec2(0.0, 46.0);
+            let name = if *id == self.my_id {
+                self.name_of(*id).unwrap_or(t("Ти", "You")).to_string()
+            } else {
+                self.name_of(*id).unwrap_or("?").to_string()
+            };
+            let ready = lobby.ready.contains(id);
+            let size_t = if k == 0 { 20 } else { 16 };
+            let tw = ui.width(&name, size_t, true);
+            crate::ui::soft_rect(
+                p.x - tw / 2.0 - 10.0,
+                p.y,
+                tw + 20.0,
+                46.0,
+                Color::new(0.0, 0.0, 0.0, 0.55),
+            );
+            ui.bold(
+                &name,
+                p.x - tw / 2.0,
+                p.y + 22.0,
+                size_t,
+                if k == 0 { ACCENT } else { TEXT },
+            );
+            let (rt, rc) = if ready {
+                (t("ГОТОВИЙ", "READY"), GOOD)
+            } else {
+                (t("не готовий", "not ready"), MUTED)
+            };
+            let rw = ui.width(rt, 13, true);
+            ui.bold(rt, p.x - rw / 2.0, p.y + 40.0, 13, rc);
+        }
+        if size > 1 && self.lobby_cast(settings.skin).len() < size {
+            ui.centered(
+                t(
+                    "Вільні місця в загоні займуть інші гравці або боти",
+                    "Free places in the squad go to other players or bots",
+                ),
+                w / 2.0,
+                h - 150.0,
+                14,
+                MUTED,
+            );
+        }
+        // the big «Ready»
+        let (n, of, me, left) = self.ready.unwrap_or((0, 0, false, 0));
+        let (bw, bh) = (320.0, 62.0);
+        let (bx, by) = ((w - bw) / 2.0, h - 128.0);
+        let pre = self.state == MatchState::PreRound;
+        if pre {
+            ui.centered(
+                &tr!(
+                    "Висадка через {}",
+                    "Boarding in {}",
+                    self.time_left.ceil() as i32
+                ),
+                w / 2.0,
+                by + 40.0,
+                30,
+                ACCENT,
+            );
+        } else {
+            let (label, c) = if me {
+                (t("СКАСУВАТИ", "CANCEL"), MUTED)
+            } else {
+                (t("ГОТОВИЙ", "READY"), GOOD)
+            };
+            if ui.button_colored(label, bx, by, bw, bh, c) {
+                self.net.send(C2S::Ready(!me));
+            }
+            let status = if left > 0 {
+                tr!(
+                    "{n}/{of} готові · матч почнеться за {left} с",
+                    "{n}/{of} ready · the match starts in {left} s"
+                )
+            } else if of > 0 {
+                tr!(
+                    "{n}/{of} готові — матч почнеться, коли всі будуть готові",
+                    "{n}/{of} ready — the match starts once everyone is"
+                )
+            } else {
+                t("Очікування гравців…", "Waiting for players…").to_string()
+            };
+            ui.centered(&status, w / 2.0, by + bh + 24.0, 15, TEXT);
+        }
+        // the squad, on the left
+        let side = (w * 0.27).clamp(260.0, 360.0);
+        if size > 1 {
+            // (ends above the chat in the corner)
+            let (px, py, ph) = (16.0, 110.0, (h - 360.0).max(220.0));
+            ui.panel(px, py, side, ph);
+            ui.bold(t("Загін", "Squad"), px + 18.0, py + 32.0, 22, ACCENT);
+            self.squad_list(ui, &lobby, px - 6.0, py + 64.0, side + 12.0, py + ph - 10.0);
+        }
+        // the character and the rest, on the right
+        let (px, py) = (w - side - 16.0, 110.0);
+        ui.panel(px, py, side, 330.0);
+        ui.bold(t("Персонаж", "Character"), px + 18.0, py + 32.0, 22, ACCENT);
+        let n_sk = toon_shared::skins::count();
+        let d = ui.stepper(
+            "",
+            toon_shared::skins::name(settings.skin),
+            px + 18.0,
+            py + 52.0,
+            side - 36.0,
+        );
+        if d != 0 {
+            settings.skin = ((settings.skin as i32 + d).rem_euclid(n_sk as i32)) as u8;
+            settings.save();
+        }
+        let bw2 = side - 36.0;
+        let mut y = py + 104.0;
+        if ui.button2(t("Досягнення", "Achievements"), px + 18.0, y, bw2, 42.0) {
+            self.leaderboards = None;
+            self.net.send(C2S::Leaderboards);
+            self.overlay = Overlay::Achievements;
+        }
+        y += 52.0;
+        if ui.button2(t("Рейтинг", "Leaderboards"), px + 18.0, y, bw2, 42.0) {
+            self.leaderboards = None;
+            self.net.send(C2S::Leaderboards);
+            self.overlay = Overlay::Leaders;
+        }
+        y += 52.0;
+        if ui.button2(t("Налаштування", "Settings"), px + 18.0, y, bw2, 42.0) {
+            self.overlay = Overlay::Settings;
+        }
+        y += 52.0;
+        let half = (bw2 - 10.0) / 2.0;
+        if ui.button2(t("Дивитися", "Watch"), px + 18.0, y, half, 42.0) {
+            self.join_team(Some(Team::Spectator));
+        }
+        if ui.button_colored(t("Вийти", "Leave"), px + 28.0 + half, y, half, 42.0, BAD) {
+            return Some(HudAction::Leave);
+        }
+        None
+    }
+
+    /// What we have achieved on this server, worked out from our places on its
+    /// leaderboards: a card per achievement, lit once reached, with how far there is to go.
+    fn draw_achievements(&mut self, ui: &mut Ui) {
+        use toon_shared::protocol::BoardKind as B;
+        let (w, h) = (screen_width(), screen_height());
+        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+        let pw = (w - 40.0).min(980.0);
+        let ph = (h - 40.0).min(600.0);
+        let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
+        ui.panel(x, y, pw, ph);
+        ui.bold(
+            t("Досягнення", "Achievements"),
+            x + 24.0,
+            y + 42.0,
+            26,
+            ACCENT,
+        );
+        let Some(boards) = &self.leaderboards else {
+            ui.centered(t("Завантаження…", "Loading…"), w / 2.0, h / 2.0, 18, MUTED);
+            return;
+        };
+        let mine = |k: B| -> f32 {
+            boards
+                .iter()
+                .find(|b| b.kind == k)
+                .and_then(|b| b.mine)
+                .map_or(0.0, |m| m.1)
+        };
+        let list = achievements();
+        let got = list.iter().filter(|a| mine(a.0) >= a.1).count();
+        ui.text(
+            &tr!(
+                "Відкрито {got} з {} · Esc — назад",
+                "{got} of {} unlocked · Esc — back",
+                list.len()
+            ),
+            x + 24.0,
+            y + 66.0,
+            14,
+            MUTED,
+        );
+        let cols = if pw > 860.0 { 4 } else { 3 };
+        let cw = (pw - 48.0 - (cols - 1) as f32 * 12.0) / cols as f32;
+        let ch = 84.0;
+        for (i, (kind, goal, uk, en, what_uk, what_en)) in list.iter().enumerate() {
+            let cx = x + 24.0 + (i % cols) as f32 * (cw + 12.0);
+            let cy = y + 86.0 + (i / cols) as f32 * (ch + 10.0);
+            if cy + ch > y + ph - 10.0 {
+                break;
+            }
+            let v = mine(*kind);
+            let done = v >= *goal;
+            crate::ui::soft_rect(
+                cx,
+                cy,
+                cw,
+                ch,
+                if done {
+                    Color::new(0.35, 0.28, 0.05, 0.55)
+                } else {
+                    Color::new(0.0, 0.0, 0.0, 0.35)
+                },
+            );
+            // a medal
+            let (mx, my) = (cx + 26.0, cy + 30.0);
+            draw_circle(mx, my, 16.0, BLACK);
+            draw_circle(
+                mx,
+                my,
+                14.0,
+                if done {
+                    ACCENT
+                } else {
+                    Color::new(0.3, 0.32, 0.38, 1.0)
+                },
+            );
+            if done {
+                draw_circle(mx, my, 7.0, Color::new(1.0, 0.95, 0.6, 1.0));
+            }
+            let name = toon_shared::lang::t(uk, en);
+            ui.bold(
+                name,
+                cx + 50.0,
+                cy + 26.0,
+                15,
+                if done { ACCENT } else { TEXT },
+            );
+            ui.text(
+                toon_shared::lang::t(what_uk, what_en),
+                cx + 50.0,
+                cy + 44.0,
+                12,
+                MUTED,
+            );
+            // progress
+            let k = (v / goal).clamp(0.0, 1.0);
+            draw_rectangle(
+                cx + 12.0,
+                cy + ch - 18.0,
+                cw - 24.0,
+                6.0,
+                Color::new(1.0, 1.0, 1.0, 0.12),
+            );
+            draw_rectangle(
+                cx + 12.0,
+                cy + ch - 18.0,
+                (cw - 24.0) * k,
+                6.0,
+                if done { ACCENT } else { GOOD },
+            );
+            let label = format!("{} / {}", kind.format(v.min(*goal)), kind.format(*goal));
+            let lw = ui.width(&label, 11, false);
+            ui.text(&label, cx + cw - 12.0 - lw, cy + ch - 24.0, 11, MUTED);
+        }
+    }
+
     /// The squad lobby: who plays with whom in the coming battle royale, requests to and
     /// from other players, and «Ready».
     fn draw_squad_lobby(&mut self, ui: &mut Ui) {
-        use toon_shared::protocol::{PartyCmd, C2S};
+        use toon_shared::protocol::C2S;
         let (w, h) = (screen_width(), screen_height());
         crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
         let Some(lobby) = self.lobby.clone() else {
@@ -968,6 +1267,47 @@ impl GameClient {
         {
             ui.text(line, x + 24.0, y + 64.0 + k as f32 * 16.0, 13, MUTED);
         }
+        self.squad_list(ui, &lobby, x, y + 112.0, pw, y + ph - 76.0);
+        // ready, and back
+        let by = y + ph - 64.0;
+        let half = (pw - 60.0) / 2.0;
+        if let Some((n, of, me, _)) = self.ready {
+            let (label, c) = if me {
+                (tr!("Готовий ✓ ({n}/{of})", "Ready ✓ ({n}/{of})"), GOOD)
+            } else {
+                (tr!("Готовий ({n}/{of})", "Ready ({n}/{of})"), ACCENT)
+            };
+            if ui.button_colored(&label, x + 24.0, by, half, 44.0, c) {
+                self.net.send(C2S::Ready(!me));
+            }
+        }
+        if ui.button2(
+            t("Закрити (Esc)", "Close (Esc)"),
+            x + 36.0 + half,
+            by,
+            half,
+            44.0,
+        ) {
+            self.overlay = Overlay::None;
+        }
+    }
+
+    /// The squad part of the lobby: our squad, who asks to join us, and the others with
+    /// «Ask to team up», inside a panel at `x` that is `pw` wide, from `top` to `bottom`.
+    fn squad_list(
+        &mut self,
+        ui: &mut Ui,
+        lobby: &toon_shared::protocol::LobbySnap,
+        x: f32,
+        top: f32,
+        pw: f32,
+        bottom: f32,
+    ) {
+        use toon_shared::protocol::{PartyCmd, C2S};
+        let size = lobby.size as usize;
+        // buttons fit narrow panels too
+        let small = ((pw - 48.0) * 0.27).min(112.0);
+        let wide = ((pw - 48.0) * 0.42).min(166.0);
         let names_of: std::collections::HashMap<u8, String> = lobby
             .parties
             .iter()
@@ -989,7 +1329,7 @@ impl GameClient {
             .find(|g| g.contains(&self.my_id))
             .cloned()
             .unwrap_or_else(|| vec![self.my_id]);
-        let mut cy = y + 112.0;
+        let mut cy = top;
         // our squad
         ui.bold(
             &tr!("Мій загін ({}/{size})", "My squad ({}/{size})", mine.len()),
@@ -1042,9 +1382,9 @@ impl GameClient {
                 ui.text(&name(from), x + 36.0, cy + 26.0, 16, TEXT);
                 if ui.button_colored(
                     t("Прийняти", "Accept"),
-                    x + pw - 254.0,
+                    x + pw - 30.0 - 2.0 * small,
                     cy + 4.0,
-                    112.0,
+                    small,
                     32.0,
                     GOOD,
                 ) {
@@ -1052,9 +1392,9 @@ impl GameClient {
                 }
                 if ui.button_colored(
                     t("Відхилити", "Decline"),
-                    x + pw - 136.0,
+                    x + pw - 24.0 - small,
                     cy + 4.0,
-                    112.0,
+                    small,
                     32.0,
                     MUTED,
                 ) {
@@ -1067,7 +1407,6 @@ impl GameClient {
         // everybody else
         ui.bold(t("Гравці", "Players"), x + 24.0, cy, 17, TEXT);
         cy += 10.0;
-        let bottom = y + ph - 76.0;
         let others: Vec<&Vec<u8>> = lobby
             .parties
             .iter()
@@ -1116,9 +1455,9 @@ impl GameClient {
             if let Some(from) = asking {
                 if ui.button_colored(
                     t("Прийняти", "Accept"),
-                    x + pw - 24.0 - 170.0,
+                    x + pw - 24.0 - wide,
                     cy + 4.0,
-                    166.0,
+                    wide,
                     32.0,
                     GOOD,
                 ) {
@@ -1134,35 +1473,13 @@ impl GameClient {
             } else {
                 (t("Запросити", "Ask to team up"), ACCENT)
             };
-            if ui.button_colored(text, x + pw - 24.0 - 170.0, cy + 4.0, 166.0, 32.0, c)
+            if ui.button_colored(text, x + pw - 24.0 - wide, cy + 4.0, wide, 32.0, c)
                 && !asked
                 && !full
             {
                 self.net.send(C2S::Party(PartyCmd::Ask(to)));
             }
             cy += 46.0;
-        }
-        // ready, and back
-        let by = y + ph - 64.0;
-        let half = (pw - 60.0) / 2.0;
-        if let Some((n, of, me, _)) = self.ready {
-            let (label, c) = if me {
-                (tr!("Готовий ✓ ({n}/{of})", "Ready ✓ ({n}/{of})"), GOOD)
-            } else {
-                (tr!("Готовий ({n}/{of})", "Ready ({n}/{of})"), ACCENT)
-            };
-            if ui.button_colored(&label, x + 24.0, by, half, 44.0, c) {
-                self.net.send(C2S::Ready(!me));
-            }
-        }
-        if ui.button2(
-            t("Закрити (Esc)", "Close (Esc)"),
-            x + 36.0 + half,
-            by,
-            half,
-            44.0,
-        ) {
-            self.overlay = Overlay::None;
         }
     }
 
@@ -3946,6 +4263,10 @@ impl GameClient {
                 self.draw_squad_lobby(ui);
                 None
             }
+            Overlay::Achievements => {
+                self.draw_achievements(ui);
+                None
+            }
             Overlay::Leaders => {
                 crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
                 let pw = (w - 40.0).min(1040.0);
@@ -4906,4 +5227,142 @@ fn ping_glyph(what: toon_shared::protocol::PingWhat, p: Vec2, r: f32, c: Color) 
             draw_circle(p.x + r * 0.25, p.y + r * 0.25, r * 0.12, c);
         }
     }
+}
+
+/// The achievements: the leaderboard a value comes from, the value to reach, the name and
+/// what it takes (Ukrainian, English).
+type Achievement = (
+    toon_shared::protocol::BoardKind,
+    f32,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+);
+
+fn achievements() -> Vec<Achievement> {
+    use toon_shared::protocol::BoardKind as B;
+    vec![
+        (
+            B::Matches,
+            1.0,
+            "Новобранець",
+            "Recruit",
+            "Зіграти матч",
+            "Play a match",
+        ),
+        (
+            B::Kills,
+            1.0,
+            "Перша кров",
+            "First blood",
+            "Перше вбивство",
+            "Your first kill",
+        ),
+        (
+            B::Wins,
+            1.0,
+            "Переможець",
+            "Winner",
+            "Виграти матч",
+            "Win a match",
+        ),
+        (
+            B::Kills,
+            25.0,
+            "Стрілець",
+            "Marksman",
+            "25 вбивств",
+            "25 kills",
+        ),
+        (
+            B::Longest,
+            100.0,
+            "Влучне око",
+            "Sharp eye",
+            "Вбивство за 100 м",
+            "A kill from 100 m",
+        ),
+        (
+            B::Matches,
+            10.0,
+            "Ветеран",
+            "Veteran",
+            "10 матчів",
+            "10 matches",
+        ),
+        (
+            B::Damage,
+            1000.0,
+            "Руйнівник",
+            "Wrecker",
+            "1000 урону в BR",
+            "1000 damage in BR",
+        ),
+        (
+            B::Kills,
+            100.0,
+            "Мисливець",
+            "Hunter",
+            "100 вбивств",
+            "100 kills",
+        ),
+        (B::Wins, 5.0, "Чемпіон", "Champion", "5 перемог", "5 wins"),
+        (
+            B::Longest,
+            300.0,
+            "Снайпер",
+            "Sniper",
+            "Вбивство за 300 м",
+            "A kill from 300 m",
+        ),
+        (
+            B::KillDeath,
+            1.0,
+            "Рівний бій",
+            "Even fight",
+            "K/D від 1,0",
+            "K/D of 1.0",
+        ),
+        (
+            B::KillDeath,
+            2.0,
+            "Майстер",
+            "Master",
+            "K/D від 2,0",
+            "K/D of 2.0",
+        ),
+        (
+            B::Matches,
+            50.0,
+            "Старожил",
+            "Old hand",
+            "50 матчів",
+            "50 matches",
+        ),
+        (
+            B::Kills,
+            500.0,
+            "Легенда",
+            "Legend",
+            "500 вбивств",
+            "500 kills",
+        ),
+        (
+            B::Wins,
+            25.0,
+            "Непереможний",
+            "Unbeatable",
+            "25 перемог",
+            "25 wins",
+        ),
+        (
+            B::Longest,
+            600.0,
+            "Соколине око",
+            "Hawk eye",
+            "Вбивство за 600 м",
+            "A kill from 600 m",
+        ),
+    ]
 }

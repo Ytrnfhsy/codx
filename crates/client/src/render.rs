@@ -1401,3 +1401,99 @@ pub fn draw_skin_preview(mats: &Materials, skin: u8, rect: Rect, t: f32) {
     mats.draw_toon(&m);
     set_default_camera();
 }
+
+/// Where the players stand in the battle royale lobby: we in the middle, the squad on
+/// both sides and a step back.
+pub const LOBBY_SPOTS: [(f32, f32); 4] = [(0.0, 0.0), (-1.35, 0.7), (1.35, 0.7), (-2.6, 1.5)];
+
+fn lobby_camera() -> Camera3D {
+    Camera3D {
+        position: vec3(0.0, 1.6, -8.4),
+        target: vec3(0.0, 1.05, 0.0),
+        up: Vec3::Y,
+        fovy: 0.62,
+        aspect: Some(screen_width() / screen_height().max(1.0)),
+        projection: Projection::Perspective,
+        render_target: None,
+        viewport: None,
+        z_near: 0.1,
+        z_far: 60.0,
+    }
+}
+
+/// A point of the lobby scene on the screen (for the names under the players).
+pub fn lobby_screen_pos(p: Vec3) -> Vec2 {
+    let m = lobby_camera().matrix();
+    let c = m * p.extend(1.0);
+    let n = c.truncate() / c.w.max(1e-4);
+    vec2(
+        (n.x * 0.5 + 0.5) * screen_width(),
+        (0.5 - n.y * 0.5) * screen_height(),
+    )
+}
+
+/// The battle royale lobby: the players (look id, character) standing on their podiums
+/// over a darkened view of the island.
+pub fn draw_lobby_scene(mats: &Materials, cast: &[(u8, u8)], t: f32) {
+    // the island behind, dimmed, with a warm light from below
+    draw_rectangle(
+        0.0,
+        0.0,
+        screen_width(),
+        screen_height(),
+        Color::new(0.04, 0.06, 0.1, 0.72),
+    );
+    let cam = lobby_camera();
+    set_camera(&cam);
+    mats.set_lighting(&crate::mesh::Lighting {
+        shadow: None,
+        textures: false,
+        tint: Vec3::ONE,
+    });
+    mats.set_view(cam.position, Color::new(0.0, 0.0, 0.0, 1.0), 100.0, 200.0);
+    let mut m = ToonMesh::new();
+    for (k, &(look, skin)) in cast.iter().take(LOBBY_SPOTS.len()).enumerate() {
+        let (x, z) = LOBBY_SPOTS[k];
+        let pos = vec3(x, 0.0, z);
+        // the podium
+        m.fill.add_box(
+            &Mat4::from_translation(pos + vec3(0.0, -0.12, 0.0)),
+            vec3(0.6, 0.12, 0.6),
+            if k == 0 {
+                [235, 190, 60]
+            } else {
+                [70, 90, 130]
+            },
+        );
+        m.fill.add_box(
+            &Mat4::from_translation(pos + vec3(0.0, -0.3, 0.0)),
+            vec3(0.66, 0.08, 0.66),
+            [40, 46, 62],
+        );
+        soldier::set_skin(look, skin);
+        // each stands a little differently, turned a bit towards the middle
+        let turn = x * 0.12 + (t * 0.4 + k as f32).sin() * 0.06;
+        soldier::add_soldier(
+            &mut m,
+            &soldier::SoldierPose {
+                pos,
+                yaw: turn,
+                pitch: 0.0,
+                stance: Stance::Stand,
+                team: Team::Allies,
+                weapon: WeaponId::M4,
+                look,
+                time: t + k as f32 * 1.7,
+                phase: 0.0,
+                walk: 0.0,
+                sprint: 0.0,
+                has_bomb: false,
+                melee: 0.0,
+                reload: None,
+                outline: soldier::OUTLINE,
+            },
+        );
+    }
+    mats.draw_toon(&m);
+    set_default_camera();
+}

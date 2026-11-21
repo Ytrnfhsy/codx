@@ -1177,7 +1177,8 @@ impl Game {
             MatchState::Playing => {
                 !(self.mode == Mode::Sab && self.overtime || self.mode == Mode::Br)
             }
-            _ => true,
+            // the battle royale waits in the lobby, not on the island
+            _ => self.mode != Mode::Br,
         }
     }
 

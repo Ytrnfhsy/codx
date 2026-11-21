@@ -152,6 +152,8 @@ pub enum Overlay {
     Leaders,
     /// The squad lobby before a battle royale match.
     Squad,
+    /// What we have achieved on this server.
+    Achievements,
 }
 
 pub struct Welcome {
@@ -922,7 +924,8 @@ impl GameClient {
                     // no classes in the battle royale (you find your weapons): pick who you
                     // are instead
                     self.choose_class(toon_shared::weapons::DEFAULT_CLASSES[0].1);
-                    self.overlay = Overlay::Skin;
+                    // (the lobby has the character chooser)
+                    self.overlay = Overlay::None;
                 } else if t.is_playing() {
                     if !self.has_class {
                         self.overlay = Overlay::Class;
@@ -2128,6 +2131,28 @@ impl GameClient {
             _ if p.from == self.my_id => Color::new(1.0, 0.85, 0.15, 1.0),
             _ => Color::new(0.45, 0.85, 1.0, 1.0),
         }
+    }
+
+    /// Waiting in the battle royale lobby (playing, the match not started yet).
+    pub fn in_br_lobby(&self) -> bool {
+        self.mode == Mode::Br && self.team.is_playing() && self.lobby.is_some() && !self.alive
+    }
+
+    /// Who stands in the lobby: we first, then our squad (look id, character).
+    pub fn lobby_cast(&self, my_skin: u8) -> Vec<(u8, u8)> {
+        let Some(l) = &self.lobby else {
+            return Vec::new();
+        };
+        let skin = |id: u8| l.skins.iter().find(|s| s.0 == id).map_or(0, |s| s.1);
+        let mut cast = vec![(self.my_id, my_skin)];
+        if let Some(g) = l.parties.iter().find(|g| g.contains(&self.my_id)) {
+            cast.extend(
+                g.iter()
+                    .filter(|&&id| id != self.my_id)
+                    .map(|&id| (id, skin(id))),
+            );
+        }
+        cast
     }
 
     pub fn aim_dir(&self) -> Vec3 {

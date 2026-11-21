@@ -37,15 +37,20 @@ Modes:
   right arm of the scope's cross there is a rangefinder: the distance to whatever the
   crosshair rests on (a player or a wall, up to 2 km).
   **Squads** ("Create server" → "Squads": everyone on their own / duos / fours; on a server
-  `brsquad <1|2|4>` or `br.squad` in the config). Before the match, during the warmup, the
-  **squad lobby** is open (`F2`, or "Squad" in the pause menu): a list of players with an "Ask to
-  team up" button; once the player you asked presses "Accept", you land together (the squad
-  stays for the next matches too, "Leave" splits it), then "Ready". Players who picked no squad
-  fill the incomplete ones in the order they joined, then bots. Squadmates do not hurt each other, see each other's
+  `brsquad <1|2|4>` or `br.squad` in the config). Before the match a player is not on the
+  island but in the **lobby**: your character on a podium in the middle, your squadmates next to
+  you in the characters they chose, a name and "ready" over each; the squad on the left (a list
+  of players with an "Ask to team up" button; once the player you asked presses "Accept", you
+  land together; the squad stays for the next matches too, "Leave" splits it); on the right the
+  character chooser, "Achievements" (16 awards for kills, wins, long shots, matches, damage and
+  K/D on this server, with how far there is to go), the leaderboards, settings, "Watch" and
+  "Leave"; a big "READY" at the bottom. Players who picked no squad fill the incomplete ones in
+  the order they joined, then bots. Squadmates do not hurt each other, see each other's
   names and marks, their markers on the map, the squad panel on the left with their health and
   each other on the minimap, and team chat (`Y`) reaches the squad only. A deadly hit while
   somebody in the squad is still on their feet only **knocks the player down**: they crawl,
-  cannot shoot and bleed out (~40 s); a squadmate holding `F` next to them for 5 s picks them
+  cannot shoot and bleed out (~40 s), but hold a **shield** up in front (it lets through only
+  15% of the damage from the front, half from elsewhere); a squadmate holding `F` next to them for 5 s picks them
   up with 30 HP (all three numbers are settings: `br.bleed_time`, `br.revive_time`,
   `br.revive_hp`). Finishing off a downed player is a kill for whoever knocked them down. When
   nobody is left on their feet the squad is out; the last squad wins. Bots in squads land
@@ -387,9 +392,10 @@ clipboard, and a held `Backspace` keeps deleting.
 **Pings.** The middle mouse button points out what the crosshair rests on, and your side (the
 team, in the battle royale the squad) sees it: an **enemy**, a red diamond over them for a few
 seconds; an **item** (a gun, a medkit, a vest, a helmet, a backpack, a sight, ammo), a death box,
-a supply drop or a car, a diamond with the item's icon, seen through walls until somebody takes
-it; just a **place**, a diamond on a stem, "Over here". Twice quickly on the same place: "Enemy
-here!" (red). Pings are on the minimap and the big map too, a new one makes a sound and the chat
+a supply drop or a car, a little round tile with the thing's own picture in its colours (a red
+medkit, a blue vest...), seen through walls until somebody takes it; just a **place**, a diamond
+on a stem, "Over here". Twice quickly on the same place: "Enemy here!" (red). Ping your own ping
+again to take it down. A faint little cross always in the middle of the screen helps to aim. Pings are on the minimap and the big map too, a new one makes a sound and the chat
 says who pinged what. A map marker (`M`) is a different thing: a yellow pin.
 
 ## Classes, perks, killstreaks

@@ -724,7 +724,10 @@ async fn amain(args: Args) {
 
                 // ---- cursor grab
                 // (the big map wants the cursor too: a click puts a marker on it)
-                let want_grab = g.overlay == Overlay::None && g.chat_input.is_none() && !g.big_map;
+                let want_grab = g.overlay == Overlay::None
+                    && g.chat_input.is_none()
+                    && !g.big_map
+                    && !g.in_br_lobby();
                 if want_grab != grabbed {
                     set_cursor_grab(want_grab);
                     show_mouse(!want_grab);
@@ -846,6 +849,14 @@ async fn amain(args: Args) {
                         },
                     );
                     gl_use_default_material();
+                }
+                // the battle royale lobby: the players on their podiums over the island
+                if g.in_br_lobby() {
+                    render::draw_lobby_scene(
+                        &mats,
+                        &g.lobby_cast(settings.skin),
+                        get_time() as f32,
+                    );
                 }
                 let mut ui = ui::Ui {
                     fonts: &fonts,

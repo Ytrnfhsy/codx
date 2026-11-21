@@ -210,8 +210,12 @@ pub struct LobbySnap {
     pub asking_me: Vec<u8>,
     /// Whom we asked.
     pub i_asked: Vec<u8>,
-    /// The squad size.
+    /// The squad size (1: everyone on their own).
     pub size: u8,
+    /// The characters the players chose (id, skin).
+    pub skins: Vec<(u8, u8)>,
+    /// Who pressed «Ready».
+    pub ready: Vec<u8>,
 }
 
 /// What was on the killer's gun (battle royale): the killcam shows it as it was.

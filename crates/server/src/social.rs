@@ -187,9 +187,12 @@ impl Game {
 
     /// The lobby is open: a battle royale in squads that has not started yet.
     pub fn lobby_open(&self) -> bool {
-        self.mode == Mode::Br
-            && self.cfg.br.squad >= 2
-            && matches!(self.state, MatchState::Warmup | MatchState::PreRound)
+        self.mode == Mode::Br && matches!(self.state, MatchState::Warmup | MatchState::PreRound)
+    }
+
+    /// Squads can be put together in the lobby.
+    fn squads_on(&self) -> bool {
+        self.lobby_open() && self.cfg.br.squad >= 2
     }
 
     fn party_size(&self, party: u8) -> usize {
@@ -235,7 +238,7 @@ impl Game {
                 }
                 self.tidy_parties();
             }
-            _ if !self.lobby_open() => {}
+            _ if !self.squads_on() => {}
             PartyCmd::Ask(to) => {
                 let (Some(me), Some(other)) = (self.p(id), self.p(to)) else {
                     return;
@@ -341,7 +344,12 @@ impl Game {
             return None;
         }
         let mut parties: Vec<(u8, Vec<u8>)> = Vec::new();
-        for p in self.players.iter().flatten().filter(|p| !p.is_bot()) {
+        for p in self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| !p.is_bot() && p.team.is_playing())
+        {
             if p.party == 0 {
                 parties.push((0, vec![p.id]));
             } else if let Some(g) = parties.iter_mut().find(|g| g.0 == p.party) {
@@ -365,6 +373,20 @@ impl Game {
                 .map(|a| a.1)
                 .collect(),
             size: self.cfg.br.squad.clamp(1, 4),
+            skins: self
+                .players
+                .iter()
+                .flatten()
+                .filter(|p| !p.is_bot())
+                .map(|p| (p.id, p.skin))
+                .collect(),
+            ready: self
+                .players
+                .iter()
+                .flatten()
+                .filter(|p| !p.is_bot() && p.ready)
+                .map(|p| p.id)
+                .collect(),
         })
     }
 
