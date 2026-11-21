@@ -704,7 +704,9 @@ async fn amain(args: Args) {
                     if is_key_pressed(KeyCode::Escape) && !binds::capturing() {
                         g.overlay = match g.overlay {
                             Overlay::Edit(_) => Overlay::Class,
-                            Overlay::Settings | Overlay::Leaders => Overlay::Pause,
+                            Overlay::Settings | Overlay::Leaders | Overlay::Achievements => {
+                                g.menu_back()
+                            }
                             Overlay::Video => {
                                 settings.save();
                                 Overlay::Settings
@@ -856,6 +858,8 @@ async fn amain(args: Args) {
                         &mats,
                         &g.lobby_cast(settings.skin),
                         get_time() as f32,
+                        g.lobby_turn,
+                        g.lobby_zoom,
                     );
                 }
                 let mut ui = ui::Ui {

@@ -143,6 +143,8 @@ pub enum C2S {
     Mark(MarkAt),
     /// The squad lobby before a battle royale match.
     Party(PartyCmd),
+    /// Battle royale: leave the round (or watching it) for the lobby, to wait for the next.
+    ToLobby,
 }
 
 /// What a ping points at.
@@ -216,6 +218,8 @@ pub struct LobbySnap {
     pub skins: Vec<(u8, u8)>,
     /// Who pressed «Ready».
     pub ready: Vec<u8>,
+    /// A match is on: those in the lobby wait for the next one.
+    pub running: bool,
 }
 
 /// What was on the killer's gun (battle royale): the killcam shows it as it was.

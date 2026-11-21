@@ -156,3 +156,51 @@ fn pings_go_to_our_side_only() {
     }
     assert!(!has(&g, mate, PingWhat::Spot), "the ping stayed for good");
 }
+
+#[test]
+fn back_to_the_lobby_in_the_middle_of_a_match() {
+    let mut cfg = ServerConfig {
+        ready_check: true,
+        data_dir: std::env::temp_dir()
+            .join("tw-lobby2")
+            .to_string_lossy()
+            .into(),
+        ..Default::default()
+    };
+    cfg.br.bots = 3;
+    let mut g = Game::new(cfg);
+    g.change_map(MapId::Island, Mode::Br);
+    let a = join(&mut g, 5721, "А", None);
+    let b = join(&mut g, 5722, "Б", None);
+    // nobody is on the island before the match, and no countdown starts it
+    for _ in 0..(5.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+    }
+    assert!(
+        !g.p(a).unwrap().alive,
+        "a player spawned on the island in the lobby"
+    );
+    assert!(
+        g.snapshot_for(a).ready.unwrap().3 == 0,
+        "a countdown in the lobby"
+    );
+    assert!(!g.br.running);
+    // everybody ready: off they go
+    g.handle(a, C2S::Ready(true));
+    g.handle(b, C2S::Ready(true));
+    for _ in 0..(15.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        if g.br.running {
+            break;
+        }
+    }
+    assert!(g.br.running, "the match did not start");
+    assert!(g.lobby_for(a).is_none());
+    // one goes back to the lobby: out of the round, waiting for the next match
+    g.handle(a, C2S::ToLobby);
+    let l = g.lobby_for(a).expect("no lobby for the one who went back");
+    assert!(l.running);
+    assert!(g.lobby_for(b).is_none());
+    let p = g.p(a).unwrap();
+    assert!(!p.alive && !p.in_plane);
+}

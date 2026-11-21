@@ -95,6 +95,8 @@ pub struct Player {
     pub squad: u8,
     /// The squad chosen in the lobby (0 = none): kept from match to match.
     pub party: u8,
+    /// Battle royale: went back to the lobby during a match (waits for the next one).
+    pub lobby_wait: bool,
     /// When they last pinged.
     pub last_ping: f64,
     /// Battle royale: knocked down (crawling, `hp` bleeds out) and who did it.
@@ -297,6 +299,7 @@ impl Player {
             ping: 0.05,
             ready: false,
             party: 0,
+            lobby_wait: false,
             last_ping: f64::NEG_INFINITY,
             squad: 0,
             downed: false,
@@ -1063,6 +1066,7 @@ impl Game {
         }
         let was_alive = p.alive;
         p.team = team;
+        p.lobby_wait = false;
         p.alive = false;
         p.streak = 0;
         p.respawn_at = 0.0;
@@ -1568,6 +1572,7 @@ impl Game {
             },
             C2S::Mark(at) => self.on_mark(id, at),
             C2S::Party(cmd) => self.on_party(id, cmd),
+            C2S::ToLobby => self.to_lobby(id),
             C2S::Marker(m) => {
                 if let Some(p) = self.pm(id) {
                     p.marker = m.filter(|m| m[0].is_finite() && m[1].is_finite());
@@ -1922,7 +1927,12 @@ impl Game {
     /// begins once the match could start, shorter as soon as somebody is ready.
     fn update_ready_deadline(&mut self) {
         let timeout = self.cfg.ready_timeout as f64;
-        if self.state != MatchState::Warmup || !self.cfg.ready_check || timeout <= 0.0 {
+        // (the battle royale lobby simply waits for everybody to be ready)
+        if self.state != MatchState::Warmup
+            || !self.cfg.ready_check
+            || timeout <= 0.0
+            || self.mode == Mode::Br
+        {
             self.ready_deadline = None;
             return;
         }

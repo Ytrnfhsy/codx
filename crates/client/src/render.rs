@@ -1406,10 +1406,12 @@ pub fn draw_skin_preview(mats: &Materials, skin: u8, rect: Rect, t: f32) {
 /// both sides and a step back.
 pub const LOBBY_SPOTS: [(f32, f32); 4] = [(0.0, 0.0), (-1.35, 0.7), (1.35, 0.7), (-2.6, 1.5)];
 
-fn lobby_camera() -> Camera3D {
+/// The lobby's camera; `zoom` 0..1 brings it up to our character.
+fn lobby_camera(zoom: f32) -> Camera3D {
+    let z = zoom.clamp(0.0, 1.0);
     Camera3D {
-        position: vec3(0.0, 1.6, -8.4),
-        target: vec3(0.0, 1.05, 0.0),
+        position: vec3(0.0, 1.6, -8.4).lerp(vec3(0.0, 1.3, -3.6), z),
+        target: vec3(0.0, 1.05, 0.0).lerp(vec3(0.0, 0.95, 0.0), z),
         up: Vec3::Y,
         fovy: 0.62,
         aspect: Some(screen_width() / screen_height().max(1.0)),
@@ -1422,8 +1424,8 @@ fn lobby_camera() -> Camera3D {
 }
 
 /// A point of the lobby scene on the screen (for the names under the players).
-pub fn lobby_screen_pos(p: Vec3) -> Vec2 {
-    let m = lobby_camera().matrix();
+pub fn lobby_screen_pos(p: Vec3, zoom: f32) -> Vec2 {
+    let m = lobby_camera(zoom).matrix();
     let c = m * p.extend(1.0);
     let n = c.truncate() / c.w.max(1e-4);
     vec2(
@@ -1434,7 +1436,8 @@ pub fn lobby_screen_pos(p: Vec3) -> Vec2 {
 
 /// The battle royale lobby: the players (look id, character) standing on their podiums
 /// over a darkened view of the island.
-pub fn draw_lobby_scene(mats: &Materials, cast: &[(u8, u8)], t: f32) {
+/// `turn`: how far our own character is turned round by the player.
+pub fn draw_lobby_scene(mats: &Materials, cast: &[(u8, u8)], t: f32, turn: f32, zoom: f32) {
     // the island behind, dimmed, with a warm light from below
     draw_rectangle(
         0.0,
@@ -1443,7 +1446,7 @@ pub fn draw_lobby_scene(mats: &Materials, cast: &[(u8, u8)], t: f32) {
         screen_height(),
         Color::new(0.04, 0.06, 0.1, 0.72),
     );
-    let cam = lobby_camera();
+    let cam = lobby_camera(zoom);
     set_camera(&cam);
     mats.set_lighting(&crate::mesh::Lighting {
         shadow: None,
@@ -1472,7 +1475,7 @@ pub fn draw_lobby_scene(mats: &Materials, cast: &[(u8, u8)], t: f32) {
         );
         soldier::set_skin(look, skin);
         // each stands a little differently, turned a bit towards the middle
-        let turn = x * 0.12 + (t * 0.4 + k as f32).sin() * 0.06;
+        let turn = x * 0.12 + (t * 0.4 + k as f32).sin() * 0.06 + if k == 0 { turn } else { 0.0 };
         soldier::add_soldier(
             &mut m,
             &soldier::SoldierPose {

@@ -975,11 +975,46 @@ impl GameClient {
             16,
             MUTED,
         );
-        // names (and who is ready) under the players
+        // our character: drag it round with the mouse, the wheel brings it closer
+        let side_w = (w * 0.27).clamp(260.0, 360.0);
+        let m = ui.mouse;
+        let over_stage =
+            m.x > side_w + 30.0 && m.x < w - side_w - 30.0 && m.y > 100.0 && m.y < h - 140.0;
+        if is_mouse_button_down(MouseButton::Left) {
+            if let Some(last) = self.lobby_drag {
+                self.lobby_turn += (m.x - last.x) * 0.012;
+            }
+            if self.lobby_drag.is_some() || over_stage && is_mouse_button_pressed(MouseButton::Left)
+            {
+                self.lobby_drag = Some(m);
+            }
+        } else {
+            self.lobby_drag = None;
+        }
+        let wheel = mouse_wheel().1;
+        if over_stage && wheel.abs() > 0.01 {
+            self.lobby_zoom = (self.lobby_zoom + wheel.signum() * 0.12).clamp(0.0, 1.0);
+        }
+        if self.lobby_zoom < 0.05 && self.lobby_turn.abs() < 0.01 {
+            ui.centered(
+                t(
+                    "Тягни персонажа мишею, щоб покрутити; коліщатко — ближче",
+                    "Drag your character to turn it round; the wheel brings it closer",
+                ),
+                w / 2.0,
+                108.0,
+                13,
+                MUTED,
+            );
+        }
+        // names (and who is ready) over the players
         for (k, (id, _)) in self.lobby_cast(settings.skin).iter().enumerate().take(4) {
             let (x, z) = crate::render::LOBBY_SPOTS[k];
             // (over their heads: under them is the «Ready» button)
-            let p = crate::render::lobby_screen_pos(vec3(x, 2.25, z)) - vec2(0.0, 46.0);
+            let p = crate::render::lobby_screen_pos(vec3(x, 2.25, z), self.lobby_zoom)
+                - vec2(0.0, 46.0);
+            // (below the title, however close the camera came)
+            let p = vec2(p.x, p.y.max(118.0));
             let name = if *id == self.my_id {
                 self.name_of(*id).unwrap_or(t("Ти", "You")).to_string()
             } else {
@@ -1010,7 +1045,7 @@ impl GameClient {
             let rw = ui.width(rt, 13, true);
             ui.bold(rt, p.x - rw / 2.0, p.y + 40.0, 13, rc);
         }
-        if size > 1 && self.lobby_cast(settings.skin).len() < size {
+        if size > 1 && self.lobby_cast(settings.skin).len() < size && self.lobby_zoom < 0.3 {
             ui.centered(
                 t(
                     "Вільні місця в загоні займуть інші гравці або боти",
@@ -1027,7 +1062,18 @@ impl GameClient {
         let (bw, bh) = (320.0, 62.0);
         let (bx, by) = ((w - bw) / 2.0, h - 128.0);
         let pre = self.state == MatchState::PreRound;
-        if pre {
+        if lobby.running {
+            ui.centered(
+                t(
+                    "Матч триває — ти почнеш у наступному",
+                    "A match is on — you join the next one",
+                ),
+                w / 2.0,
+                by + 40.0,
+                24,
+                ACCENT,
+            );
+        } else if pre {
             ui.centered(
                 &tr!(
                     "Висадка через {}",
@@ -1048,10 +1094,13 @@ impl GameClient {
             if ui.button_colored(label, bx, by, bw, bh, c) {
                 self.net.send(C2S::Ready(!me));
             }
-            let status = if left > 0 {
+            let _ = left;
+            let status = if of > 0 && n >= of {
+                t("Усі готові — починаємо", "Everyone is ready — here we go").to_string()
+            } else if me {
                 tr!(
-                    "{n}/{of} готові · матч почнеться за {left} с",
-                    "{n}/{of} ready · the match starts in {left} s"
+                    "Ти готовий · {n}/{of} — чекаємо на інших",
+                    "You are ready · {n}/{of} — waiting for the others"
                 )
             } else if of > 0 {
                 tr!(
@@ -1133,6 +1182,10 @@ impl GameClient {
             26,
             ACCENT,
         );
+        if ui.button2(t("Назад", "Back"), x + pw - 164.0, y + 18.0, 140.0, 40.0) {
+            self.overlay = self.menu_back();
+            return;
+        }
         let Some(boards) = &self.leaderboards else {
             ui.centered(t("Завантаження…", "Loading…"), w / 2.0, h / 2.0, 18, MUTED);
             return;
@@ -1147,11 +1200,7 @@ impl GameClient {
         let list = achievements();
         let got = list.iter().filter(|a| mine(a.0) >= a.1).count();
         ui.text(
-            &tr!(
-                "Відкрито {got} з {} · Esc — назад",
-                "{got} of {} unlocked · Esc — back",
-                list.len()
-            ),
+            &tr!("Відкрито {got} з {}", "{got} of {} unlocked", list.len()),
             x + 24.0,
             y + 66.0,
             14,
@@ -4247,11 +4296,34 @@ impl GameClient {
                     self.net.send(toon_shared::protocol::C2S::Leaderboards);
                     self.overlay = Overlay::Leaders;
                 }
+                // a battle royale match on: back to the lobby to wait for the next one
+                let to_lobby =
+                    self.mode == Mode::Br && self.team.is_playing() && self.lobby.is_none();
+                if to_lobby
+                    && ui.button_colored(
+                        t("Вийти в лоббі", "Back to the lobby"),
+                        x + 24.0,
+                        y + 314.0,
+                        half,
+                        46.0,
+                        ACCENT,
+                    )
+                {
+                    self.net.send(toon_shared::protocol::C2S::ToLobby);
+                    self.overlay = Overlay::None;
+                    self.killcam = None;
+                    self.pending_killcam = None;
+                }
+                let (dx, dw) = if to_lobby {
+                    (x + 36.0 + half, half)
+                } else {
+                    (x + 24.0, bw)
+                };
                 if ui.button_colored(
                     t("Відключитися", "Disconnect"),
-                    x + 24.0,
+                    dx,
                     y + 314.0,
-                    bw,
+                    dw,
                     46.0,
                     BAD,
                 ) {
@@ -4280,10 +4352,14 @@ impl GameClient {
                     26,
                     ACCENT,
                 );
+                if ui.button2(t("Назад", "Back"), x + pw - 164.0, y + 18.0, 140.0, 40.0) {
+                    self.overlay = self.menu_back();
+                    return None;
+                }
                 ui.text(
                     t(
-                        "Рахуються всі режими; K/D — після 5 матчів. Esc — назад",
-                        "Every mode counts; K/D after 5 matches. Esc — back",
+                        "Рахуються всі режими; K/D — після 5 матчів",
+                        "Every mode counts; K/D after 5 matches",
                     ),
                     x + 24.0,
                     y + 66.0,

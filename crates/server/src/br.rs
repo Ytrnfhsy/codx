@@ -232,6 +232,7 @@ impl Game {
             p.team = toon_shared::Team::Allies;
             p.alive = false;
             p.in_plane = true;
+            p.lobby_wait = false;
             p.body = Body {
                 pos: start,
                 ..Default::default()

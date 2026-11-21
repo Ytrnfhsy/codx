@@ -652,19 +652,16 @@ fn the_match_waits_for_ready_players() {
     assert_eq!(g.state, MatchState::Warmup, "started without anyone ready");
     let r = g.snapshot_for(me).ready.unwrap();
     assert_eq!((r.0, r.1, r.2), (0, 1, false));
-    assert!(
-        (38..=41).contains(&r.3),
-        "countdown {} s with nobody ready",
-        r.3
-    );
+    // (the lobby has no countdown: it waits for everybody)
+    assert_eq!(r.3, 0, "a countdown in the battle royale lobby");
     g.handle(me, C2S::Ready(true));
     run(&mut g, 2.0);
     assert_ne!(g.state, MatchState::Warmup, "ready, but nothing started");
 }
 
-/// One player never presses «Ready»: the others do not wait for ever. Once somebody is
-/// ready the match starts after `ready_timeout` seconds anyway (twice that with nobody
-/// ready at all).
+/// One player never presses «Ready»: in the team modes the others do not wait for ever.
+/// Once somebody is ready the match starts after `ready_timeout` seconds anyway (twice that
+/// with nobody ready at all). (The battle royale lobby has no countdown.)
 #[test]
 fn the_match_does_not_wait_for_ever() {
     let mut cfg = ServerConfig {
@@ -675,10 +672,9 @@ fn the_match_does_not_wait_for_ever() {
         ..Default::default()
     };
     cfg.ready_timeout = 10.0;
-    cfg.br.bots = 4;
-    cfg.br.max_players = 8;
+    cfg.bots = 4;
     let mut g = Game::new(cfg);
-    g.change_map(MapId::Market, Mode::Br);
+    g.change_map(MapId::Market, Mode::Tdm);
     let v = toon_shared::consts::PROTOCOL_VERSION;
     let a = g
         .connect("127.0.0.1:5801".parse().unwrap(), "Готовий", "", v)

@@ -337,6 +337,11 @@ pub struct GameClient {
     sent_skin: u8,
     /// Where the character chooser wants its turning 3D preview this frame.
     pub skin_preview: Option<Rect>,
+    /// The lobby: how far our character is turned round (dragging the mouse), how close
+    /// the camera came (the wheel, 0..1), and where a drag was last frame.
+    pub lobby_turn: f32,
+    pub lobby_zoom: f32,
+    pub lobby_drag: Option<Vec2>,
     pub fx: Effects,
     pub rcon_pass: String,
     /// The connection's number for admin command proofs, and our count of them.
@@ -361,7 +366,7 @@ pub struct GameClient {
     pub recorder: Recorder,
     pub killcam: Option<Killcam>,
     /// A killcam waiting to start: (real time to start, info, final killcam).
-    pending_killcam: Option<(f64, KillInfo, bool)>,
+    pub pending_killcam: Option<(f64, KillInfo, bool)>,
     /// When the inventory screen was opened (its key closes it again only after that).
     pub inventory_opened: f64,
     pub ragdolls: Vec<(u8, Ragdoll)>,
@@ -635,6 +640,9 @@ impl GameClient {
             piloting: None,
             sent_lang: toon_shared::lang::get(),
             sent_skin: 255,
+            lobby_turn: 0.0,
+            lobby_zoom: 0.0,
+            lobby_drag: None,
             skin_preview: None,
             fx: Effects::new(),
             rcon_pass: String::new(),
@@ -2130,6 +2138,16 @@ impl GameClient {
             _ if self.br.is_some() => self.mate_color(p.from),
             _ if p.from == self.my_id => Color::new(1.0, 0.85, 0.15, 1.0),
             _ => Color::new(0.45, 0.85, 1.0, 1.0),
+        }
+    }
+
+    /// Where «Back» leads from the leaderboards, achievements and settings: the lobby
+    /// if we came from there, otherwise the pause menu.
+    pub fn menu_back(&self) -> Overlay {
+        if self.in_br_lobby() {
+            Overlay::None
+        } else {
+            Overlay::Pause
         }
     }
 

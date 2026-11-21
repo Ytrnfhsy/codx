@@ -44,7 +44,10 @@ Modes:
   land together; the squad stays for the next matches too, "Leave" splits it); on the right the
   character chooser, "Achievements" (16 awards for kills, wins, long shots, matches, damage and
   K/D on this server, with how far there is to go), the leaderboards, settings, "Watch" and
-  "Leave"; a big "READY" at the bottom. Players who picked no squad fill the incomplete ones in
+  "Leave"; a big "READY" at the bottom (the match starts as soon as everybody is ready, with no
+  countdown). Drag your character with the mouse to turn it round, the wheel brings it closer.
+  In the middle of a match the `Esc` menu has "Back to the lobby": you are out of the round (your
+  things stay in a box) and wait in the lobby for the next match. Players who picked no squad fill the incomplete ones in
   the order they joined, then bots. Squadmates do not hurt each other, see each other's
   names and marks, their markers on the map, the squad panel on the left with their health and
   each other on the minimap, and team chat (`Y`) reaches the squad only. A deadly hit while
@@ -605,7 +608,7 @@ An example: [`server.example.json`](../server.example.json). The main fields:
 | `bots`, `bot_skill` | fill with bots up to N players; difficulty 0..1 (0.1 easy, 0.4 normal, 0.7 hard, 1 veteran) |
 | `spawn_protection` | seconds of invulnerability after respawning (0 = off) |
 | `min_players` | how many players a match needs to start (until then, warm-up) |
-| `ready_check`, `ready_timeout` | wait for everybody's "Ready", but not for ever: once somebody is ready the rest get `ready_timeout` seconds (30), and with nobody ready twice as long (0: wait for everyone) |
+| `ready_check`, `ready_timeout` | wait for everybody's "Ready", but not for ever: once somebody is ready the rest get `ready_timeout` seconds (30), and with nobody ready twice as long (0: wait for everyone); the battle royale lobby has no countdown and waits until everybody is ready |
 | `http_enabled` | turns on the web page and the admin panel |
 | `public` | show the server on the game's public list (`null`: not asked yet) |
 | `master` | the public list's address (`https://master.pagani.com.ua`) |

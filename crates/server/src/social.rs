@@ -339,8 +339,31 @@ impl Game {
         self.tidy_parties();
     }
 
+    /// Back to the lobby in the middle of a battle royale match: out of the round (as if
+    /// knocked out: the things stay in a box), waiting there for the next match.
+    pub fn to_lobby(&mut self, id: u8) {
+        if self.mode != Mode::Br || self.lobby_open() {
+            return;
+        }
+        let Some(p) = self.p(id) else { return };
+        if !p.team.is_playing() || p.lobby_wait {
+            return;
+        }
+        if p.alive {
+            self.kill(id, None, toon_shared::weapons::Cause::World, false);
+        }
+        if let Some(p) = self.pm(id) {
+            p.in_plane = false;
+            p.alive = false;
+            p.spectating = None;
+            p.ready = false;
+            p.lobby_wait = true;
+        }
+    }
+
     pub fn lobby_for(&self, id: u8) -> Option<LobbySnap> {
-        if !self.lobby_open() {
+        let waiting = self.mode == Mode::Br && self.p(id).is_some_and(|p| p.lobby_wait);
+        if !self.lobby_open() && !waiting {
             return None;
         }
         let mut parties: Vec<(u8, Vec<u8>)> = Vec::new();
@@ -387,6 +410,7 @@ impl Game {
                 .filter(|p| !p.is_bot() && p.ready)
                 .map(|p| p.id)
                 .collect(),
+            running: !self.lobby_open(),
         })
     }
 
