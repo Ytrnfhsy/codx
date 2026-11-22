@@ -173,6 +173,32 @@ fn pings_go_to_our_side_only() {
         has(&g, mate, medkit),
         "the medkit in the box was not pinged"
     );
+    // «I need that» from the squadmate (and the pinger cannot claim their own)
+    let pid = g.pings.iter().find(|p| p.what == medkit).unwrap().id;
+    g.handle(me, C2S::Mark(MarkAt::Claim(pid)));
+    for _ in 0..8 {
+        g.tick(TICK_DT);
+    }
+    g.handle(mate, C2S::Mark(MarkAt::Claim(pid)));
+    g.tick(TICK_DT);
+    let claimed = |g: &Game| {
+        g.snapshot_for(me)
+            .pings
+            .iter()
+            .find(|p| p.id == pid)
+            .and_then(|p| p.claimed)
+    };
+    assert_eq!(
+        claimed(&g),
+        Some(mate),
+        "the claim did not reach the pinger"
+    );
+    for _ in 0..8 {
+        g.tick(TICK_DT);
+    }
+    g.handle(foe, C2S::Mark(MarkAt::Claim(pid)));
+    g.tick(TICK_DT);
+    assert_eq!(claimed(&g), Some(mate), "an enemy claimed our ping");
     g.br.boxes[0].items.remove(1);
     g.tick(TICK_DT);
     assert!(

@@ -33,6 +33,8 @@ pub struct Ping {
     pub ent: Option<u16>,
     /// One thing inside the box `ent` (not the whole box): it goes once that is taken.
     pub in_box: bool,
+    /// Who said «I need that».
+    pub claimed: Option<u8>,
 }
 
 impl Game {
@@ -84,6 +86,32 @@ impl Game {
                 }
                 in_box = true;
                 (what, b.pos, Some(bid), THING_LIFE)
+            }
+            MarkAt::Claim(pid) => {
+                let Some(k) = self.pings.iter().position(|p| p.id == pid) else {
+                    return;
+                };
+                let (from, what) = (self.pings[k].from, self.pings[k].what);
+                // a thing somebody on our side pinged
+                let ours = self.p(from).is_some_and(|o| {
+                    self.allied(me, o) || !self.br.running && me.party != 0 && me.party == o.party
+                });
+                let thing = !matches!(what, PingWhat::Spot | PingWhat::Danger | PingWhat::Enemy);
+                if from == id || !ours || !thing {
+                    return;
+                }
+                let p = &mut self.pings[k];
+                p.claimed = if p.claimed == Some(id) {
+                    None
+                } else {
+                    Some(id)
+                };
+                // (it stays up a while longer for the one going to get it)
+                p.until = p.until.max(time + THING_LIFE * 0.5);
+                if let Some(pl) = self.pm(id) {
+                    pl.last_ping = time;
+                }
+                return;
             }
             MarkAt::Remove(pid) => {
                 self.pings.retain(|p| !(p.id == pid && p.from == id));
@@ -153,6 +181,7 @@ impl Game {
             until: time + life,
             ent,
             in_box,
+            claimed: None,
         });
     }
 
@@ -163,6 +192,11 @@ impl Game {
         pings.retain_mut(|p| {
             if time >= p.until || self.p(p.from).is_none_or(|o| !o.alive) {
                 return false;
+            }
+            if p.claimed
+                .is_some_and(|c| self.p(c).is_none_or(|o| !o.alive))
+            {
+                p.claimed = None;
             }
             match p.ent {
                 // a thing in a box: as long as the box still has one like it
@@ -213,6 +247,7 @@ impl Game {
                 what: p.what,
                 pos: p.pos.to_array(),
                 age: (self.time - p.at) as f32,
+                claimed: p.claimed,
             })
             .collect()
     }

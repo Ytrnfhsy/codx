@@ -1395,6 +1395,28 @@ impl GameClient {
         // somebody on our side pointed something out: a note and a line in the chat
         let mut heard = false;
         for p in &s.pings {
+            // somebody said «I need that» on a ping
+            let before = self
+                .pings
+                .iter()
+                .find(|o| o.id == p.id)
+                .and_then(|o| o.claimed);
+            if let Some(c) = p
+                .claimed
+                .filter(|c| Some(*c) != before && self.seen_pings.contains(&p.id))
+            {
+                heard = true;
+                let who = self.name_of(c).unwrap_or("?").to_string();
+                let col = self.ping_color(p);
+                self.push_chat(
+                    tr!(
+                        "{who}: мені потрібно — {}",
+                        "{who}: I need that — {}",
+                        ping_label(p.what)
+                    ),
+                    col,
+                );
+            }
             if self.seen_pings.insert(p.id) && p.age < 1.5 {
                 heard = true;
                 if p.from != self.my_id {
@@ -2019,9 +2041,15 @@ impl GameClient {
     /// ground, a place); pressed twice on a place, «enemy here».
     fn ping(&mut self) {
         let now = self.now;
-        // pinging one of our own pings again takes it down
+        // pinging one of our own pings again takes it down; a squadmate's ping of a thing:
+        // «I need that»
         let eye = self.eye();
         let dir = look_dir(self.yaw, self.pitch);
+        if let Some(id) = self.ping_aimed(false) {
+            self.net.send(C2S::Mark(MarkAt::Claim(id)));
+            self.last_ping = (f64::NEG_INFINITY, None);
+            return;
+        }
         let mine = self
             .pings
             .iter()
@@ -2055,6 +2083,31 @@ impl GameClient {
             self.last_ping = (now, None);
         }
         self.net.send(C2S::Mark(at));
+    }
+
+    /// A ping the crosshair rests on: ours (`mine`) or a squadmate's ping of a thing.
+    pub fn ping_aimed(&self, mine: bool) -> Option<u16> {
+        let eye = self.eye();
+        let dir = look_dir(self.yaw, self.pitch);
+        self.pings
+            .iter()
+            .filter(|p| {
+                if mine {
+                    p.from == self.my_id
+                } else {
+                    p.from != self.my_id
+                        && !matches!(p.what, PingWhat::Spot | PingWhat::Danger | PingWhat::Enemy)
+                }
+            })
+            .map(|p| {
+                let to = Vec3::from_array(p.pos) + vec3(0.0, ping_lift(p.what), 0.0) - eye;
+                let d = to.length().max(0.1);
+                let tol = (1.2 / d).atan().max(0.06);
+                (p.id, dir.dot(to / d).clamp(-1.0, 1.0).acos() / tol)
+            })
+            .filter(|(_, k)| *k < 1.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|p| p.0)
     }
 
     /// What a ping would point at now.

@@ -14,7 +14,7 @@ pub const MASTER_PORT: u16 = 27900;
 /// Where game servers announce themselves and the game finds them (a URL, or "host:port"
 /// for plain HTTP).
 pub const MASTER_DEFAULT: &str = "https://master.pagani.com.ua";
-pub const PROTOCOL_VERSION: u16 = 42;
+pub const PROTOCOL_VERSION: u16 = 43;
 /// Version of the game build: the release tag (`TW_VERSION`, set by CI for `v*` tags,
 /// without the `v`); for builds made by hand the nearest `v*` git tag (see build.rs), or
 /// the crate version without git.

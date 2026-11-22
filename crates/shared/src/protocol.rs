@@ -163,6 +163,8 @@ pub enum MarkAt {
     /// One thing inside a death box (box id, its place in the box's list: supplies first,
     /// then guns).
     BoxItem(u16, u8),
+    /// «I need that»: on a squadmate's ping of a thing (again: no longer).
+    Claim(u16),
 }
 
 /// The squad lobby: asking to be in somebody's squad, and the answers.
@@ -188,6 +190,8 @@ pub struct PingSnap {
     pub pos: V3,
     /// Seconds since it was put.
     pub age: f32,
+    /// Who said «I need that» (a thing pinged by somebody else).
+    pub claimed: Option<u8>,
 }
 
 /// What a ping shows.

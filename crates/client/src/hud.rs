@@ -790,6 +790,42 @@ impl GameClient {
             };
             let tw = ui.width(&label, 14, true);
             ui.shadowed(&label, top.x - tw / 2.0, top.y + 30.0, 14, c);
+            // «I need that»: who, in their colour, with a ring round the badge
+            if let Some(cl) = pg.claimed {
+                let cc = if self.br.is_some() {
+                    self.mate_color(cl)
+                } else {
+                    GOOD
+                };
+                draw_circle_lines(top.x, top.y, 15.0 * k + 6.0, 2.5, cc);
+                let who = if cl == self.my_id {
+                    t("Ти береш", "You take it").to_string()
+                } else {
+                    tr!("{} бере", "{} takes it", self.name_of(cl).unwrap_or("?"))
+                };
+                let ww = ui.width(&who, 13, true);
+                ui.shadowed(&who, top.x - ww / 2.0, top.y + 46.0, 13, cc);
+            }
+        }
+        // on a squadmate's ping of a thing: how to say «I need that»
+        if self.alive && self.overlay == Overlay::None {
+            if let Some(id) = self.ping_aimed(false) {
+                let claimed = self
+                    .pings
+                    .iter()
+                    .find(|p| p.id == id)
+                    .is_some_and(|p| p.claimed == Some(self.my_id));
+                let text = if claimed {
+                    tr!(
+                        "{} — уже не потрібно",
+                        "{} — no longer needed",
+                        key(Action::Ping)
+                    )
+                } else {
+                    tr!("{} — мені потрібно", "{} — I need that", key(Action::Ping))
+                };
+                ui.centered(&text, cx, cy + 46.0, 15, TEXT);
+            }
         }
     }
 
@@ -1087,7 +1123,7 @@ impl GameClient {
             );
         } else {
             let (label, c) = if me {
-                (t("СКАСУВАТИ", "CANCEL"), MUTED)
+                (t("НЕ ГОТОВИЙ", "NOT READY"), MUTED)
             } else {
                 (t("ГОТОВИЙ", "READY"), GOOD)
             };
