@@ -401,6 +401,41 @@ impl Game {
         }
     }
 
+    /// A squad from the main lobby: the ones with the same tag are put together (in the
+    /// battle royale's lobby squads; the team modes pick their team by it).
+    pub fn on_party_tag(&mut self, id: u8, tag: u64) {
+        if let Some(p) = self.pm(id) {
+            p.party_tag = tag;
+        }
+        if tag == 0 || self.cfg.br.squad < 2 {
+            return;
+        }
+        let size = self.cfg.br.squad.clamp(1, 4) as usize;
+        let mate = self
+            .players
+            .iter()
+            .flatten()
+            .find(|p| p.id != id && !p.is_bot() && p.party_tag == tag)
+            .map(|p| (p.id, p.party));
+        let Some((mate, their)) = mate else { return };
+        let party = if their != 0 {
+            their
+        } else {
+            let used: Vec<u8> = self.players.iter().flatten().map(|p| p.party).collect();
+            let new = (1..=255u8).find(|k| !used.contains(k)).unwrap_or(1);
+            if let Some(p) = self.pm(mate) {
+                p.party = new;
+            }
+            new
+        };
+        if self.party_size(party) < size {
+            if let Some(p) = self.pm(id) {
+                p.party = party;
+            }
+        }
+        self.tidy_parties();
+    }
+
     /// A player is gone: their squad and asks with them.
     pub fn party_forget(&mut self, id: u8) {
         self.party_asks.retain(|(a, b)| *a != id && *b != id);

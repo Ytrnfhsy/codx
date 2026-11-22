@@ -145,6 +145,9 @@ pub enum C2S {
     Party(PartyCmd),
     /// Battle royale: leave the round (or watching it) for the lobby, to wait for the next.
     ToLobby,
+    /// Came with a squad from the main lobby (the same number for all of it): together in
+    /// one squad, or on one team.
+    PartyTag(u64),
 }
 
 /// What a ping points at.

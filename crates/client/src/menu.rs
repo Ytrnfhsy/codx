@@ -10,6 +10,9 @@ use toon_shared::tr;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Page {
+    /// The main lobby: the squad, the mode, «Play» (and the server finds itself).
+    Lobby,
+    /// Joining a server by hand.
     Main,
     Host,
     Browser,
@@ -19,7 +22,13 @@ pub enum Page {
 }
 
 pub enum MenuAction {
-    Connect { address: String },
+    Connect {
+        address: String,
+    },
+    /// A server the main lobby found (no password).
+    Matched {
+        address: String,
+    },
     Host,
     StopServer,
     Quit,
@@ -37,6 +46,20 @@ pub struct MenuState {
     pub binds_editor: crate::binds::Editor,
     /// Already looked again for an update after a server said we are outdated.
     rechecked: bool,
+    /// The main lobby's squad on the public list.
+    pub party: Option<crate::party::PartyClient>,
+    /// Looking for a server since (for the mode).
+    pub searching: Option<(std::time::Instant, String)>,
+    /// Nothing found for the mode: offer a game with bots.
+    pub nothing_found: Option<String>,
+    /// The leader's last «go to that server» we followed (None: not heard from yet).
+    pub followed: Option<u64>,
+    /// Our character in the lobby: turned round, the camera brought closer, a drag.
+    pub turn: f32,
+    pub zoom: f32,
+    pub drag: Option<Vec2>,
+    /// Where «Back» leads from the host, browser and settings pages.
+    pub back: Page,
 }
 
 pub fn lan_ip() -> Option<String> {
@@ -49,13 +72,21 @@ impl MenuState {
     /// `updates`: look for game updates (release builds only).
     pub fn new(updates: bool) -> MenuState {
         MenuState {
-            page: Page::Main,
+            page: Page::Lobby,
             browser: Browser::new(),
             error: None,
             host_info: None,
             lan_ip: lan_ip(),
             updater: crate::updater::Updater::new(updates, toon_shared::consts::RELEASE_BUILD),
             rechecked: false,
+            party: None,
+            searching: None,
+            nothing_found: None,
+            followed: None,
+            turn: 0.0,
+            zoom: 0.0,
+            drag: None,
+            back: Page::Lobby,
             fav_input: String::new(),
             binds_editor: Default::default(),
         }
@@ -387,6 +418,11 @@ pub fn draw_menu(
     server_running: Option<u16>,
 ) -> Option<MenuAction> {
     let (w, h) = (screen_width(), screen_height());
+    if st.page == Page::Lobby {
+        let action = crate::lobby::main_lobby(ui, st, s);
+        menu_footer(ui, st, s);
+        return action;
+    }
     // title
     let title = "TOON WARFARE";
     let tw = ui.width(title, 64, true);
@@ -415,7 +451,13 @@ pub fn draw_menu(
     let y = (h - 575.0).clamp(134.0, 150.0);
     let mut action = None;
     match st.page {
+        Page::Lobby => {}
         Page::Main => {
+            if ui.button2(t("← Лоббі", "← Lobby"), 16.0, 16.0, 140.0, 40.0)
+                || is_key_pressed(KeyCode::Escape)
+            {
+                st.page = Page::Lobby;
+            }
             // a running server adds a status line and its own row of buttons
             ui.panel(
                 x,
@@ -485,6 +527,7 @@ pub fn draw_menu(
                 46.0,
             ) {
                 st.page = Page::Host;
+                st.back = Page::Main;
             }
             if ui.button2(
                 t("Знайти сервери", "Find servers"),
@@ -494,11 +537,13 @@ pub fn draw_menu(
                 46.0,
             ) {
                 st.page = Page::Browser;
+                st.back = Page::Main;
                 st.browser.refresh(&s.servers_to_ask(), &s.master);
             }
             if ui.button2(t("Налаштування", "Settings"), x + 24.0, y + 356.0, bw, 46.0)
             {
                 st.page = Page::Settings;
+                st.back = Page::Main;
             }
             if ui.button_colored(t("Вихід", "Quit"), x + 36.0 + bw, y + 356.0, bw, 46.0, BAD) {
                 action = Some(MenuAction::Quit);
@@ -789,7 +834,7 @@ pub fn draw_menu(
                 action = Some(MenuAction::Host);
             }
             if ui.button2(t("Назад", "Back"), x + 24.0, y + 490.0, 140.0, 50.0) {
-                st.page = Page::Main;
+                st.page = st.back;
             }
         }
         Page::Browser => {
@@ -917,7 +962,7 @@ pub fn draw_menu(
                 st.browser.refresh(&s.servers_to_ask(), &s.master);
             }
             if ui.button2(t("Назад", "Back"), x + 24.0, y + 474.0, 140.0, 44.0) {
-                st.page = Page::Main;
+                st.page = st.back;
             }
         }
         Page::Settings => {
@@ -939,7 +984,7 @@ pub fn draw_menu(
             }
             if ui.button(t("Зберегти", "Save"), x + pw - 176.0, by, 152.0, 44.0) {
                 s.save();
-                st.page = Page::Main;
+                st.page = st.back;
             }
         }
         Page::Video => {
@@ -962,6 +1007,13 @@ pub fn draw_menu(
             }
         }
     }
+    menu_footer(ui, st, s);
+    action
+}
+
+/// Under every page of the menu: an error, the updater, the version.
+fn menu_footer(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) {
+    let (w, h) = (screen_width(), screen_height());
     if let Some(e) = &st.error {
         let ew = ui.width(e, 18, true) + 40.0;
         draw_rectangle(
@@ -1006,5 +1058,4 @@ pub fn draw_menu(
         14,
         MUTED,
     );
-    action
 }

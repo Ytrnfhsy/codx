@@ -9,10 +9,12 @@ mod game;
 mod hud;
 mod killcam;
 mod level;
+mod lobby;
 mod menu;
 mod mesh;
 mod models;
 mod netclient;
+mod party;
 mod pilot;
 mod ragdoll;
 mod render;
@@ -473,6 +475,14 @@ async fn amain(args: Args) {
         }
 
         let mut next: Option<Screen> = None;
+        // the main lobby's squad hears whether we are playing just now
+        if let Some(p) = &menu.party {
+            p.set_me(
+                &settings.name,
+                settings.skin,
+                matches!(screen, Screen::Game(_)),
+            );
+        }
         match &mut screen {
             Screen::Menu if args.model_gallery => {
                 render::draw_model_gallery(&mats);
@@ -484,6 +494,15 @@ async fn amain(args: Args) {
                     grabbed = false;
                 }
                 draw_backdrop(&backdrop, &mats);
+                if menu.page == menu::Page::Lobby {
+                    render::draw_lobby_scene(
+                        &mats,
+                        &lobby::cast(&menu, &settings),
+                        get_time() as f32,
+                        menu.turn,
+                        menu.zoom,
+                    );
+                }
                 let mut ui = ui::Ui {
                     fonts: &fonts,
                     mouse: vec2(mx, my),
@@ -497,9 +516,27 @@ async fn amain(args: Args) {
                 };
                 let running = server.as_ref().filter(|s| s.is_running()).map(|s| s.port);
                 match menu::draw_menu(&mut ui, &mut menu, &mut settings, running) {
+                    Some(MenuAction::Matched { address }) => {
+                        menu.error = None;
+                        netclient::MATCHED.store(true, std::sync::atomic::Ordering::Relaxed);
+                        settings.save();
+                        match NetClient::connect(&address, &settings.name, "") {
+                            Ok(net) => {
+                                next = Some(Screen::Connecting {
+                                    net,
+                                    address,
+                                    since: Instant::now(),
+                                })
+                            }
+                            Err(e) => menu.error = Some(e),
+                        }
+                    }
                     Some(MenuAction::Connect { address }) => {
                         menu.error = None;
                         settings.save();
+                        // (by hand: on our own)
+                        netclient::PARTY_TAG.store(0, std::sync::atomic::Ordering::Relaxed);
+                        netclient::MATCHED.store(false, std::sync::atomic::Ordering::Relaxed);
                         match NetClient::connect(&address, &settings.name, &settings.password) {
                             Ok(net) => {
                                 next = Some(Screen::Connecting {
@@ -513,6 +550,8 @@ async fn amain(args: Args) {
                     }
                     Some(MenuAction::Host) => {
                         settings.save();
+                        netclient::PARTY_TAG.store(0, std::sync::atomic::Ordering::Relaxed);
+                        netclient::MATCHED.store(false, std::sync::atomic::Ordering::Relaxed);
                         if let Some(mut s) = server.take() {
                             s.shutdown();
                         }
@@ -880,10 +919,12 @@ async fn amain(args: Args) {
                 }
                 if let Some(hud::HudAction::Leave) = action {
                     g.disconnect();
+                    menu.page = menu::Page::Lobby;
                     next = Some(Screen::Menu);
                 }
                 if let Some(reason) = g.leave.take() {
                     menu.error = Some(reason);
+                    menu.page = menu::Page::Lobby;
                     next = Some(Screen::Menu);
                 }
             }

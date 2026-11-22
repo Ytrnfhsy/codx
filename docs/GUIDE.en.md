@@ -179,7 +179,19 @@ installs updates by itself (see [Updates](#updates)). Builds of a release tag ar
 
 ### Playing
 
-* **Join**: start `toon-warfare`, enter a name and the server's address (`IP:port`, the default
+* **The main lobby**: the game starts in the lobby. At the top the mode (battle royale, team
+  deathmatch, sabotage), in the middle your character on a podium (drag it round, the wheel
+  brings it closer), on the right your name, character, "Servers by hand", "Host a server",
+  settings. On the left the **squad**: everybody in the lobby just now (through the public
+  list), with "Invite"; the invited player sees "Invitations" and presses ✓. Up to 4 in a squad,
+  the leader (★) picks the mode, the others press "READY". The leader's **"PLAY"**: the game
+  finds a server with that mode, room for the whole squad, no password and the same version:
+  the closest, rather one with people on it (in the battle royale one still in its lobby, not in
+  the middle of a match); the squad follows the leader by itself and ends up together on the
+  server (one squad, in the team modes one team), ready for the match. No such server: "Play
+  with bots on a server of your own". "Disconnect" in the game leads back to the main lobby, the
+  squad stays.
+* **Join by hand**: "Servers by hand", then enter a name and the server's address (`IP:port`, the default
   port is `27015`, a domain name works too) → "Connect". "Find servers" lists your favourites,
   the public server list, the local network and recent servers.
 * **Host a server from the game**: "Create server" → set the mode, map, bots, RCON password →
@@ -661,6 +673,11 @@ An example unit: [`deploy/toon-server.service`](../deploy/toon-server.service).
 In the game, "Find servers" shows, besides favourites, recent servers and the local network, the
 **public list**: every server whose owner agreed to be on it.
 
+* **The main lobby** lives on the list too: players not on a server yet see each other, invite
+  each other into squads, and the leader passes on through it which server to go to (`POST
+  /party`, every 1.5 s from each; whoever is silent for 20 s drops out). A player is known there
+  by a secret key the game made up itself (`party_token` in the settings; game servers never see
+  it).
 * **For a server's owner.** On its first start in a console the server asks "Add to the list?
   [Y/n]" and keeps the answer in `server.json` (`"public": true/false`). Started as a service
   (no console) it asks nothing and stays off the list until you set `"public": true`, start it

@@ -259,3 +259,66 @@ fn back_to_the_lobby_in_the_middle_of_a_match() {
     let p = g.p(a).unwrap();
     assert!(!p.alive && !p.in_plane);
 }
+
+#[test]
+fn a_squad_from_the_main_lobby_stays_together() {
+    // the battle royale: one squad
+    let mut cfg = ServerConfig {
+        ready_check: true,
+        data_dir: std::env::temp_dir().join("tw-tag").to_string_lossy().into(),
+        ..Default::default()
+    };
+    cfg.br.squad = 2;
+    let mut g = Game::new(cfg.clone());
+    g.change_map(MapId::Island, Mode::Br);
+    let a = g
+        .connect(
+            "127.0.0.1:5731".parse().unwrap(),
+            "А",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    let x = join(&mut g, 5732, "Чужий", None);
+    let b = g
+        .connect(
+            "127.0.0.1:5733".parse().unwrap(),
+            "Б",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    for id in [a, b] {
+        g.handle(id, C2S::PartyTag(77));
+        g.handle(id, C2S::JoinTeam(None));
+    }
+    let party = |g: &Game, id: u8| g.p(id).unwrap().party;
+    assert!(party(&g, a) != 0 && party(&g, a) == party(&g, b));
+    assert_ne!(party(&g, x), party(&g, a));
+    // a team mode: the same team, whatever the balance says
+    let mut g = Game::new(cfg);
+    g.play_on(toon_shared::maps::test_yard(), Mode::Tdm);
+    let ids: Vec<u8> = (0..4)
+        .map(|k| {
+            let id = g
+                .connect(
+                    format!("127.0.0.1:{}", 5740 + k).parse().unwrap(),
+                    &format!("П{k}"),
+                    "",
+                    toon_shared::consts::PROTOCOL_VERSION,
+                )
+                .unwrap();
+            if k % 2 == 1 {
+                g.handle(id, C2S::PartyTag(5));
+            }
+            g.handle(id, C2S::JoinTeam(None));
+            id
+        })
+        .collect();
+    let team = |id: u8| g.p(id).unwrap().team;
+    assert_eq!(
+        team(ids[1]),
+        team(ids[3]),
+        "the squad was split between the teams"
+    );
+}

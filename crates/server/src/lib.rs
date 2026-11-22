@@ -14,6 +14,7 @@ pub mod http;
 pub mod master;
 pub mod nav;
 pub mod netserver;
+pub mod party;
 pub mod pickups;
 pub mod registry;
 pub mod sab;

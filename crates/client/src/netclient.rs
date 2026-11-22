@@ -32,6 +32,10 @@ pub fn resolve(addr: &str) -> Result<SocketAddr, String> {
 
 /// This installation's own number (from the settings), sent when connecting.
 pub static PLAYER_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The squad we come with from the main lobby (0 = on our own): told to the server.
+pub static PARTY_TAG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The main lobby found this server for us: we come ready to play.
+pub static MATCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl NetClient {
     pub fn connect(addr: &str, name: &str, password: &str) -> Result<NetClient, String> {
@@ -136,6 +140,9 @@ pub struct ServerInfo {
     pub max: u64,
     pub password: bool,
     pub ping_ms: u32,
+    /// The server's protocol version, and its match state ("Warmup", "Playing"...).
+    pub version: u64,
+    pub state: String,
     /// Where the answer came from.
     from: Option<SocketAddr>,
 }
@@ -266,6 +273,8 @@ impl Browser {
                 max: v["max_players"].as_u64().unwrap_or(0),
                 password: v["password"].as_bool().unwrap_or(false),
                 ping_ms,
+                version: v["version"].as_u64().unwrap_or(0),
+                state: v["state"].as_str().unwrap_or("").to_string(),
                 from: Some(from),
             });
         }

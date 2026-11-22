@@ -730,9 +730,19 @@ impl GameClient {
         for m in pending {
             g.handle_msg(m, &mut audio_dummy);
         }
-        // the battle royale: straight into the lobby (watching is a button there)
-        if g.mode == Mode::Br {
+        // with a squad from the main lobby: the server keeps it together
+        let tag = crate::netclient::PARTY_TAG.load(std::sync::atomic::Ordering::Relaxed);
+        if tag != 0 {
+            g.net.send(C2S::PartyTag(tag));
+        }
+        // the battle royale: straight into the lobby (watching is a button there); come
+        // with a squad, straight onto its team
+        if g.mode == Mode::Br || tag != 0 {
             g.join_team(None);
+        }
+        // «Play» in the main lobby: ready for the match already
+        if crate::netclient::MATCHED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            g.net.send(C2S::Ready(true));
         }
         g
     }

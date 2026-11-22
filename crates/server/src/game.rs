@@ -97,6 +97,8 @@ pub struct Player {
     pub party: u8,
     /// Battle royale: went back to the lobby during a match (waits for the next one).
     pub lobby_wait: bool,
+    /// The squad they came with from the main lobby (0 = none).
+    pub party_tag: u64,
     /// When they last pinged.
     pub last_ping: f64,
     /// Battle royale: knocked down (crawling, `hp` bleeds out) and who did it.
@@ -300,6 +302,7 @@ impl Player {
             ready: false,
             party: 0,
             lobby_wait: false,
+            party_tag: 0,
             last_ping: f64::NEG_INFINITY,
             squad: 0,
             downed: false,
@@ -1037,6 +1040,17 @@ impl Game {
         if self.mode.solo() {
             return Team::Allies;
         }
+        // with the squad they came with
+        let tag = self.p(id).map_or(0, |p| p.party_tag);
+        if let Some(t) = self
+            .players
+            .iter()
+            .flatten()
+            .find(|p| tag != 0 && p.id != id && p.party_tag == tag && p.team.is_playing())
+            .map(|p| p.team)
+        {
+            return t;
+        }
         let count = |t: Team| {
             self.players
                 .iter()
@@ -1092,9 +1106,14 @@ impl Game {
                 team_only: false,
             });
         }
-        // battle royale: whoever joins while the plane is still over the map boards it
+        // battle royale: whoever joins while the plane is still over the map boards it;
+        // later on, they wait in the lobby for the next match
         if team.is_playing() {
             self.br_board(id);
+            let running = self.mode == Mode::Br && self.br.running;
+            if let Some(p) = self.pm(id).filter(|p| running && !p.in_plane && !p.alive) {
+                p.lobby_wait = true;
+            }
         }
     }
 
@@ -1573,6 +1592,7 @@ impl Game {
             C2S::Mark(at) => self.on_mark(id, at),
             C2S::Party(cmd) => self.on_party(id, cmd),
             C2S::ToLobby => self.to_lobby(id),
+            C2S::PartyTag(tag) => self.on_party_tag(id, tag),
             C2S::Marker(m) => {
                 if let Some(p) = self.pm(id) {
                     p.marker = m.filter(|m| m[0].is_finite() && m[1].is_finite());

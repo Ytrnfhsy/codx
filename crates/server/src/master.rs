@@ -54,12 +54,14 @@ pub fn run_master(bind: &str, port: u16) -> Result<(), String> {
     };
     println!("[master] каталог серверів слухає TCP {used}");
     let list: List = Default::default();
+    let parties: Arc<Mutex<crate::party::Parties>> = Default::default();
     for req in server.incoming_requests() {
         let list = list.clone();
+        let parties = parties.clone();
         // (each on its own thread: checking a server can take a couple of seconds)
         let _ = std::thread::Builder::new()
             .name("master-req".into())
-            .spawn(move || handle(&list, req));
+            .spawn(move || handle(&list, &parties, req));
     }
     Ok(())
 }
@@ -105,9 +107,23 @@ fn client_ip(req: &Request) -> Option<IpAddr> {
     Some(direct)
 }
 
-fn handle(list: &List, mut req: Request) {
+fn handle(list: &List, parties: &Mutex<crate::party::Parties>, mut req: Request) {
     let url = req.url().split('?').next().unwrap_or("/").to_string();
     match (req.method().clone(), url.as_str()) {
+        // the main lobby's squads
+        (Method::Post, "/party") => {
+            let Some(ip) = client_ip(&req) else {
+                return json_resp(req, 400, json!({"error": "no address"}));
+            };
+            let mut body = String::new();
+            let _ = req.as_reader().take(4096).read_to_string(&mut body);
+            let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            let answer = parties
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .call(ip, &v);
+            json_resp(req, 200, answer)
+        }
         (Method::Post, "/announce") => {
             let Some(ip) = client_ip(&req) else {
                 return json_resp(req, 400, json!({"error": "no address"}));

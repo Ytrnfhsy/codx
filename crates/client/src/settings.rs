@@ -63,6 +63,11 @@ pub struct Settings {
     /// A number this installation made up once: servers keep our records under it.
     #[serde(default)]
     pub player_key: u64,
+    /// Our secret for the main lobby on the public list (others see only an id made of
+    /// it, and game servers never see it).
+    pub party_token: String,
+    /// The mode picked in the main lobby ("br", "tdm", "sab").
+    pub play_mode: String,
     pub name: String,
     pub address: String,
     pub password: String,
@@ -139,6 +144,8 @@ impl Settings {
         use toon_shared::lang::t;
         Settings {
             player_key: 0,
+            party_token: String::new(),
+            play_mode: "br".into(),
             name: format!(
                 "{}{}",
                 t("Боєць", "Soldier"),
@@ -225,6 +232,10 @@ impl Settings {
             let mut h = std::collections::hash_map::RandomState::new().build_hasher();
             h.write_u64(1);
             s.player_key = h.finish().max(1);
+            s.save();
+        }
+        if s.party_token.len() < 16 {
+            s.party_token = toon_server::party::new_token();
             s.save();
         }
         crate::netclient::PLAYER_KEY.store(s.player_key, std::sync::atomic::Ordering::Relaxed);

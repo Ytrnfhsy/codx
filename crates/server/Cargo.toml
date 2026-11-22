@@ -16,6 +16,7 @@ toon_shared = { path = "../shared" }
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 bincode.workspace = true
 tiny_http = "0.12"
 # admin session tokens from the OS's secure random source
