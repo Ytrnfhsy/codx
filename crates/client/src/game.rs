@@ -730,6 +730,10 @@ impl GameClient {
         for m in pending {
             g.handle_msg(m, &mut audio_dummy);
         }
+        // the battle royale: straight into the lobby (watching is a button there)
+        if g.mode == Mode::Br {
+            g.join_team(None);
+        }
         g
     }
 

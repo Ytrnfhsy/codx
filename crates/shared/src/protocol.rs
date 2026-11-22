@@ -160,6 +160,9 @@ pub enum MarkAt {
     Clear,
     /// Take down this ping of ours (pinged again).
     Remove(u16),
+    /// One thing inside a death box (box id, its place in the box's list: supplies first,
+    /// then guns).
+    BoxItem(u16, u8),
 }
 
 /// The squad lobby: asking to be in somebody's squad, and the answers.

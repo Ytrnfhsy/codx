@@ -31,6 +31,8 @@ pub struct Ping {
     pub until: f64,
     /// The thing it points at (it goes with it, and goes away once it is taken).
     pub ent: Option<u16>,
+    /// One thing inside the box `ent` (not the whole box): it goes once that is taken.
+    pub in_box: bool,
 }
 
 impl Game {
@@ -63,7 +65,26 @@ impl Game {
             return;
         }
         let eye = me.body.pos;
+        let mut in_box = false;
         let (what, pos, ent, life) = match at {
+            MarkAt::BoxItem(bid, k) => {
+                let Some(b) = self.br.boxes.iter().find(|b| b.id == bid) else {
+                    return;
+                };
+                let k = k as usize;
+                let what = match b.items.get(k) {
+                    Some(&(kind, n)) => PingWhat::Loot(kind, n),
+                    None => match b.guns.get(k - b.items.len()) {
+                        Some(g) => PingWhat::Weapon(g.id),
+                        None => return,
+                    },
+                };
+                if b.pos.distance(eye) > PING_REACH {
+                    return;
+                }
+                in_box = true;
+                (what, b.pos, Some(bid), THING_LIFE)
+            }
             MarkAt::Remove(pid) => {
                 self.pings.retain(|p| !(p.id == pid && p.from == id));
                 return;
@@ -110,7 +131,7 @@ impl Game {
         }
         // one ping per thing: pointing at it again only freshens it
         self.pings.retain(|p| {
-            let same = ent.is_some() && p.ent == ent
+            let same = ent.is_some() && p.ent == ent && (p.what == what || !in_box && !p.in_box)
                 || p.what == what && p.pos.distance(pos) < 2.0
                 // ("enemy here" takes the place of the plain ping it was pressed over)
                 || what == PingWhat::Danger && p.what == PingWhat::Spot && p.pos.distance(pos) < 3.0;
@@ -131,6 +152,7 @@ impl Game {
             at: time,
             until: time + life,
             ent,
+            in_box,
         });
     }
 
@@ -143,6 +165,18 @@ impl Game {
                 return false;
             }
             match p.ent {
+                // a thing in a box: as long as the box still has one like it
+                Some(e) if p.in_box => {
+                    let what = p.what;
+                    self.br.boxes.iter().any(|b| {
+                        b.id == e
+                            && match what {
+                                PingWhat::Loot(kind, _) => b.items.iter().any(|i| i.0 == kind),
+                                PingWhat::Weapon(w) => b.guns.iter().any(|g| g.id == w),
+                                _ => false,
+                            }
+                    })
+                }
                 Some(e) => match self.markable(e) {
                     Some((what, pos)) => {
                         p.what = what;

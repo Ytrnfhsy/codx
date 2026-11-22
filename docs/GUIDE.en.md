@@ -398,7 +398,8 @@ seconds; an **item** (a gun, a medkit, a vest, a helmet, a backpack, a sight, am
 a supply drop or a car, a little round tile with the thing's own picture in its colours (a red
 medkit, a blue vest...), seen through walls until somebody takes it; just a **place**, a diamond
 on a stem, "Over here". Twice quickly on the same place: "Enemy here!" (red). Ping your own ping
-again to take it down. A faint little cross always in the middle of the screen helps to aim. Pings are on the minimap and the big map too, a new one makes a sound and the chat
+again to take it down. In a death box a single thing can be pinged: the little diamond at the
+end of its row, or the middle button on it (the ping goes once the thing is taken). A faint little cross always in the middle of the screen helps to aim. Pings are on the minimap and the big map too, a new one makes a sound and the chat
 says who pinged what. A map marker (`M`) is a different thing: a yellow pin.
 
 ## Classes, perks, killstreaks

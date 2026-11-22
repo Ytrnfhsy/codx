@@ -150,6 +150,35 @@ fn pings_go_to_our_side_only() {
     );
     g.handle(me, C2S::Mark(MarkAt::Thing(60000)));
     assert!(g.pings.len() <= 2, "{:?}", g.pings);
+    // one thing in a death box: shown to the side, gone once it is taken
+    g.br.boxes.push(toon_server::boxes::DeathBox {
+        id: 9000,
+        owner: foe,
+        name: "Ворог".into(),
+        pos: vec3(7.0, 0.0, -11.0),
+        items: vec![
+            (toon_shared::protocol::LootKind::Bandages, 2),
+            (toon_shared::protocol::LootKind::Medkit, 1),
+        ],
+        guns: Vec::new(),
+        born: 0.0,
+    });
+    for _ in 0..8 {
+        g.tick(TICK_DT);
+    }
+    g.handle(me, C2S::Mark(MarkAt::BoxItem(9000, 1)));
+    g.tick(TICK_DT);
+    let medkit = PingWhat::Loot(toon_shared::protocol::LootKind::Medkit, 1);
+    assert!(
+        has(&g, mate, medkit),
+        "the medkit in the box was not pinged"
+    );
+    g.br.boxes[0].items.remove(1);
+    g.tick(TICK_DT);
+    assert!(
+        !has(&g, mate, medkit),
+        "the ping stayed after the medkit was taken"
+    );
     // a ping runs out
     for _ in 0..(30.0 / TICK_DT) as usize {
         g.tick(TICK_DT);

@@ -2823,13 +2823,29 @@ impl GameClient {
             ACCENT,
         );
         ui.text(
-            t("Клацни, щоб узяти", "Click to take"),
+            t(
+                "Клацни, щоб узяти · ◆ або СКМ — позначити для своїх",
+                "Click to take · ◆ or MMB — ping it for your side",
+            ),
             x + 24.0,
             y + 62.0,
             14,
             MUTED,
         );
         let mut act = None;
+        let mut ping: Option<u8> = None;
+        // a row: take it (most of it), or ping it (the diamond at its end, or the middle
+        // button anywhere on it)
+        let row_w = pw - 48.0 - 42.0;
+        let mine: Vec<toon_shared::protocol::PingWhat> = self
+            .pings
+            .iter()
+            .filter(|p| {
+                p.from == self.my_id && Vec3::from_array(p.pos).distance(self.body.pos) < 10.0
+            })
+            .map(|p| p.what)
+            .collect();
+        let pinged = |what: toon_shared::protocol::PingWhat| mine.contains(&what);
         let mut ry = y + 76.0;
         if hands {
             let empty = self.br.as_ref().map_or(0, |b| b.empty);
@@ -2872,17 +2888,30 @@ impl GameClient {
                 LootKind::Armor(_) | LootKind::Helmet(_) => format!("{} ({n}%)", kind.name()),
                 _ => kind.name(),
             };
-            if ui.button2(&label, x + 24.0, ry, pw - 48.0, 32.0) {
+            if ui.button2(&label, x + 24.0, ry, row_w, 32.0) {
                 act = Some(BoxCmd::Take(v.id, k as u8));
+            }
+            let on = pinged(toon_shared::protocol::PingWhat::Loot(*kind, *n));
+            if ping_button(ui, x + 30.0 + row_w, ry, on) || middle_on(ui, x + 24.0, ry, pw - 48.0) {
+                ping = Some(k as u8);
             }
             ry += 38.0;
         }
         for (k, (gun, mag)) in v.guns.iter().enumerate() {
             let label = format!("{} · {mag}", gun.def().name);
-            if ui.button2(&label, x + 24.0, ry, pw - 48.0, 32.0) {
+            if ui.button2(&label, x + 24.0, ry, row_w, 32.0) {
                 act = Some(BoxCmd::Take(v.id, (v.items.len() + k) as u8));
             }
+            let on = pinged(toon_shared::protocol::PingWhat::Weapon(*gun));
+            if ping_button(ui, x + 30.0 + row_w, ry, on) || middle_on(ui, x + 24.0, ry, pw - 48.0) {
+                ping = Some((v.items.len() + k) as u8);
+            }
             ry += 38.0;
+        }
+        if let Some(k) = ping {
+            self.net.send(toon_shared::protocol::C2S::Mark(
+                toon_shared::protocol::MarkAt::BoxItem(v.id, k),
+            ));
         }
         if !v.items.is_empty()
             && ui.button(
@@ -5441,4 +5470,26 @@ fn achievements() -> Vec<Achievement> {
             "A kill from 600 m",
         ),
     ]
+}
+
+/// The little ping button at the end of a row (lit when that thing is pinged already).
+fn ping_button(ui: &mut Ui, x: f32, y: f32, on: bool) -> bool {
+    let hit = ui.button2("", x, y, 36.0, 32.0);
+    let c = if on {
+        ACCENT
+    } else {
+        Color::new(0.75, 0.8, 0.9, 1.0)
+    };
+    ping_diamond(vec2(x + 18.0, y + 16.0), 9.0, c);
+    hit
+}
+
+/// The middle mouse button pressed over a row.
+fn middle_on(ui: &Ui, x: f32, y: f32, w: f32) -> bool {
+    let m = ui.mouse;
+    is_mouse_button_pressed(MouseButton::Middle)
+        && m.x >= x
+        && m.x <= x + w
+        && m.y >= y
+        && m.y <= y + 32.0
 }
