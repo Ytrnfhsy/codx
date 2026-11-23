@@ -29,9 +29,47 @@ pub fn short(pid: &str) -> &str {
     &pid[..pid.len().min(4)]
 }
 
-/// A name with its tag: «Oleh #a3f9».
-pub fn tagged(name: &str, pid: &str) -> String {
-    format!("{name} #{}", short(pid))
+/// The tag as it follows a name («#a3f9»).
+pub fn tag_of(pid: &str) -> String {
+    format!(" #{}", short(pid))
+}
+
+/// The colour tags are drawn in: quiet, so they do not catch the eye.
+const TAG: Color = Color::new(0.6, 0.63, 0.7, 0.55);
+
+/// A line of text and, when `show`, the player's tag after it, smaller and quieter.
+#[allow(clippy::too_many_arguments)]
+fn text_tagged(ui: &Ui, text: &str, pid: &str, show: bool, x: f32, y: f32, size: u16, c: Color) {
+    ui.text(text, x, y, size, c);
+    if show {
+        let w = ui.width(text, size, false);
+        ui.text(&tag_of(pid), x + w, y, size.saturating_sub(3), TAG);
+    }
+}
+
+/// The names (in lower case) more than one player in the lobby has: their tags show
+/// without pointing at them.
+fn clashing(v: &crate::party::PartyView) -> Vec<String> {
+    let all: Vec<String> = v
+        .members
+        .iter()
+        .map(|m| m.name.to_lowercase())
+        .chain(v.invites.iter().map(|i| i.1.to_lowercase()))
+        .chain(v.online.iter().map(|o| o.1.to_lowercase()))
+        .collect();
+    let mut out: Vec<String> = all
+        .iter()
+        .filter(|n| all.iter().filter(|m| m == n).count() > 1)
+        .cloned()
+        .collect();
+    out.dedup();
+    out
+}
+
+/// The mouse over this rectangle.
+fn hovered(ui: &Ui, x: f32, y: f32, w: f32, h: f32) -> bool {
+    let m = ui.mouse;
+    m.x >= x && m.x <= x + w && m.y >= y && m.y <= y + h
 }
 
 /// How long to wait for the servers' answers before picking.
@@ -144,24 +182,36 @@ pub fn main_lobby(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) -> Option<M
         st.zoom = (st.zoom + wheel.signum() * 0.12).clamp(0.0, 1.0);
     }
     // names over the podiums
-    let mut names: Vec<(String, bool, bool)> = vec![(s.name.clone(), true, false)];
+    // (a tag shows pointing at the name, or when somebody else has the same name)
+    let clash = clashing(&view);
+    let mut names: Vec<(String, bool, bool, String)> =
+        vec![(s.name.clone(), true, false, String::new())];
     for m in squad.iter().filter(|m| m.pid != view.me) {
-        names.push((tagged(&m.name, &m.pid), m.ready, m.pid == view.leader));
+        names.push((m.name.clone(), m.ready, m.pid == view.leader, m.pid.clone()));
     }
     if in_squad && view.leader == view.me {
         names[0].2 = true;
     }
-    for (k, (name, ready, lead)) in names.iter().enumerate().take(4) {
+    for (k, (name, ready, lead, pid)) in names.iter().enumerate().take(4) {
         let (x, z) = crate::render::LOBBY_SPOTS[k];
         let p = crate::render::lobby_screen_pos(vec3(x, 2.25, z), st.zoom) - vec2(0.0, 46.0);
         let p = vec2(p.x, p.y.max(150.0));
+        let show = !pid.is_empty()
+            && (hovered(ui, p.x - 90.0, p.y, 180.0, 46.0) || clash.contains(&name.to_lowercase()));
+        let tag = if show { tag_of(pid) } else { String::new() };
         let label = if *lead {
             format!("★ {name}")
         } else {
             name.clone()
         };
         let sz = if k == 0 { 20 } else { 16 };
-        let tw = ui.width(&label, sz, true);
+        let nw = ui.width(&label, sz, true);
+        let gw = if tag.is_empty() {
+            0.0
+        } else {
+            ui.width(&tag, sz - 4, false)
+        };
+        let tw = nw + gw;
         crate::ui::soft_rect(
             p.x - tw / 2.0 - 10.0,
             p.y,
@@ -176,6 +226,9 @@ pub fn main_lobby(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) -> Option<M
             sz,
             if k == 0 { ACCENT } else { TEXT },
         );
+        if !tag.is_empty() {
+            ui.text(&tag, p.x - tw / 2.0 + nw, p.y + 22.0, sz - 4, TAG);
+        }
         if k > 0 {
             let (rt, rc) = if *ready {
                 (t("ГОТОВИЙ", "READY"), GOOD)
@@ -426,6 +479,7 @@ fn squad_panel(
 ) {
     let inner = pw - 36.0;
     let mut y = top;
+    let clash = clashing(v);
     if !v.ok {
         let e = v.error.clone().unwrap_or_default();
         ui.text(
@@ -447,20 +501,16 @@ fn squad_panel(
     }
     for m in &v.members {
         crate::ui::soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
-        let mut name = tagged(&m.name, &m.pid);
+        let show = hovered(ui, x + 18.0, y, inner, 34.0) || clash.contains(&m.name.to_lowercase());
+        let mut name = m.name.clone();
         if m.pid == v.leader && v.members.len() > 1 {
             name = format!("★ {name}");
         }
         if m.pid == v.me {
             name = tr!("{name} (ти)", "{name} (you)");
         }
-        ui.text(
-            &name,
-            x + 28.0,
-            y + 23.0,
-            15,
-            if m.pid == v.me { GOOD } else { TEXT },
-        );
+        let c = if m.pid == v.me { GOOD } else { TEXT };
+        text_tagged(ui, &name, &m.pid, show, x + 28.0, y + 23.0, 15, c);
         if m.pid != v.leader {
             let (rt, rc) = if m.ready {
                 (t("готовий", "ready"), GOOD)
@@ -499,7 +549,9 @@ fn squad_panel(
         y += 24.0;
         for (pid, name) in v.invites.iter().take(3) {
             crate::ui::soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.1, 0.3, 0.1, 0.35));
-            ui.text(&tagged(name, pid), x + 28.0, y + 23.0, 14, TEXT);
+            let show =
+                hovered(ui, x + 18.0, y, inner, 34.0) || clash.contains(&name.to_lowercase());
+            text_tagged(ui, name, pid, show, x + 28.0, y + 23.0, 14, TEXT);
             if ui.button_colored(
                 "✓",
                 x + 18.0 + inner - 2.0 * small - 6.0,
@@ -533,13 +585,13 @@ fn squad_panel(
             break;
         }
         crate::ui::soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
-        let name = tagged(name, pid);
+        let show = hovered(ui, x + 18.0, y, inner, 34.0) || clash.contains(&name.to_lowercase());
         let label = if *size > 1 {
             tr!("{name} (загін {size})", "{name} (squad of {size})")
         } else {
-            name
+            name.clone()
         };
-        ui.text(&label, x + 28.0, y + 23.0, 14, TEXT);
+        text_tagged(ui, &label, pid, show, x + 28.0, y + 23.0, 14, TEXT);
         let bw = (inner * 0.4).min(130.0);
         if !full
             && ui.button_colored(
