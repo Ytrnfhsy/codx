@@ -183,7 +183,9 @@ installs updates by itself (see [Updates](#updates)). Builds of a release tag ar
   deathmatch, sabotage), in the middle your character on a podium (drag it round, the wheel
   brings it closer), on the right your name, character, "Servers by hand", "Host a server",
   settings. On the left the **squad**: everybody in the lobby just now (through the public
-  list), with "Invite"; the invited player sees "Invitations" and presses ✓. Up to 4 in a squad,
+  list), with "Invite"; each name has a tag (`Oleh #a3f9`), the same for an installation of the
+  game: yours is on the right, tell it to your friends so they do not mix you up with a
+  namesake; the invited player sees "Invitations" and presses ✓. Up to 4 in a squad,
   the leader (★) picks the mode, the others press "READY". The leader's **"PLAY"**: the game
   finds a server with that mode, room for the whole squad, no password and the same version:
   the closest, rather one with people on it (in the battle royale one still in its lobby, not in

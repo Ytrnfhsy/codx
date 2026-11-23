@@ -23,6 +23,17 @@ pub fn mode_name(m: &str) -> &'static str {
     }
 }
 
+/// A player's tag: the start of the id the public list knows them by (the same for an
+/// installation of the game), so two of the same name can be told apart.
+pub fn short(pid: &str) -> &str {
+    &pid[..pid.len().min(4)]
+}
+
+/// A name with its tag: «Oleh #a3f9».
+pub fn tagged(name: &str, pid: &str) -> String {
+    format!("{name} #{}", short(pid))
+}
+
 /// How long to wait for the servers' answers before picking.
 const SEARCH_MIN: f32 = 1.5;
 const SEARCH_MAX: f32 = 3.5;
@@ -135,7 +146,7 @@ pub fn main_lobby(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) -> Option<M
     // names over the podiums
     let mut names: Vec<(String, bool, bool)> = vec![(s.name.clone(), true, false)];
     for m in squad.iter().filter(|m| m.pid != view.me) {
-        names.push((m.name.clone(), m.ready, m.pid == view.leader));
+        names.push((tagged(&m.name, &m.pid), m.ready, m.pid == view.leader));
     }
     if in_squad && view.leader == view.me {
         names[0].2 = true;
@@ -253,6 +264,18 @@ pub fn main_lobby(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) -> Option<M
         action = Some(MenuAction::Quit);
     }
     if online {
+        // our tag: the same for this installation, to tell friends so they find us
+        ui.text(
+            &tr!(
+                "Твій тег: #{} — скажи його друзям",
+                "Your tag: #{} — tell it to your friends",
+                short(&view.me)
+            ),
+            rx + 18.0,
+            py + 346.0,
+            13,
+            ACCENT,
+        );
         ui.text(
             &tr!("У лоббі зараз: {}", "In the lobby now: {}", view.in_lobby),
             rx + 18.0,
@@ -424,7 +447,7 @@ fn squad_panel(
     }
     for m in &v.members {
         crate::ui::soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
-        let mut name = m.name.clone();
+        let mut name = tagged(&m.name, &m.pid);
         if m.pid == v.leader && v.members.len() > 1 {
             name = format!("★ {name}");
         }
@@ -476,7 +499,7 @@ fn squad_panel(
         y += 24.0;
         for (pid, name) in v.invites.iter().take(3) {
             crate::ui::soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.1, 0.3, 0.1, 0.35));
-            ui.text(name, x + 28.0, y + 23.0, 14, TEXT);
+            ui.text(&tagged(name, pid), x + 28.0, y + 23.0, 14, TEXT);
             if ui.button_colored(
                 "✓",
                 x + 18.0 + inner - 2.0 * small - 6.0,
@@ -510,10 +533,11 @@ fn squad_panel(
             break;
         }
         crate::ui::soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
+        let name = tagged(name, pid);
         let label = if *size > 1 {
             tr!("{name} (загін {size})", "{name} (squad of {size})")
         } else {
-            name.clone()
+            name
         };
         ui.text(&label, x + 28.0, y + 23.0, 14, TEXT);
         let bw = (inner * 0.4).min(130.0);
