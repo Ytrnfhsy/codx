@@ -181,6 +181,8 @@ pub struct GameClient {
     pub map: Map,
     pub world: World,
     pub level: crate::level::Level,
+    /// What blasts have broken, and the pieces still coming down.
+    pub ruins: crate::ruins::Ruins,
     pub sky_mesh: MeshBuilder,
     pub sun_mesh: MeshBuilder,
     pub mode: Mode,
@@ -520,6 +522,7 @@ impl GameClient {
         let map = maps::build(w.map);
         let world = World::from_map(&map);
         let level = crate::level::Level::build(&map);
+        let ruins = crate::ruins::Ruins::new(&map);
         let sky_mesh = build_sky(&map);
         let def = DEFAULT_CLASSES[0].1;
         let spec = vec3(map.center().x, 15.0, map.max.y);
@@ -530,6 +533,7 @@ impl GameClient {
             map,
             world,
             level,
+            ruins,
             sky_mesh,
             sun_mesh: build_sun(Weather::Clear),
             mode: w.mode,
@@ -830,6 +834,7 @@ impl GameClient {
         self.map = maps::build(map);
         self.world = World::from_map(&self.map);
         self.level = crate::level::Level::build(&self.map);
+        self.ruins = crate::ruins::Ruins::new(&self.map);
         self.sky_mesh = build_sky(&self.map);
         self.sun_mesh = build_sun(Weather::Clear);
         self.weather = Weather::Clear;
@@ -1099,6 +1104,24 @@ impl GameClient {
                 if let Some(a) = audio {
                     a.play_at(Sfx::Explosion, p, self.camera().0, 1.0, 260.0);
                 }
+            }
+            S2C::Blast(b) => {
+                let now = get_time();
+                let ear = self.camera().0;
+                self.ruins.blast(
+                    b,
+                    &mut self.map,
+                    &mut self.world,
+                    &mut self.level,
+                    &mut self.fx,
+                    *audio,
+                    ear,
+                    now,
+                );
+            }
+            S2C::Blasts(list) => {
+                self.ruins
+                    .replay(list, &mut self.map, &mut self.world, &mut self.level);
             }
             S2C::Melee { id } => {
                 self.recorder.event(self.server_now(), Event::Melee(id));
@@ -3220,6 +3243,8 @@ impl GameClient {
             }
         }
         self.fx.update(dt);
+        self.ruins
+            .update(&self.map, &mut self.level, &mut self.fx, get_time());
         // grenade smoke trails
         for e in &self.ents {
             if let EntSnap::Grenade { pos, .. } = e {

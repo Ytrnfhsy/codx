@@ -22,6 +22,7 @@ pub mod social;
 pub mod stats;
 pub mod update;
 pub mod vehicles;
+pub mod wreck;
 
 use config::ServerConfig;
 use std::net::UdpSocket;

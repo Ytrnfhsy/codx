@@ -321,15 +321,25 @@ pub fn render_world(
         let mut far = crate::mesh::MeshBuilder::new();
         let s = 600.0;
         let y = -0.02;
-        far.add_quad(
-            [
-                vec3(-s, y, -s),
-                vec3(-s, y, s),
-                vec3(s, y, s),
-                vec3(s, y, -s),
-            ],
-            [c[0], c[1], c[2], 255],
-        );
+        // a frame round the map's own ground (under the map itself it would cover the
+        // pits blasts dig)
+        let (a, b) = (g.map.min - Vec2::splat(1.5), g.map.max + Vec2::splat(1.5));
+        for (x0, z0, x1, z1) in [
+            (-s, -s, s, a.y),
+            (-s, b.y, s, s),
+            (-s, a.y, a.x, b.y),
+            (b.x, a.y, s, b.y),
+        ] {
+            far.add_quad(
+                [
+                    vec3(x0, y, z0),
+                    vec3(x0, y, z1),
+                    vec3(x1, y, z1),
+                    vec3(x1, y, z0),
+                ],
+                [c[0], c[1], c[2], 255],
+            );
+        }
         gl_use_material(&mats.world);
         far.draw();
         gl_use_default_material();
@@ -342,6 +352,9 @@ pub fn render_world(
     let grow = if settings.outlines { px * 0.9 } else { 0.0 };
     g.level.draw(mats, view.pos, &view.matrix, grow, fog_far);
     g.level.draw_grass(mats, &g.world, view.pos, settings.grass);
+    if g.ruins.busy() {
+        mats.draw_toon(&g.ruins.build(&g.map, get_time()));
+    }
 
     // dynamic objects
     let mut m = std::mem::take(&mut g.frame_mesh);

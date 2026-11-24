@@ -83,6 +83,10 @@ pub enum Sfx {
     BoltOf(WeaponId),
     /// Somebody on our side pointed something out: two quick rising notes.
     Ping,
+    /// Something coming down: a rumble and chunks of wall clattering into a heap.
+    Crumble,
+    /// A tree going over: a creak, a crack and the thump of it hitting the ground.
+    TreeFall,
 }
 
 impl Sfx {
@@ -148,6 +152,8 @@ impl Sfx {
                 | Sfx::Knife
                 | Sfx::Beep
                 | Sfx::Smoke
+                | Sfx::Crumble
+                | Sfx::TreeFall
         )
     }
 
@@ -1282,6 +1288,61 @@ impl Synth {
                 let b = self.step();
                 mono(&b)
             }
+            Sfx::Crumble => {
+                // a low rumble under it all
+                let mut b = self.burst(
+                    1.6,
+                    &[(Kind::Low, 260.0, 0.7), (Kind::Low, 380.0, 0.7)],
+                    0.02,
+                    0.6,
+                );
+                Synth::norm(&mut b, 0.9);
+                let thump = Synth::drop(0.35, 90.0, 40.0, 0.05, 0.12);
+                Synth::mix(&mut b, &thump, 0.0, 0.9);
+                // grit pouring and chunks hitting chunks
+                let grit = self.burst(1.3, &[(Kind::Band, 1400.0, 0.7)], 0.03, 0.45);
+                Synth::mix(&mut b, &grit, 0.05, 0.35);
+                for _ in 0..34 {
+                    let at = self.rng.f32().powf(1.6) * 1.3;
+                    let f = self.rng.range(500.0, 1900.0);
+                    let c = self.clack(&[f, f * 1.5, f * 2.3], 9.0, 0.07, 1.0);
+                    Synth::mix(&mut b, &c, at, self.rng.range(0.06, 0.2));
+                    if self.rng.chance(0.4) {
+                        let t = Synth::drop(0.12, 140.0, 70.0, 0.02, 0.04);
+                        Synth::mix(&mut b, &t, at, 0.3);
+                    }
+                }
+                Synth::norm(&mut b, 0.9);
+                let mut o = spatialize(&b, VALLEY, 1.0, &mut self.rng);
+                fade_out(&mut o, 0.3);
+                normalize(&mut o, 0.85);
+                o
+            }
+            Sfx::TreeFall => {
+                // wood giving way: a creak of rising crackles...
+                let mut b = Self::buf(0.1);
+                for k in 0..26 {
+                    let at = k as f32 * 0.028 + self.rng.range(0.0, 0.02);
+                    let f = self.rng.range(300.0, 900.0) + k as f32 * 25.0;
+                    let c = self.clack(&[f, f * 2.1], 22.0, 0.05, 1.0);
+                    Synth::mix(&mut b, &c, at, 0.1 + k as f32 * 0.008);
+                }
+                // ...a sharp crack, leaves rushing through the air...
+                let crack = self.burst(0.08, &[(Kind::Band, 2200.0, 1.2)], 0.0005, 0.02);
+                Synth::mix(&mut b, &crack, 0.75, 1.0);
+                let rush = self.burst(1.0, &[(Kind::Band, 3000.0, 0.6)], 0.4, 0.3);
+                Synth::mix(&mut b, &rush, 0.8, 0.35);
+                // ...and the trunk hitting the ground
+                let thud = Synth::drop(0.45, 85.0, 38.0, 0.05, 0.14);
+                Synth::mix(&mut b, &thud, 1.55, 1.3);
+                let dirt = self.burst(0.4, &[(Kind::Band, 900.0, 0.8)], 0.002, 0.1);
+                Synth::mix(&mut b, &dirt, 1.56, 0.5);
+                Synth::norm(&mut b, 0.9);
+                let mut o = spatialize(&b, VALLEY, 0.8, &mut self.rng);
+                fade_out(&mut o, 0.2);
+                normalize(&mut o, 0.8);
+                o
+            }
             Sfx::Land => {
                 let mut b = Synth::drop(0.2, 120.0, 55.0, 0.03, 0.06);
                 let grit = self.burst(0.15, &[(Kind::Band, 1800.0, 0.8)], 0.002, 0.03);
@@ -1509,6 +1570,8 @@ fn all() -> Vec<Sfx> {
         Sfx::Door,
         Sfx::DoorShut,
         Sfx::Ping,
+        Sfx::Crumble,
+        Sfx::TreeFall,
     ]);
     for w in WeaponId::all() {
         v.extend([Sfx::MagOutOf(w), Sfx::MagInOf(w), Sfx::BoltOf(w)]);

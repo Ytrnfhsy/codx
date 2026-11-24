@@ -74,6 +74,7 @@ pub const HELP: &str = "Команди:
   bots <n>                   — заповнювати ботами до n гравців (командні режими)
   brbots <n>                 — те саме для королівської битви
   givestreak <id|ім'я> <radar|airstrike|artillery|heli|fpv|bomber|nrk> — видати кілстрік
+  boom <x> <y> <z> [радіус] | boom <гравець> [відстань] [радіус] — вибух (перевірити, як ламаються речі)
   givebomb <id|ім'я> — дати бомбу гравцю (Саботаж)
   tune [movement|weapons|<зброя>]           — показати параметри руху/зброї
   tune <шлях> <значення>     — змінити: tune movement.sprint_speed 8; tune m249.rpm 850
@@ -523,6 +524,49 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             }
             g.send(id, S2C::StreakReady(streak));
             format!("Видано: {}", streak.name())
+        }
+        "boom" | "blast" => {
+            // a blast where the admin says (to try how things break)
+            let words: Vec<&str> = args.collect();
+            // or in front of a player: boom <id|ім'я> [відстань] [радіус]
+            let at_player = words.first().and_then(|w| {
+                w.parse::<f32>()
+                    .is_err()
+                    .then(|| find_player(g, w))
+                    .flatten()
+            });
+            let v: Vec<f32> = if let Some(id) = at_player {
+                let Some(p) = g.p(id) else {
+                    return "Гравця немає".into();
+                };
+                let n: Vec<f32> = words[1..].iter().filter_map(|x| x.parse().ok()).collect();
+                let d = n.first().copied().unwrap_or(6.0);
+                let f = toon_shared::look_dir(p.yaw, 0.0);
+                let at = p.body.pos + f * d;
+                let y = g
+                    .world
+                    .floor_below(at + glam::vec3(0.0, 3.0, 0.0), 30.0)
+                    .unwrap_or(at.y);
+                vec![at.x, y + 0.5, at.z, n.get(1).copied().unwrap_or(6.5)]
+            } else {
+                words.iter().filter_map(|x| x.parse().ok()).collect()
+            };
+            if v.len() < 3 {
+                return "Використання: boom <x> <y> <z> [радіус] або boom <id|ім'я> [відстань] [радіус]".into();
+            }
+            let r = v.get(3).copied().unwrap_or(6.5).clamp(1.0, 30.0);
+            g.explode(
+                glam::vec3(v[0], v[1], v[2]),
+                r,
+                0.0,
+                None,
+                toon_shared::weapons::Cause::Grenade,
+                r > 6.6,
+            );
+            format!(
+                "Вибух у ({:.0}, {:.0}, {:.0}), радіус {r:.1} м",
+                v[0], v[1], v[2]
+            )
         }
         "givebomb" => {
             let Some(who) = args.next() else {

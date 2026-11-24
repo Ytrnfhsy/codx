@@ -4,6 +4,7 @@
 pub mod ballistics;
 pub mod cars;
 pub mod consts;
+pub mod destruct;
 pub mod inventory;
 pub mod lang;
 pub mod map;

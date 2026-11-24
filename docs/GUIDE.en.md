@@ -296,6 +296,22 @@ Bots can walk stairs and ladders, climb onto roofs and balconies and jump down.
   through almost unchanged (×0.95 damage) and you can walk through it; planks hold players back
   and weaken a bullet (×0.7). Brick, concrete and metal stop bullets. You see splinters and
   shreds.
+* **Destruction.** Explosions (grenades, airstrikes, artillery, drone bombs, a car blowing up,
+  the Sabotage bomb, red-zone shelling) break what is around them:
+  * they cut ragged holes in walls, floors, fences and stalls (wood and cloth break more easily
+    than brick and metal);
+  * whatever is left with nothing holding it up (a roof with no walls, a floor with no
+    supports) falls and lies as a heap of rubble you can climb;
+  * trees and posts snap at the foot and fall away from the blast, crown and all;
+  * the ground gets a crater: a pit with a scorched bottom on the small maps, a dent in the
+    hills with the grass blown off on the Island.
+
+  Chunks fly, dust rises, you hear the collapse and the wood cracking. Things lying on a floor
+  that caved in drop onto whatever is under it. Anyone buried under rubble is pushed up on top
+  of it. A new round (or map) and everything is whole again. Someone who joins mid-round sees
+  the map already broken. The server sends only the blasts, and every client breaks its own
+  copy of the map with the same code, so it costs the network next to nothing.
+  Bots still walk their old routes: they do not use new gaps blown in walls yet.
 
 ### Killcam, ragdolls, sound
 
@@ -776,6 +792,7 @@ Three ways, all with the same commands:
 | `tune …` | fine tuning of movement and every gun (see the section above) |
 | `givestreak <id\|name> <radar\|airstrike\|artillery\|heli\|fpv\|bomber\|nrk>` | give a killstreak |
 | `givebomb <id\|name>` | give the bomb to a living player (Sabotage) |
+| `boom <x> <y> <z> [radius]` or `boom <player> [distance] [radius]` | an explosion at a point or in front of a player, to try how things break |
 | `set <key> <value>` | `scorelimit`, `timelimit`, `sabtime`, `rounds`, `bombtimer`, `planttime`, `defusetime`, `ff`, `autobalance`, `maxplayers`, `brmaxplayers`, `password`, `name`, `motd`, `botskill`, `spawnprotect`, `bleedtime`, `revivetime`, `revivehp` |
 | `save` | save the current settings into the config |
 
@@ -838,8 +855,13 @@ crates/
             list), http.rs + web/ (the admin panel), netserver.rs (the UDP loop)
   client/   the game toon-warfare: game.rs (movement prediction, guns, interpolation), render.rs,
             models.rs (cartoon models), mesh.rs (toon shading, outlines, fog), hud.rs,
-            menu.rs, audio.rs (synthesised sounds), effects.rs
+            menu.rs, audio.rs (synthesised sounds), effects.rs, ruins.rs (pieces falling)
 ```
+
+* **Destruction** — `shared/destruct.rs`: a blast cuts cubes out of the map's boxes, pieces
+  left unsupported fall into a heap, posts and trees topple, the terrain gets a crater. The
+  code is deterministic, so the server sends only the list of blasts and the clients and the
+  server end up with the same map (checked by `crates/server/tests/wreck.rs`).
 
 * **The server is authoritative** over health, hits, ammo, the score, the bomb and killstreaks.
 * Movement: **client-side prediction** with the same physics (`shared/physics.rs`) + server checks

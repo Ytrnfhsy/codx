@@ -1272,6 +1272,7 @@ impl Game {
             radius,
             big,
         });
+        self.break_things(pos, radius, big);
         let victims: Vec<(u8, f32)> = self
             .players
             .iter()

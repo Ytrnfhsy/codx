@@ -18,6 +18,7 @@ mod party;
 mod pilot;
 mod ragdoll;
 mod render;
+mod ruins;
 mod settings;
 mod soldier;
 mod textures;

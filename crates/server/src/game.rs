@@ -511,6 +511,8 @@ pub struct Game {
     pub tuning: toon_shared::tuning::Tuning,
     pub map: Map,
     pub world: World,
+    /// What blasts have broken (see `destruct`).
+    pub wreck: toon_shared::destruct::Wreck,
     pub nav: Nav,
     /// The map played before (with its world and routes), in case the rotation returns.
     spare_map: Option<(Map, World, Nav)>,
@@ -630,6 +632,7 @@ impl Game {
         let mut g = Game {
             tuning,
             cfg,
+            wreck: toon_shared::destruct::Wreck::new(&map),
             map,
             world,
             nav,
@@ -945,6 +948,9 @@ impl Game {
         if !self.world.doors.is_empty() {
             let doors = self.doors_msg();
             self.send(id, doors);
+        }
+        if !self.wreck.log.is_empty() {
+            self.send(id, S2C::Blasts(self.wreck.log.clone()));
         }
         self.say(Dest::All, || S2C::Chat {
             from: String::new(),
@@ -2053,6 +2059,7 @@ impl Game {
 
     fn start_round(&mut self, pre: f64) {
         self.round += 1;
+        self.mend_map();
         self.state = MatchState::PreRound;
         self.state_end = self.time + pre;
         self.overtime = false;
@@ -2216,6 +2223,7 @@ impl Game {
     /// changes when the real maps do).
     pub fn play_on(&mut self, map: toon_shared::map::Map, mode: Mode) {
         self.world = World::from_map(&map);
+        self.wreck = toon_shared::destruct::Wreck::new(&map);
         self.nav = Nav::build(&map, &self.world);
         self.map = map;
         self.spare_map = None;
@@ -2226,6 +2234,8 @@ impl Game {
     pub fn change_map(&mut self, map: MapId, mode: Mode) {
         // building a big map (and its routes) takes seconds: the same map again keeps what
         // is built, and the one before is kept aside for a rotation that goes back to it
+        // (the map put aside is kept whole)
+        self.wreck.reset(&mut self.map, &mut self.world);
         if self.map.id != map || self.map.boxes.is_empty() {
             let built = match self.spare_map.take() {
                 Some(b) if b.0.id == map => b,
@@ -2240,6 +2250,7 @@ impl Game {
             let old_world = std::mem::replace(&mut self.world, built.1);
             let old_nav = std::mem::replace(&mut self.nav, built.2);
             self.spare_map = Some((old_map, old_world, old_nav));
+            self.wreck = toon_shared::destruct::Wreck::new(&self.map);
         }
         self.mode = mode;
         self.state = MatchState::Warmup;

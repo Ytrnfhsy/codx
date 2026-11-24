@@ -830,6 +830,11 @@ pub enum S2C {
         radius: f32,
         big: bool,
     },
+    /// Something broke (see `destruct`): every client applies the same blast to its map.
+    Blast(crate::destruct::Blast),
+    /// Every blast since the round began, in order (to someone who just joined); empty:
+    /// the map is whole again.
+    Blasts(Vec<crate::destruct::Blast>),
     Melee {
         id: u8,
     },

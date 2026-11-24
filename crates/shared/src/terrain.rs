@@ -95,8 +95,10 @@ impl Heightmap {
     /// Ground height at (x, z): on the cell's two triangles (split along the diagonal from
     /// (i, j) to (i+1, j+1)), the same surface the renderer draws.
     pub fn height(&self, x: f32, z: f32) -> f32 {
-        let fx = (x - self.origin.x) / self.cell;
-        let fz = (z - self.origin.y) / self.cell;
+        // (clamped: far outside the grid it is as at its edge, and absurd coordinates
+        // must not overflow)
+        let fx = ((x - self.origin.x) / self.cell).clamp(-1.0, self.w as f32 + 1.0);
+        let fz = ((z - self.origin.y) / self.cell).clamp(-1.0, self.h as f32 + 1.0);
         let i = fx.floor();
         let j = fz.floor();
         let (u, v) = (fx - i, fz - j);

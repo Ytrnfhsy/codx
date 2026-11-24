@@ -28,14 +28,14 @@ pub fn boxes_mesh<'a>(
     outlines: bool,
 ) -> ToonMesh {
     let mut m = ToonMesh::new();
-    let mut rng = Rng::new(seed);
+    let _ = seed;
     let mut decal_layer = 0;
     for b in boxes {
         if !b.visible {
             continue;
         }
         // tiny colour variation per box for a hand-painted feel
-        let j = rng.range(-10.0, 10.0);
+        let j = b.shade as f32;
         let c = [
             (b.color[0] as f32 + j).clamp(0.0, 255.0) as u8,
             (b.color[1] as f32 + j).clamp(0.0, 255.0) as u8,
@@ -215,6 +215,8 @@ fn grass_chunk(
 struct Tile {
     min: Vec3,
     max: Vec3,
+    /// The ground's own height range here (terrain maps).
+    ground_y: (f32, f32),
     /// Boxes up close (with outlines and small details).
     near: ToonMesh,
     /// The same boxes far away: big shapes only, no outlines.
@@ -250,7 +252,17 @@ pub struct Level {
     /// Bounds of everything drawn.
     pub min: Vec3,
     pub max: Vec3,
+    /// The tiles' grid: corner (x, z), size (m), columns and rows.
+    origin: Vec2,
+    size: f32,
+    tw: usize,
+    th: usize,
+    /// The ground's colour at each grid point (terrain maps).
+    colors: Vec<[u8; 3]>,
 }
+
+/// Small maps are cut into tiles this big (m): something breaking rebuilds only its own.
+const ARENA_TILE: f32 = 24.0;
 
 /// Colour of the ground at grid point (i, j).
 fn ground_color(m: &Heightmap, i: usize, j: usize) -> [u8; 3] {
@@ -433,111 +445,237 @@ fn map_image(map: &Map, m: &Heightmap, colors: &[[u8; 3]]) -> MapImage {
 
 impl Level {
     pub fn build(map: &Map) -> Level {
+        Self::build_hiding(map, &|_| false)
+    }
+
+    fn tile_of(&self, p: Vec3) -> usize {
+        let ti = (((p.x - self.origin.x) / self.size).floor() as i64).clamp(0, self.tw as i64 - 1)
+            as usize;
+        let tj = (((p.z - self.origin.y) / self.size).floor() as i64).clamp(0, self.th as i64 - 1)
+            as usize;
+        tj * self.tw + ti
+    }
+
+    /// The meshes of one tile's boxes (minus the hidden ones) and their bounds.
+    fn tile_meshes(
+        &self,
+        map: &Map,
+        t: usize,
+        hidden: &dyn Fn(usize) -> bool,
+    ) -> (ToonMesh, ToonMesh, Vec3, Vec3) {
+        let group: Vec<&MapBox> = map
+            .boxes
+            .iter()
+            .enumerate()
+            .filter(|(i, b)| b.visible && !hidden(*i) && self.tile_of((b.min + b.max) * 0.5) == t)
+            .map(|(_, b)| b)
+            .collect();
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for b in &group {
+            lo = lo.min(b.min);
+            hi = hi.max(b.max);
+        }
+        let seed = t as u64 + 3;
+        let near = boxes_mesh(group.iter().copied(), seed, true);
+        let far = if self.terrain {
+            boxes_mesh(
+                group.iter().copied().filter(|b| {
+                    let s = b.max - b.min;
+                    s.x * s.y * s.z > 1.0 && s.min_element() > 0.2
+                }),
+                seed,
+                false,
+            )
+        } else {
+            ToonMesh::new()
+        };
+        (near, far, lo, hi)
+    }
+
+    /// Builds the level leaving out some boxes (pieces still falling).
+    pub fn build_hiding(map: &Map, hidden: &dyn Fn(usize) -> bool) -> Level {
+        let mut level = Level {
+            hm: map.terrain.clone(),
+            grass: Default::default(),
+            tiles: Vec::new(),
+            terrain: map.terrain.is_some(),
+            image: None,
+            min: Vec3::splat(f32::MAX),
+            max: Vec3::splat(f32::MIN),
+            origin: map.min - Vec2::splat(4.0),
+            size: ARENA_TILE,
+            tw: 1,
+            th: 1,
+            colors: Vec::new(),
+        };
         let Some(m) = map.terrain.as_deref() else {
-            let mesh = crate::level::boxes_mesh(map.boxes.iter(), map.id as u64 + 3, true);
-            let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-            for b in map.boxes.iter().filter(|b| b.visible) {
-                lo = lo.min(b.min);
-                hi = hi.max(b.max);
-            }
-            lo.y = lo.y.max(-1.0);
-            return Level {
-                hm: None,
-                grass: Default::default(),
-                tiles: vec![Tile {
+            let span = map.max - map.min + Vec2::splat(8.0);
+            level.tw = (span.x / ARENA_TILE).ceil().max(1.0) as usize;
+            level.th = (span.y / ARENA_TILE).ceil().max(1.0) as usize;
+            for t in 0..level.tw * level.th {
+                let (near, far, lo, hi) = level.tile_meshes(map, t, hidden);
+                level.tiles.push(Tile {
                     min: lo,
                     max: hi,
-                    near: mesh,
-                    far: ToonMesh::new(),
+                    ground_y: (0.0, 0.0),
+                    near,
+                    far,
                     ground: Vec::new(),
                     water: None,
-                }],
-                terrain: false,
-                image: None,
-                min: lo,
-                max: hi,
-            };
+                });
+                if lo.x <= hi.x {
+                    level.min = level.min.min(lo);
+                    level.max = level.max.max(hi);
+                }
+            }
+            level.min.y = level.min.y.max(-1.0);
+            return level;
         };
-        let colors: Vec<[u8; 3]> = (0..m.h)
+        level.colors = (0..m.h)
             .flat_map(|j| (0..m.w).map(move |i| (i, j)))
             .map(|(i, j)| ground_color(m, i, j))
             .collect();
-        let tw = (m.w - 1).div_ceil(TILE_CELLS);
-        let th = (m.h - 1).div_ceil(TILE_CELLS);
-        let size = TILE_CELLS as f32 * m.cell;
-        // boxes go to the tile under their centre
-        let mut groups: Vec<Vec<&MapBox>> = vec![Vec::new(); tw * th];
-        for b in map.boxes.iter().filter(|b| b.visible) {
-            let c = (b.min + b.max) * 0.5;
-            let ti = (((c.x - m.origin.x) / size).floor() as i64).clamp(0, tw as i64 - 1) as usize;
-            let tj = (((c.z - m.origin.y) / size).floor() as i64).clamp(0, th as i64 - 1) as usize;
-            groups[tj * tw + ti].push(b);
-        }
-        let mut tiles = Vec::with_capacity(tw * th);
-        let (mut all_lo, mut all_hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-        for tj in 0..th {
-            for ti in 0..tw {
-                let (i0, j0) = (ti * TILE_CELLS, tj * TILE_CELLS);
-                let ground: Vec<MeshBuilder> = LODS
-                    .iter()
-                    .map(|&s| ground_mesh(m, &colors, i0, j0, s))
-                    .collect();
-                let mut lo = vec3(
-                    m.origin.x + i0 as f32 * m.cell,
-                    f32::MAX,
-                    m.origin.y + j0 as f32 * m.cell,
-                );
-                let mut hi = vec3(lo.x + size, f32::MIN, lo.z + size);
-                let mut wet = false;
-                for j in j0..=(j0 + TILE_CELLS).min(m.h - 1) {
-                    for i in i0..=(i0 + TILE_CELLS).min(m.w - 1) {
-                        let y = m.at(i as i64, j as i64);
-                        lo.y = lo.y.min(y);
-                        hi.y = hi.y.max(y);
-                        wet |= y < m.water;
-                    }
-                }
-                let group = &groups[tj * tw + ti];
-                for b in group {
-                    lo = lo.min(b.min);
-                    hi = hi.max(b.max);
-                }
-                let seed = (tj * tw + ti) as u64 + 3;
-                let near = boxes_mesh(group.iter().copied(), seed, true);
-                let far = boxes_mesh(
-                    group.iter().copied().filter(|b| {
-                        let s = b.max - b.min;
-                        s.x * s.y * s.z > 1.0 && s.min_element() > 0.2
-                    }),
-                    seed,
-                    false,
-                );
-                let water = wet.then(|| {
-                    hi.y = hi.y.max(m.water);
-                    water_mesh(m, i0, j0)
-                });
-                all_lo = all_lo.min(lo);
-                all_hi = all_hi.max(hi);
-                tiles.push(Tile {
-                    min: lo,
-                    max: hi,
+        level.tw = (m.w - 1).div_ceil(TILE_CELLS);
+        level.th = (m.h - 1).div_ceil(TILE_CELLS);
+        level.size = TILE_CELLS as f32 * m.cell;
+        level.origin = m.origin;
+        for tj in 0..level.th {
+            for ti in 0..level.tw {
+                let t = tj * level.tw + ti;
+                let (near, far, blo, bhi) = level.tile_meshes(map, t, hidden);
+                let mut tile = Tile {
+                    min: Vec3::ZERO,
+                    max: Vec3::ZERO,
+                    ground_y: (0.0, 0.0),
                     near,
                     far,
-                    ground,
-                    water,
-                });
+                    ground: Vec::new(),
+                    water: None,
+                };
+                level.ground_of(m, ti, tj, &mut tile);
+                tile.min = tile.min.min(blo);
+                tile.max = tile.max.max(bhi);
+                level.min = level.min.min(tile.min);
+                level.max = level.max.max(tile.max);
+                level.tiles.push(tile);
             }
         }
-        let image = Some(map_image(map, m, &colors));
-        Level {
-            hm: map.terrain.clone(),
-            grass: Default::default(),
-            tiles,
-            terrain: true,
-            image,
-            min: all_lo,
-            max: all_hi,
+        level.image = Some(map_image(map, m, &level.colors));
+        level
+    }
+
+    /// (Re)builds a tile's ground meshes and water, and its bounds from the ground.
+    fn ground_of(&self, m: &Heightmap, ti: usize, tj: usize, tile: &mut Tile) {
+        let (i0, j0) = (ti * TILE_CELLS, tj * TILE_CELLS);
+        tile.ground = LODS
+            .iter()
+            .map(|&s| ground_mesh(m, &self.colors, i0, j0, s))
+            .collect();
+        let mut lo = vec3(
+            m.origin.x + i0 as f32 * m.cell,
+            f32::MAX,
+            m.origin.y + j0 as f32 * m.cell,
+        );
+        let mut hi = vec3(lo.x + self.size, f32::MIN, lo.z + self.size);
+        let mut wet = false;
+        for j in j0..=(j0 + TILE_CELLS).min(m.h - 1) {
+            for i in i0..=(i0 + TILE_CELLS).min(m.w - 1) {
+                let y = m.at(i as i64, j as i64);
+                lo.y = lo.y.min(y);
+                hi.y = hi.y.max(y);
+                wet |= y < m.water;
+            }
         }
+        tile.water = wet.then(|| {
+            hi.y = hi.y.max(m.water);
+            water_mesh(m, i0, j0)
+        });
+        tile.ground_y = (lo.y, hi.y);
+        tile.min = lo;
+        tile.max = hi;
+    }
+
+    /// Something broke: the tiles holding these points (the middles of the boxes that
+    /// went or came) are built again, without the hidden boxes (pieces still on their way
+    /// down).
+    pub fn rebuild(&mut self, map: &Map, points: &[Vec3], hidden: &dyn Fn(usize) -> bool) {
+        let mut tiles: Vec<usize> = points.iter().map(|p| self.tile_of(*p)).collect();
+        tiles.sort_unstable();
+        tiles.dedup();
+        for t in tiles {
+            let (ti, tj) = (t % self.tw, t / self.tw);
+            let (near, far, lo, hi) = self.tile_meshes(map, t, hidden);
+            let tile = &mut self.tiles[t];
+            tile.near = near;
+            tile.far = far;
+            if self.terrain {
+                let base_lo = vec3(
+                    self.origin.x + ti as f32 * self.size,
+                    tile.ground_y.0,
+                    self.origin.y + tj as f32 * self.size,
+                );
+                let base_hi = vec3(
+                    base_lo.x + self.size,
+                    tile.ground_y.1,
+                    base_lo.z + self.size,
+                );
+                tile.min = base_lo.min(lo);
+                tile.max = base_hi.max(hi);
+            } else {
+                tile.min = lo;
+                tile.max = hi;
+            }
+            if lo.x <= hi.x {
+                self.min = self.min.min(lo);
+                self.max = self.max.max(hi);
+            }
+        }
+    }
+
+    /// The ground was dented around `c` (radius `r`): its colours and the tiles there are
+    /// built again.
+    pub fn rebuild_ground(&mut self, map: &Map, c: Vec3, r: f32) {
+        let Some(m) = map.terrain.as_deref() else {
+            return;
+        };
+        self.hm = map.terrain.clone();
+        let n = (r / m.cell).ceil() as i64 + 2;
+        if let Some((ci, cj)) = m.index_of(c.x, c.z) {
+            for j in (cj as i64 - n).max(0)..=(cj as i64 + n).min(m.h as i64 - 1) {
+                for i in (ci as i64 - n).max(0)..=(ci as i64 + n).min(m.w as i64 - 1) {
+                    let (i, j) = (i as usize, j as usize);
+                    self.colors[j * m.w + i] = ground_color(m, i, j);
+                }
+            }
+        }
+        let (a, b) = (
+            self.tile_of(c - Vec3::splat(r + m.cell)),
+            self.tile_of(c + Vec3::splat(r + m.cell)),
+        );
+        for tj in a / self.tw..=b / self.tw {
+            for ti in a % self.tw..=b % self.tw {
+                let t = tj * self.tw + ti;
+                let mut tile = std::mem::replace(
+                    &mut self.tiles[t],
+                    Tile {
+                        min: Vec3::ZERO,
+                        max: Vec3::ZERO,
+                        ground_y: (0.0, 0.0),
+                        near: ToonMesh::new(),
+                        far: ToonMesh::new(),
+                        ground: Vec::new(),
+                        water: None,
+                    },
+                );
+                let (bmin, bmax) = (tile.min, tile.max);
+                self.ground_of(m, ti, tj, &mut tile);
+                tile.min = tile.min.min(bmin);
+                tile.max = tile.max.max(bmax);
+                self.tiles[t] = tile;
+            }
+        }
+        // the grass there grows again on the new ground
+        self.grass.borrow_mut().1.clear();
     }
 
     #[allow(clippy::map_entry)]
@@ -648,14 +786,22 @@ impl Level {
         let outlines = outline_grow > 0.0;
         let fade = (OUTLINE_FADE.0, OUTLINE_FADE.1, outline_grow);
         if !self.terrain {
-            let t = &self.tiles[0];
+            let shown: Vec<&Tile> = self
+                .tiles
+                .iter()
+                .filter(|t| t.min.x <= t.max.x && Self::visible(matrix, t.min, t.max))
+                .collect();
             gl_use_material(&mats.world);
-            t.near.fill.draw_tex(Some(&mats.atlas));
-            t.near.decals.draw_tex(Some(&mats.atlas));
+            for t in &shown {
+                t.near.fill.draw_tex(Some(&mats.atlas));
+                t.near.decals.draw_tex(Some(&mats.atlas));
+            }
             if outlines {
                 mats.set_outline_fade(Some(fade));
                 gl_use_material(&mats.outline);
-                t.near.outline.draw();
+                for t in &shown {
+                    t.near.outline.draw();
+                }
                 mats.set_outline_fade(None);
             }
             gl_use_default_material();
@@ -717,7 +863,12 @@ impl Level {
     pub fn casters(&self, min: Vec3, max: Vec3) -> Vec<&MeshBuilder> {
         let mut out = Vec::new();
         for t in &self.tiles {
-            if t.max.x < min.x || t.min.x > max.x || t.max.z < min.z || t.min.z > max.z {
+            if t.min.x > t.max.x
+                || t.max.x < min.x
+                || t.min.x > max.x
+                || t.max.z < min.z
+                || t.min.z > max.z
+            {
                 continue;
             }
             // the ground only receives shadows: on long gentle slopes it would shadow

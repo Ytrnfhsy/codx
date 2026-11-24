@@ -12,6 +12,8 @@ enum Kind {
     Smoke,
     Star,
     Flash,
+    /// A tumbling chunk of something broken.
+    Chunk,
 }
 
 struct Particle {
@@ -339,6 +341,66 @@ impl Effects {
         }
     }
 
+    /// Bits of a wall, a floor or a tree flying out of a blast at `from`.
+    pub fn debris(&mut self, min: Vec3, max: Vec3, color: [u8; 3], from: Vec3) {
+        let s = max - min;
+        let n = ((s.x * s.y * s.z * 9.0) as usize).clamp(2, 12);
+        for _ in 0..n {
+            let p = vec3(
+                self.rng.range(min.x, max.x),
+                self.rng.range(min.y, max.y),
+                self.rng.range(min.z, max.z),
+            );
+            let out = (p - from).normalize_or(Vec3::Y);
+            let vel = out * self.rng.range(3.0, 10.0)
+                + vec3(0.0, self.rng.range(2.0, 6.0), 0.0)
+                + self.rv(1.5);
+            let max = self.rng.range(1.1, 1.9);
+            let size = self
+                .rng
+                .range(0.1, 0.3)
+                .min(s.min_element().max(0.05) * 1.5);
+            self.push(Particle {
+                pos: p,
+                vel,
+                life: 0.0,
+                max,
+                size,
+                grow: 0.0,
+                color,
+                kind: Kind::Chunk,
+                grav: 14.0,
+            });
+        }
+        let grey = [
+            ((color[0] as u16 + 150) / 2) as u8,
+            ((color[1] as u16 + 145) / 2) as u8,
+            ((color[2] as u16 + 140) / 2) as u8,
+        ];
+        self.dust((min + max) * 0.5, s.max_element().min(3.0), grey);
+    }
+
+    /// A cloud of dust where something came down.
+    pub fn dust(&mut self, pos: Vec3, size: f32, color: [u8; 3]) {
+        let n = (size * 3.0).clamp(2.0, 8.0) as usize;
+        for _ in 0..n {
+            let v = self.rv(1.2 * size.max(0.6)) + vec3(0.0, self.rng.range(0.3, 1.2), 0.0);
+            let max = self.rng.range(1.4, 2.6);
+            let at = pos + self.rv(size * 0.4);
+            self.push(Particle {
+                pos: at,
+                vel: v,
+                life: 0.0,
+                max,
+                size: 0.3 + size * 0.15,
+                grow: 0.5 + size * 0.25,
+                color,
+                kind: Kind::Puff,
+                grav: -0.15,
+            });
+        }
+    }
+
     /// Flames licking up from a patch of fire.
     pub fn flames(&mut self, c: Vec3, r: f32) {
         for _ in 0..3 {
@@ -466,6 +528,14 @@ impl Effects {
                             [col[0], col[1], col[2], alpha],
                         );
                     }
+                }
+                Kind::Chunk => {
+                    // tumbling, a little smaller at the end
+                    let spin = p.pos.x * 3.1 + p.max * 7.0;
+                    let mm = Mat4::from_translation(p.pos)
+                        * Mat4::from_euler(EulerRot::XYZ, p.life * 7.0 + spin, p.life * 5.0, spin);
+                    let s = p.size * (1.0 - (k - 0.75).max(0.0) * 3.0);
+                    m.add_box_ex(&mm, Vec3::splat(s * 0.5), col, 255, false);
                 }
                 _ => {
                     let mm = Mat4::from_translation(p.pos);

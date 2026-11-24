@@ -54,11 +54,29 @@ pub struct World {
     pub door_open: Vec<bool>,
     /// Open doors that swung out of the room instead of into it.
     pub door_out: Vec<bool>,
+    /// Each map box's place in `boxes` (`u32::MAX`: not solid, not here).
+    map_ix: Vec<u32>,
 }
+
+/// Where a box that is gone is kept (never reached by anything).
+const GONE: Vec3 = Vec3::splat(-1.0e6);
 
 impl World {
     pub fn from_map(map: &Map) -> World {
         let solid: Vec<_> = map.boxes.iter().filter(|b| b.solid).collect();
+        let mut n = 0u32;
+        let map_ix = map
+            .boxes
+            .iter()
+            .map(|b| {
+                if b.solid {
+                    n += 1;
+                    n - 1
+                } else {
+                    u32::MAX
+                }
+            })
+            .collect();
         let mut boxes: Vec<Aabb> = solid
             .iter()
             .map(|b| Aabb {
@@ -96,6 +114,7 @@ impl World {
             door_base,
             door_open: vec![true; map.doors.len()],
             door_out: vec![false; map.doors.len()],
+            map_ix,
         };
         for (i, b) in w.boxes.iter().enumerate() {
             // (a door's cells cover it both shut and open)
@@ -119,6 +138,49 @@ impl World {
         }
         w.cells = cells;
         w
+    }
+
+    /// Map box `i` is gone (blown up, fallen down).
+    pub fn remove_map_box(&mut self, i: usize) {
+        let Some(&w) = self.map_ix.get(i) else { return };
+        if w == u32::MAX {
+            return;
+        }
+        let b = self.boxes[w as usize];
+        let (x0, z0) = self.cell_of(b.min.x, b.min.z);
+        let (x1, z1) = self.cell_of(b.max.x, b.max.z);
+        for cz in z0..=z1 {
+            for cx in x0..=x1 {
+                self.cells[(cz * self.dims.0 + cx) as usize].retain(|&k| k != w);
+            }
+        }
+        self.boxes[w as usize] = Aabb {
+            min: GONE,
+            max: GONE,
+        };
+        self.map_ix[i] = u32::MAX;
+    }
+
+    /// A box added to the end of the map's list (a piece of something broken).
+    pub fn add_map_box(&mut self, b: &crate::map::MapBox) {
+        if !b.solid {
+            self.map_ix.push(u32::MAX);
+            return;
+        }
+        let w = self.boxes.len() as u32;
+        self.map_ix.push(w);
+        self.boxes.push(Aabb {
+            min: b.min,
+            max: b.max,
+        });
+        self.mats.push(b.mat);
+        let (x0, z0) = self.cell_of(b.min.x, b.min.z);
+        let (x1, z1) = self.cell_of(b.max.x, b.max.z);
+        for cz in z0..=z1 {
+            for cx in x0..=x1 {
+                self.cells[(cz * self.dims.0 + cx) as usize].push(w);
+            }
+        }
     }
 
     /// Opens (into the room) or shuts door `k`.
@@ -601,6 +663,7 @@ impl Body {
 
     /// Advances the body by `dt` seconds.
     pub fn step(&mut self, world: &World, inp: &MoveInput, t: &MoveTuning, dt: f32) {
+        self.climb_out(world);
         // stance changes (need head room to stand up)
         if inp.want_stance != self.stance {
             let ok = inp.want_stance.height() <= self.stance.height()
@@ -950,6 +1013,29 @@ impl Body {
             self.climbing = false;
         }
         true
+    }
+
+    /// Something fell where we stand (a heap of rubble): up onto it.
+    fn climb_out(&mut self, world: &World) {
+        for _ in 0..4 {
+            let feet = Aabb {
+                min: self.pos + vec3(-PLAYER_RADIUS, 0.0, -PLAYER_RADIUS),
+                max: self.pos + vec3(PLAYER_RADIUS, 0.6, PLAYER_RADIUS),
+            };
+            let Some(top) = world.max_top(&feet) else {
+                return;
+            };
+            if top <= self.pos.y || top - self.pos.y > 3.0 {
+                return;
+            }
+            let up = vec3(self.pos.x, top + 0.001, self.pos.z);
+            self.snap += up.y - self.pos.y;
+            self.pos = up;
+            self.vel.y = self.vel.y.max(0.0);
+            if fits(world, self.pos, self.stance) {
+                return;
+            }
+        }
     }
 
     fn move_axis(&mut self, world: &World, axis: usize, d: f32, grounded: bool) {

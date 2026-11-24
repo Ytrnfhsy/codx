@@ -102,6 +102,9 @@ pub struct MapBox {
     /// Rendered.
     pub visible: bool,
     pub mat: Mat,
+    /// A touch lighter or darker than its colour (−10..10), for a hand-painted look; the
+    /// pieces a box breaks into keep it.
+    pub shade: i8,
 }
 
 /// A ladder up a wall. Players climb it with W/S (or walk off a roof onto it); the
@@ -391,6 +394,7 @@ impl MapBuilder {
             solid,
             visible,
             mat: Mat::Solid,
+            shade: shade_of(self.boxes.len()),
         });
     }
 
@@ -902,6 +906,15 @@ impl MapBuilder {
         self.clip(min.x - t, wall_h, min.y, min.x, 40.0, max.y);
         self.clip(max.x, wall_h, min.y, max.x + t, 40.0, max.y);
     }
+}
+
+/// A box's shade from its place in the list (the same on every machine).
+fn shade_of(n: usize) -> i8 {
+    let h = (n as u32)
+        .wrapping_mul(0x9E37_79B9)
+        .rotate_left(13)
+        .wrapping_mul(0x85EB_CA6B);
+    ((h >> 16) % 21) as i8 - 10
 }
 
 /// Splits a wall into solid pieces around openings: (from, to, y_from, y_to) relative to wall base.
