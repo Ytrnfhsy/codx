@@ -577,12 +577,23 @@ void main() {
             wp.y -= texcoord.y * far;
         }
     }
+    // (only where it is drawn: its light, shadow and fog stay those of where it lies)
+    vec3 nearer = vec3(0.0);
+    if (normal.w < -0.5) {
+        // paint on the ground (roads, pavements, pads): drawn a little nearer along the
+        // line of sight, more the farther it is, so it stays on the screen where it is
+        // but always wins over the ground under it, and over paint lower down (-w is its
+        // layer), however few depth bits the GPU has
+        vec3 to = wp.xyz - CamPos;
+        float d = length(to);
+        nearer = -to / max(d, 0.001) * min(d * d * 0.0004 * (-normal.w), d * 0.3);
+    }
     if (Push > 0.0) {
         float d = length(wp.xyz - CamPos);
         wp.xyz += normal.xyz * (Grow * d);
         wp.xyz += normalize(wp.xyz - CamPos) * (Push + Grow * 2.0 * d);
     }
-    gl_Position = Projection * wp;
+    gl_Position = Projection * (wp + vec4(nearer, 0.0));
     color = color0 / 255.0;
     fogd = length(wp.xyz - CamPos);
     vWorld = wp.xyz;

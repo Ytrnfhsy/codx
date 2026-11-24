@@ -61,6 +61,16 @@ pub fn boxes_mesh<'a>(
                 Vec3::Y,
                 crate::textures::material_for(b.color),
             );
+            // its layer for the shader (paint higher up lies over paint lower down)
+            let layer = 1.0
+                + (b.max.y.max(0.0) * 100.0).round().min(12.0) * 0.5
+                + decal_layer as f32 * 0.12;
+            if let Some(ch) = m.decals.chunks.last_mut() {
+                let n = ch.verts.len();
+                for v in &mut ch.verts[n - 4..] {
+                    v.normal.w = -layer;
+                }
+            }
             continue;
         }
         m.fill
