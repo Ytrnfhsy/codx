@@ -1413,6 +1413,18 @@ mod tests {
                 l.top
             );
         }
+        // and no ladder stands in a doorway's way
+        for l in &map.ladders {
+            for d in &map.doors {
+                let c = d.centre();
+                let dist = vec2(c.x - l.base.x, c.z - l.base.z).length();
+                assert!(
+                    dist > 2.0 || (c.y - l.base.y).abs() > 2.5,
+                    "the ladder at {} stands {dist:.1} m from a door",
+                    l.base
+                );
+            }
+        }
         let mut buried = Vec::new();
         for p in &map.loot {
             let q = *p + vec3(0.0, 0.15, 0.0);

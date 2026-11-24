@@ -741,16 +741,17 @@ pub fn works(b: &mut MapBuilder, l: Lot) {
         pal::METAL,
     );
     b.wood(
-        cx + 2.65,
+        cx - 2.8,
         16.3,
         cz - 2.65,
-        cx + 2.8,
+        cx - 2.65,
         17.2,
         cz + 2.65,
         pal::METAL,
     );
-    // (a caged ladder standing at the ring's edge: it comes out onto the ring)
-    b.ladder(vec3(cx - 2.8, 0.0, cz), vec3(-1.0, 0.0, 0.0), 16.3);
+    // (a caged ladder standing at the ring's edge on the far side from the shed, clear of
+    // its door: it comes out onto the ring)
+    b.ladder(vec3(cx + 2.8, 0.0, cz), vec3(1.0, 0.0, 0.0), 16.3);
     b.push_detail(
         cx - 1.0,
         24.0,
