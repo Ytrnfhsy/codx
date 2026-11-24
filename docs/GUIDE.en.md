@@ -523,7 +523,9 @@ Each gun behaves its own way, and the server's admin can tune all of it:
   sideways force, 0 turns it off), `movement.wall_jump_up` (the lift, a share of the jump),
   `movement.wall_jumps` (how many times). The server works out the jump height from these
   settings: in the air nobody rises higher than a jump (and by a wall, a jump with its kicks)
-  plus 1.1 m, and landing from the height of your own jump does not hurt.
+  plus 1.1 m, and landing from the height of your own jump does not hurt. A kick breaks a fall:
+  jump off a roof, kick off a wall on the way down, and the damage counts from where you kicked,
+  not from the roof.
 
 The server sends these settings to every player, so the client's movement prediction matches
 the server's, with no jerks or being "pulled back". Changes take effect **at once, without a

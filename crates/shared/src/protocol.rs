@@ -29,6 +29,9 @@ pub mod flags {
     /// Visible on the receiving player's radar (UAV or recently fired).
     pub const ON_RADAR: u8 = 64;
     pub const FIRING: u8 = 128;
+    /// (In the input) just kicked off a wall: a fall counts from here on. Sent for a
+    /// moment after the kick (inputs can get lost).
+    pub const KICKED: u8 = 16;
 }
 
 /// Client → server.

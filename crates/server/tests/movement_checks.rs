@@ -158,6 +158,74 @@ fn long_falls_hurt_and_short_ones_do_not() {
     }
 }
 
+/// A kick off a wall stops a fall: the damage counts from the kick, not from the top;
+/// a kick with no wall by does not count, nor do more kicks than the tuning allows.
+#[test]
+fn a_kick_off_a_wall_breaks_the_fall() {
+    // (by a wall?, kicks on the way down) → hurt?
+    for (wall, kicks, hurt) in [(true, 1, false), (false, 1, true), (true, 4, true)] {
+        let (mut g, me) = game();
+        let ground = g.p(me).unwrap().body.pos;
+        let mut seq = 0;
+        send(&mut g, me, &mut seq, ground, true);
+        g.pm(me).unwrap().body.pos = ground + vec3(0.0, 14.0, 0.0);
+        g.pm(me).unwrap().support_y = ground.y + 14.0;
+        let life = g.p(me).unwrap().life;
+        let mut go = |g: &mut Game, y: f32, kicked: bool| {
+            seq += 1;
+            g.state = toon_shared::protocol::MatchState::Playing;
+            if wall {
+                g.pm(me).unwrap().by_wall = true;
+            }
+            let mut f = if y == 0.0 { flags::ON_GROUND } else { 0 };
+            if kicked {
+                f |= flags::KICKED;
+            }
+            g.handle(
+                me,
+                C2S::Input(InputState {
+                    seq,
+                    life,
+                    pos: (ground + vec3(0.0, y, 0.0)).to_array(),
+                    vel: [0.0; 3],
+                    yaw: 0.0,
+                    pitch: 0.0,
+                    stance: Stance::Stand.to_u8(),
+                    flags: f,
+                    slot: 0,
+                }),
+            );
+            g.tick(TICK_DT);
+        };
+        // down, kicking off the wall on the way (only the first two count with the
+        // usual tuning)
+        let at: &[f32] = if kicks == 1 {
+            &[3.0]
+        } else {
+            &[12.0, 9.0, 6.0, 3.0]
+        };
+        let mut y = 14.0f32;
+        while y > 0.0 {
+            y = (y - 0.5).max(0.0);
+            let kick = at.contains(&y);
+            go(&mut g, y, kick);
+            if kick {
+                go(&mut g, y, true);
+            }
+        }
+        let p = g.p(me).unwrap();
+        if hurt {
+            assert!(
+                p.hp < MAX_HEALTH - 20.0 || !p.alive,
+                "wall {wall}, {kicks} kicks: hp {}",
+                p.hp
+            );
+        } else {
+            assert_eq!(p.hp, MAX_HEALTH, "wall {wall}, {kicks} kicks: hurt");
+        }
+    }
+}
+
 /// Admin commands carry a proof made from the password, never the password: the right
 /// proof runs the command once, and neither a repeat of it nor a changed command passes.
 #[test]

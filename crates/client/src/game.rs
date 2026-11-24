@@ -351,6 +351,8 @@ pub struct GameClient {
     rcon_seq: u32,
     pub spec_pos: Vec3,
     last_input_send: f64,
+    /// Until when the inputs say we kicked off a wall (`flags::KICKED`).
+    kicked_until: f64,
     pub shake: f32,
     pub frame_mesh: ToonMesh,
     pub fx_mesh: MeshBuilder,
@@ -654,6 +656,7 @@ impl GameClient {
             rcon_seq: 0,
             spec_pos: spec,
             last_input_send: 0.0,
+            kicked_until: 0.0,
             shake: 0.0,
             frame_mesh: ToonMesh::new(),
             fx_mesh: MeshBuilder::new(),
@@ -2767,10 +2770,14 @@ impl GameClient {
                 }
             } else {
                 let mut t = dt.min(0.1);
+                let kicks = self.body.wall_jumps;
                 while t > 0.0 {
                     let h = t.min(1.0 / 60.0);
                     self.body.step(&self.world, &inp, &self.tuning.movement, h);
                     t -= h;
+                }
+                if self.body.wall_jumps > kicks {
+                    self.kicked_until = get_time() + 0.15;
                 }
             }
             if !self.body.on_ground {
@@ -3186,6 +3193,9 @@ impl GameClient {
             }
             if self.using {
                 f |= flags::USE;
+            }
+            if now < self.kicked_until {
+                f |= flags::KICKED;
             }
             self.net.send_unreliable(C2S::Input(InputState {
                 seq: self.seq,

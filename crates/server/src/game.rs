@@ -143,6 +143,10 @@ pub struct Player {
     pub by_wall: bool,
     pub fall_top: Option<f32>,
     fall_life: u16,
+    /// Kicks off walls since the feet left the ground, and whether the last input said
+    /// it had just kicked (a kick stops a fall: it counts from there).
+    kicks: u8,
+    kicking: bool,
     /// Backpack actions left (refills; nobody needs to drop things a hundred times a second).
     pub item_budget: f32,
     /// Battle royale: still riding the plane.
@@ -333,6 +337,8 @@ impl Player {
             support_y: f32::MAX,
             by_wall: false,
             fall_top: None,
+            kicks: 0,
+            kicking: false,
             fall_life: 0,
             item_budget: 12.0,
             in_plane: false,
@@ -1803,12 +1809,25 @@ impl Game {
                 }
                 p.support_y = new.y;
                 p.by_wall = false;
+                p.kicks = 0;
             } else {
                 let from = if p.support_y == f32::MAX {
                     new.y
                 } else {
                     p.support_y
                 };
+                // a kick off a wall (by a wall, no more often than the kicks the tuning
+                // allows) stops the fall: it counts from where it was
+                let kicked = inp.flags & flags::KICKED != 0;
+                if kicked
+                    && !p.kicking
+                    && (p.kicks as f32) < self.tuning.movement.wall_jumps.floor()
+                    && (p.by_wall || toon_shared::physics::wall_beside(world, new).is_some())
+                {
+                    p.kicks += 1;
+                    p.fall_top = Some(new.y);
+                }
+                p.kicking = kicked;
                 p.fall_top = Some(p.fall_top.unwrap_or(from).max(new.y));
             }
             if p.body.on_ground {
