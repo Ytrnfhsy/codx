@@ -13,6 +13,7 @@ pub mod maps_cargo;
 pub mod maps_depot;
 pub mod maps_dress;
 pub mod maps_island;
+pub mod maps_island_sites;
 pub mod maps_market;
 pub mod maps_site;
 pub mod maps_wreck;

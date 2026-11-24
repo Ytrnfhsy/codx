@@ -1,11 +1,14 @@
 //! «Острів» — a 2 × 2 km map for the battle royale: mountains in the north-east, a
 //! river running from their foot to the southern sea, a lake in the north-west, forests,
-//! fields, four towns, a dozen villages and two army camps joined by dirt roads and bridges.
+//! fields, four towns (each with landmarks of its own), a dozen villages, two army camps and
+//! landmarks between them (ranches, a mine, a castle…: see `maps_island_sites`), joined by
+//! dirt roads and bridges. And a few things nobody expects to find.
 //!
 //! Everything is generated from fixed seeds, so the client and the server build exactly
 //! the same island.
 
 use crate::map::{door, pal, shade, window, Map, MapBuilder, MapId, Side, Spawn};
+use crate::maps_island_sites::{self as sites, Lot};
 use crate::props::Tower;
 use crate::rng::Rng;
 use crate::terrain::{fbm, paint, Heightmap};
@@ -44,6 +47,34 @@ enum Kind {
     Village,
     /// A fenced army camp: barracks, containers, watchtowers.
     Base,
+    /// A landmark of its own (a ranch, a mine, a castle…): see `Theme`.
+    Site,
+}
+
+/// What a place is like.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Theme {
+    Plain,
+    /// A church, a park, a statue where the streets cross.
+    OldTown,
+    /// A market square (and the harbour down by the sea).
+    Port,
+    /// A market square and the town hall with its clock.
+    Market,
+    /// The works: a shed, a chimney, silos.
+    Works,
+    Ranch,
+    Sawmill,
+    Mine,
+    Radio,
+    Campsite,
+    Castle,
+    Lighthouse,
+    Fuel,
+    Park,
+    Harbour,
+    Ufo,
+    Stones,
 }
 
 /// A settlement: a levelled pad with houses on it.
@@ -54,6 +85,7 @@ struct Place {
     w: f32,
     d: f32,
     kind: Kind,
+    theme: Theme,
 }
 
 impl Place {
@@ -72,23 +104,52 @@ impl Place {
 }
 
 const fn place(x: f32, z: f32, w: f32, d: f32, kind: Kind) -> Place {
-    Place { x, z, w, d, kind }
+    Place {
+        x,
+        z,
+        w,
+        d,
+        kind,
+        theme: Theme::Plain,
+    }
 }
 
-const PLACES: [Place; 17] = [
-    // the town in the middle, by the river
-    place(-120.0, -80.0, 128.0, 104.0, Kind::Town),
+const fn town(x: f32, z: f32, w: f32, d: f32, theme: Theme) -> Place {
+    Place {
+        x,
+        z,
+        w,
+        d,
+        kind: Kind::Town,
+        theme,
+    }
+}
+
+const fn site(x: f32, z: f32, w: f32, d: f32, theme: Theme) -> Place {
+    Place {
+        x,
+        z,
+        w,
+        d,
+        kind: Kind::Site,
+        theme,
+    }
+}
+
+const PLACES: [Place; 31] = [
+    // the old town in the middle, by the river
+    town(-120.0, -80.0, 128.0, 104.0, Theme::OldTown),
     // the port town on the south-east coast
-    place(300.0, 660.0, 108.0, 88.0, Kind::Town),
+    town(300.0, 660.0, 108.0, 88.0, Theme::Port),
     place(-660.0, 80.0, 60.0, 52.0, Kind::Village),
     place(-300.0, -660.0, 60.0, 52.0, Kind::Village),
     place(220.0, -760.0, 52.0, 52.0, Kind::Village),
     place(680.0, 80.0, 60.0, 52.0, Kind::Village),
     place(-660.0, 660.0, 60.0, 52.0, Kind::Village),
     place(0.0, 500.0, 52.0, 52.0, Kind::Village),
-    // the western market town and the south-western one
-    place(-640.0, -180.0, 116.0, 96.0, Kind::Town),
-    place(-430.0, 420.0, 108.0, 92.0, Kind::Town),
+    // the western market town and the south-western works town
+    town(-640.0, -180.0, 116.0, 96.0, Theme::Market),
+    town(-430.0, 420.0, 108.0, 92.0, Theme::Works),
     place(440.0, -60.0, 60.0, 52.0, Kind::Village),
     place(-340.0, -390.0, 56.0, 52.0, Kind::Village),
     place(-740.0, 340.0, 56.0, 52.0, Kind::Village),
@@ -97,10 +158,25 @@ const PLACES: [Place; 17] = [
     // army camps: the best guns are there
     place(-40.0, -540.0, 96.0, 76.0, Kind::Base),
     place(640.0, 420.0, 96.0, 76.0, Kind::Base),
+    // landmarks
+    site(800.0, 300.0, 64.0, 48.0, Theme::Ranch),
+    site(-830.0, -400.0, 60.0, 48.0, Theme::Ranch),
+    site(170.0, 790.0, 60.0, 48.0, Theme::Ranch),
+    site(120.0, -300.0, 56.0, 44.0, Theme::Sawmill),
+    site(470.0, -420.0, 56.0, 44.0, Theme::Mine),
+    site(620.0, -620.0, 26.0, 24.0, Theme::Radio),
+    site(-690.0, -470.0, 48.0, 40.0, Theme::Campsite),
+    site(-620.0, -640.0, 64.0, 64.0, Theme::Castle),
+    site(900.0, -150.0, 24.0, 24.0, Theme::Lighthouse),
+    site(300.0, -20.0, 32.0, 24.0, Theme::Fuel),
+    site(60.0, 250.0, 64.0, 48.0, Theme::Park),
+    site(480.0, 816.0, 80.0, 36.0, Theme::Harbour),
+    site(330.0, -560.0, 36.0, 30.0, Theme::Ufo),
+    site(-20.0, 360.0, 30.0, 30.0, Theme::Stones),
 ];
 
 /// Dirt roads between the settlements.
-const ROADS: [&[(f32, f32)]; 18] = [
+const ROADS: [&[(f32, f32)]; 26] = [
     &[(-660.0, 80.0), (-400.0, 20.0), (-248.0, -40.0)],
     &[(8.0, -80.0), (400.0, -44.0), (680.0, 80.0)],
     &[(-100.0, 24.0), (-80.0, 280.0), (0.0, 500.0), (300.0, 660.0)],
@@ -120,7 +196,20 @@ const ROADS: [&[(f32, f32)]; 18] = [
     &[(270.0, 240.0), (-60.0, 200.0), (-80.0, 280.0)],
     &[(-60.0, 764.0), (0.0, 526.0)],
     &[(-40.0, -578.0), (100.0, -440.0)],
+    // to the landmarks
+    &[(340.0, 704.0), (440.0, 816.0)],
+    &[(800.0, 276.0), (700.0, 106.0)],
+    &[(-830.0, -376.0), (-700.0, -228.0)],
+    &[(140.0, 790.0), (-34.0, 790.0)],
+    &[(92.0, -300.0), (36.0, -300.0)],
+    &[(470.0, -398.0), (430.0, -86.0)],
+    &[(-690.0, -450.0), (-650.0, -228.0)],
+    &[(-588.0, -640.0), (-330.0, -656.0)],
 ];
+
+/// The crop circle on the northern field: centre and rings (inner, outer radius).
+const CROP_CIRCLE: (f32, f32) = (140.0, -650.0);
+const CROP_RINGS: [(f32, f32); 3] = [(0.0, 2.6), (5.0, 7.0), (12.0, 14.0)];
 
 /// Farm fields: (min x, min z, max x, max z, stripes along x).
 const FIELDS: [(f32, f32, f32, f32, bool); 16] = [
@@ -361,9 +450,19 @@ fn heightmap() -> Heightmap {
                     };
                 }
             }
+            // the crop circle
+            let cd = vec2(p.x - CROP_CIRCLE.0, p.z - CROP_CIRCLE.1).length();
+            if CROP_RINGS.iter().any(|&(a, b)| cd >= a && cd <= b) {
+                c = paint::DIRT;
+            }
             for pl in PLACES {
                 if pl.dist(p.x, p.z) < 1.0 {
-                    c = paint::DIRT;
+                    c = match pl.theme {
+                        Theme::Park | Theme::Stones | Theme::Castle => paint::MEADOW,
+                        Theme::Radio => paint::AUTO,
+                        Theme::Harbour | Theme::Fuel => paint::PAVED,
+                        _ => paint::DIRT,
+                    };
                 }
             }
             if ROADS.iter().any(|r| line_dist(q, r) < 3.2) && p.y >= WATER {
@@ -379,6 +478,7 @@ fn heightmap() -> Heightmap {
             Kind::Village => 3.0,
             // camps: concrete all over
             Kind::Base => 1000.0,
+            Kind::Site => continue,
         };
         let (a, b) = (pl.min(), pl.max());
         for j in 0..m.h {
@@ -724,6 +824,10 @@ fn settle(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
         camp(b, m, pl, rng);
         return;
     }
+    if pl.kind == Kind::Site {
+        landmark(b, m, pl, rng);
+        return;
+    }
     let y = m.height(pl.x, pl.z);
     let street = if pl.kind == Kind::Town { 4.0 } else { 3.0 };
     let (a, bb) = (pl.min(), pl.max());
@@ -740,6 +844,34 @@ fn settle(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
             } else {
                 (pl.z + street + 2.0, bb.y - 2.0)
             };
+            // a themed town gives a quarter or two to its landmarks
+            let quarter = Lot { x0, z0, x1, z1 };
+            let special = match (pl.theme, qx > 0.0, qz > 0.0) {
+                (Theme::OldTown, true, false) => {
+                    sites::church(b, quarter);
+                    true
+                }
+                (Theme::OldTown, false, true) => {
+                    sites::park(b, quarter, rng, true);
+                    true
+                }
+                (Theme::Market, false, false) | (Theme::Port, true, true) => {
+                    sites::market_square(b, quarter, rng);
+                    true
+                }
+                (Theme::Market, true, true) => {
+                    sites::town_hall(b, quarter);
+                    true
+                }
+                (Theme::Works, false, false) => {
+                    sites::works(b, quarter);
+                    true
+                }
+                _ => false,
+            };
+            if special {
+                continue;
+            }
             let lot_w = if pl.kind == Kind::Town { 17.0 } else { 16.0 };
             let lot_d = if pl.kind == Kind::Town { 15.5 } else { 14.5 };
             let nx = ((x1 - x0) / lot_w).floor().max(1.0) as i32;
@@ -820,6 +952,9 @@ fn settle(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
                 0.9,
                 pal::CONCRETE_DARK,
             );
+        } else if pl.theme == Theme::OldTown {
+            // the founder on his plinth where the streets cross
+            sites::statue(b, pl.x, pl.z);
         } else {
             // a fountain square in the middle of the crossroads
             b.cbox(pl.x, pl.z, 5.0, 5.0, 0.0, 0.7, pal::CONCRETE);
@@ -832,6 +967,106 @@ fn settle(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
                 .push(vec3(pl.x + a.cos() * 10.0, 0.3, pl.z + a.sin() * 10.0));
         }
     });
+}
+
+/// Builds a landmark on its levelled pad.
+fn landmark(b: &mut MapBuilder, m: &Heightmap, pl: &Place, rng: &mut Rng) {
+    let y = m.height(pl.x, pl.z);
+    let l = Lot::centered(pl.x, pl.z, pl.w, pl.d);
+    b.lift(y, |b| match pl.theme {
+        Theme::Ranch => sites::ranch(b, l, rng),
+        Theme::Sawmill => sites::sawmill(b, l, rng),
+        Theme::Mine => sites::mine(b, l, rng),
+        Theme::Radio => sites::radio_station(b, l),
+        Theme::Campsite => sites::campsite(b, l, rng),
+        Theme::Castle => sites::castle(b, l, rng),
+        Theme::Lighthouse => sites::lighthouse(b, l),
+        Theme::Fuel => sites::fuel_station(b, l),
+        Theme::Park => sites::park(b, l, rng, false),
+        Theme::Harbour => {
+            // out to sea: how far south the water gets deep enough for boats
+            let len = |x: f32| {
+                let mut len = 10.0;
+                while len < 110.0 && m.height(x, l.z1 + len) > WATER - 1.5 {
+                    len += 3.0;
+                }
+                len
+            };
+            sites::harbour(b, l, &len, WATER - y, rng)
+        }
+        Theme::Ufo => sites::ufo(b, l),
+        Theme::Stones => sites::stones(b, l),
+        _ => {}
+    });
+}
+
+/// The things nobody expects: a duck and a monster in the lake, letters on a hillside,
+/// a wreck with a chest on the beach, a hut with a stash and a ring of toadstools deep in
+/// the woods, gnomes by a village, a picnic for giants. Returns where they stand (centre,
+/// radius) so that no tree grows there.
+fn odd_finds(b: &mut MapBuilder, m: &Heightmap) -> Vec<(Vec2, f32)> {
+    let mut taken = Vec::new();
+    let ground = |x: f32, z: f32| m.height(x, z);
+    sites::rubber_duck(b, LAKE.0 + 30.0, LAKE.1 - 25.0, WATER);
+    sites::lake_monster(b, LAKE.0 - 30.0, LAKE.1 + 35.0, WATER);
+    // TOON on the hillside above the old town, facing it
+    let (lx, lz) = (372.0, -300.0);
+    sites::letters(b, "TOON", lx, lz, 2.5, &ground);
+    taken.push((vec2(lx + 20.0, lz), 26.0));
+    // the wreck: west-south-west, where the land gives way to the beach
+    let dir = vec2(-0.94, 0.34);
+    let mut r = 600.0;
+    while r < 990.0 && m.height(dir.x * r, dir.y * r) > WATER + 0.8 {
+        r += 2.0;
+    }
+    let w = dir * (r - 6.0);
+    sites::shipwreck(b, w.x, w.y, m.height(w.x, w.y).max(WATER + 0.2));
+    taken.push((w, 14.0));
+    // deep in the woods, far from everything: a hut, and a ring of toadstools
+    let mut spots: Vec<Vec2> = Vec::new();
+    let mut z = -900.0;
+    while z < 900.0 && spots.len() < 2 {
+        let mut x = -900.0;
+        while x < 900.0 && spots.len() < 2 {
+            let q = vec2(x, z);
+            let deep = fbm(SEED + 7, x / 130.0, z / 130.0, 3) > 0.64;
+            let ok = deep
+                && m.height(x, z) > WATER + 3.0
+                && m.slope(x, z) < 0.25
+                && PLACES.iter().all(|p| p.dist(x, z) > 90.0)
+                && ROADS.iter().all(|rd| line_dist(q, rd) > 50.0)
+                && spots.iter().all(|s| (*s - q).length() > 400.0);
+            if ok {
+                spots.push(q);
+            }
+            x += 37.0;
+        }
+        z += 41.0;
+    }
+    if let Some(h) = spots.first() {
+        let y = base(m, h.x, h.y, 3.0);
+        b.lift(y, |b| sites::stash_hut(b, h.x, h.y));
+        taken.push((*h, 9.0));
+    }
+    if let Some(f) = spots.get(1) {
+        sites::fairy_ring(b, f.x, f.y, &ground);
+        taken.push((*f, 7.0));
+    }
+    // gnomes behind a village in the south-west
+    let v = &PLACES[6];
+    let g = vec2(v.max().x + 8.0, v.z - 16.0);
+    sites::gnomes(b, g.x, g.y, &ground);
+    taken.push((g, 5.0));
+    // no wood under the harbour's piers
+    let h = PLACES.iter().find(|p| p.theme == Theme::Harbour).unwrap();
+    taken.push((vec2(h.x, h.max().y + 36.0), 50.0));
+    // a picnic laid for giants beside the park
+    let p = PLACES.iter().find(|p| p.theme == Theme::Park).unwrap();
+    let pc = vec2(p.max().x + 9.0, p.z + 4.0);
+    let y = base(m, pc.x, pc.y, 4.0);
+    b.lift(y, |b| sites::giant_picnic(b, pc.x, pc.y));
+    taken.push((pc, 10.0));
+    taken
 }
 
 fn bridge(b: &mut MapBuilder, br: &Bridge) {
@@ -883,6 +1118,9 @@ pub fn island() -> Map {
         bridge(&mut b, br);
     }
 
+    // odd things to find (no tree grows through them)
+    let eggs = odd_finds(&mut b, &m);
+
     // haystacks on the fields
     for &(x0, z0, x1, z1, _) in &FIELDS {
         for _ in 0..4 {
@@ -904,6 +1142,7 @@ pub fn island() -> Map {
                 .iter()
                 .all(|f| x < f.0 - 2.0 || x > f.2 + 2.0 || z < f.1 - 2.0 || z > f.3 + 2.0)
             && brs.iter().all(|br| (br.c - q).length() > br.half + 6.0)
+            && eggs.iter().all(|&(c, r)| (c - q).length() > r)
     };
     let step = 7.0;
     let n = (2.0 * HALF / step) as i32;
@@ -995,11 +1234,13 @@ pub fn island() -> Map {
     };
     let mut car_spots = Vec::new();
     for pl in PLACES {
-        let spots: Vec<(f32, f32)> = match pl.kind {
-            Kind::Base => vec![
+        let spots: Vec<(f32, f32)> = match (pl.kind, pl.theme) {
+            (Kind::Base, _) => vec![
                 (pl.x - 18.0, pl.max().y - 12.0),
                 (pl.x + 18.0, pl.max().y - 12.0),
             ],
+            // no road up there
+            (_, Theme::Radio | Theme::Ufo | Theme::Stones | Theme::Harbour) => vec![],
             _ => vec![(pl.max().x + 7.0, pl.z + 1.5)],
         };
         for (x, z) in spots {
@@ -1150,6 +1391,42 @@ mod tests {
             .count();
         let boats = map.car_spots.len() - jeeps;
         assert!(jeeps >= 14 && boats >= 3, "{jeeps} jeeps, {boats} boats");
+    }
+
+    /// Every ladder leads onto something to stand on, and nothing lies inside a wall.
+    #[test]
+    fn ladders_lead_somewhere_and_loot_lies_free() {
+        let map = island();
+        let w = crate::physics::World::from_map(&map);
+        for l in &map.ladders {
+            let e = l.exit();
+            let top = w.floor_below(e + vec3(0.0, 0.5, 0.0), 1.2);
+            let room = crate::physics::Aabb {
+                min: vec3(e.x - 0.3, l.top + 0.1, e.z - 0.3),
+                max: vec3(e.x + 0.3, l.top + 1.6, e.z + 0.3),
+            };
+            assert!(
+                top.is_some_and(|y| (y - l.top).abs() < 0.6) && !w.overlaps(&room),
+                "the ladder at {} goes up to nothing ({:?} for {})",
+                l.base,
+                top,
+                l.top
+            );
+        }
+        let mut buried = Vec::new();
+        for p in &map.loot {
+            let q = *p + vec3(0.0, 0.15, 0.0);
+            let inside = map.boxes.iter().any(|b| {
+                b.solid
+                    && b.mat != crate::map::Mat::Cloth
+                    && q.cmpgt(b.min).all()
+                    && q.cmplt(b.max).all()
+            });
+            if inside {
+                buried.push(*p);
+            }
+        }
+        assert!(buried.len() < 3, "loot inside walls: {buried:?}");
     }
 
     #[test]

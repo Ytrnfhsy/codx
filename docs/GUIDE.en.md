@@ -26,7 +26,8 @@ Modes:
   marked. The game goes on until a team has won N rounds (2 by default).
 * **Battle royale (BR)**: every man for himself on the 2×2 km "Island" (hills, a river with
   bridges, a lake, woods and fields, 4 towns, 11 villages and 2 army bases with a fence,
-  barracks, containers and towers on the corners; the zone scales with the map) or on the
+  barracks, containers and towers on the corners; the zone scales with the map; the places
+  are described below) or on the
   "Market". You jump from the plane (the haze thins out high up so you can see where to land;
   the minimap shows where the plane flies), open the parachute, loot, the zone closes in, and
   the last one alive wins. On the map (`M`) you can put a marker (a yellow pin): it shows on the
@@ -312,6 +313,38 @@ Bots can walk stairs and ladders, climb onto roofs and balconies and jump down.
   the map already broken. The server sends only the blasts, and every client breaks its own
   copy of the map with the same code, so it costs the network next to nothing.
   Bots still walk their old routes: they do not use new gaps blown in walls yet.
+
+### Places on the Island
+
+Every town has a face of its own:
+
+* **The old town** (in the middle, by the river): a church with a bell tower (a ladder up to the
+  bell: the town's highest perch for a sniper), a park with a pond and a band stand, the
+  founder's statue where the streets cross.
+* **The market town** (in the west): a market square with a covered hall and stalls, a town hall
+  with a clock and a roof you can hold.
+* **The works town** (in the south-west): a works shed with a gallery inside, a brick chimney
+  with a ladder to a ring at 16 m, silos with a walkway across to the shed's roof.
+* **The port town** (in the south-east): a market by the sea and, next to it, the **harbour**:
+  warehouses, a crane, piers with boats.
+
+And between them:
+
+* **ranches** (three): a house with a porch, a stable, a corral, a water tower with a windmill,
+  a tractor;
+* a **sawmill** in the woods: the saw under its roof, stacks of logs, a lorry loaded with them;
+* a **mine** at the foot of the mountains: the pit-head tower with its wheel, wagons of ore,
+  spoil heaps;
+* a **radio station** on the peak: a mast with a platform at 14 m and the operators' hut;
+* a **campsite** by the lake: tents round a campfire, cabins, canoes;
+* **castle ruins** on a hill: walls with battlements and breaches, four towers, a keep with a
+  roof;
+* a **lighthouse** on the eastern cape, a **filling station** by the road, a **park** in the south.
+
+Roads lead to every one of them, most have a jeep waiting, and the best things lie high up
+and on the towers.
+
+And a few **easter eggs** are hidden on the Island. We will not say where: go and look.
 
 ### Killcam, ragdolls, sound
 
