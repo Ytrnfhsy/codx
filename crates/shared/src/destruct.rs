@@ -732,9 +732,51 @@ impl Wreck {
                 }
             })
             .collect();
-        // down onto the ground at its foot, as one; a piece that lies across a roof or a
-        // wall rests on top of it (all worked out before any of it is put down)
-        let bottom = laid.iter().map(|b| b.min.y).fold(f32::MAX, f32::min);
+        // gravity: cut across its length into short slices, each slice drops as one
+        // (what is joined across keeps together: a cab on its mast) until it rests on
+        // whatever is under it, the ground or the stump or a roof, so a long thing lies
+        // along what it fell over instead of hanging in the air off its highest support
+        let k = if dir.x != 0.0 { 0 } else { 2 };
+        let (lo_k, hi_k) = laid.iter().fold((f32::MAX, f32::MIN), |(a, z), b| {
+            (a.min(b.min[k]), z.max(b.max[k]))
+        });
+        const SLICE: f32 = 1.6;
+        let n = (((hi_k - lo_k) / SLICE).ceil() as usize).clamp(1, 64);
+        let step = (hi_k - lo_k) / n as f32;
+        let mut slices: Vec<Vec<MapBox>> = vec![Vec::new(); n];
+        for b in &laid {
+            for (i, slice) in slices.iter_mut().enumerate() {
+                let (s0, s1) = (lo_k + step * i as f32, lo_k + step * (i + 1) as f32);
+                let (c0, c1) = (b.min[k].max(s0), b.max[k].min(s1));
+                if c1 - c0 < 0.02 {
+                    continue;
+                }
+                let mut part = *b;
+                part.min[k] = c0;
+                part.max[k] = c1;
+                slice.push(part);
+            }
+        }
+        let ground_under = |me: &Self, p: &MapBox| -> f32 {
+            let mut f = me.floor_at(map, p.min.x, p.min.z, p.max.x, p.max.z, p.min.y + 0.05);
+            if let Some(t) = &map.terrain {
+                let g = t
+                    .height(p.min.x, p.min.z)
+                    .max(t.height(p.max.x, p.max.z))
+                    .max(t.height(p.min.x, p.max.z))
+                    .max(t.height(p.max.x, p.min.z));
+                f = f.max(g);
+            }
+            f
+        };
+        let drops: Vec<f32> = slices
+            .iter()
+            .map(|sl| {
+                sl.iter()
+                    .map(|p| ground_under(self, p) - p.min.y)
+                    .fold(f32::MIN, f32::max)
+            })
+            .collect();
         let ground = self.floor_at(
             map,
             pivot.x - 0.5,
@@ -743,22 +785,16 @@ impl Wreck {
             pivot.z + 0.5,
             pivot.y + 0.5,
         );
-        let lift: Vec<f32> = laid
-            .iter()
-            .map(|b| {
-                let base = ground + (b.min.y - bottom);
-                let under = self.floor_at(map, b.min.x, b.min.z, b.max.x, b.max.z, base + 8.0);
-                ground - bottom + (under - ground).max(0.0)
-            })
-            .collect();
         let mut idx = Vec::new();
-        for (b, dy) in laid.into_iter().zip(lift) {
-            let b = MapBox {
-                min: b.min + Vec3::Y * dy,
-                max: b.max + Vec3::Y * dy,
-                ..b
-            };
-            idx.push(self.add(map, world, b, ch));
+        for (sl, dy) in slices.into_iter().zip(drops) {
+            for b in sl {
+                let b = MapBox {
+                    min: b.min + Vec3::Y * dy,
+                    max: b.max + Vec3::Y * dy,
+                    ..b
+                };
+                idx.push(self.add(map, world, b, ch));
+            }
         }
         ch.topples.push(Topple {
             pivot: vec3(pivot.x, ground, pivot.z),
@@ -1096,7 +1132,7 @@ mod tests {
             },
         );
         assert_eq!(ch.topples.len(), 1, "it falls over as one");
-        // the jib (22 m long along x) lies flat on the ground, still in one piece
+        // the jib (22 m long along x) went with it and lies flat on the ground
         let jib = ch.topples[0]
             .boxes
             .iter()
@@ -1104,6 +1140,19 @@ mod tests {
             .find(|b| b.max.x - b.min.x > 20.0)
             .expect("the jib went with it");
         assert!(jib.max.y < 3.0, "{jib:?}");
+        // every slice of it lies on something: nothing of it hangs over empty air
+        let w2 = World::from_map(&m);
+        for &i in &ch.topples[0].boxes {
+            let b = m.boxes[i];
+            if !b.solid {
+                continue;
+            }
+            let c = (b.min + b.max) * 0.5;
+            let under = w2
+                .floor_below(vec3(c.x, b.min.y - 0.02, c.z), 30.0)
+                .unwrap_or(0.0);
+            assert!(b.min.y - under < 1.6, "floating: {b:?} over {under}");
+        }
         // nothing of it is left up in the air
         let fallen = &ch.topples[0].boxes;
         for (i, b) in m.boxes.iter().enumerate() {
@@ -1118,7 +1167,7 @@ mod tests {
             }
         }
         // and it did not shatter: about as many boxes as before
-        assert!(live(&m) < before + 12, "{} → {}", before, live(&m));
+        assert!(live(&m) < before + 120, "{} → {}", before, live(&m));
     }
 
     #[test]

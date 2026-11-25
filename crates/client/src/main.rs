@@ -74,6 +74,8 @@ struct Args {
     exec: Option<String>,
     /// (smoke tests) keep looking at this point
     look_at: Option<glam::Vec3>,
+    /// (smoke tests) a spectator's camera here
+    spec_at: Option<glam::Vec3>,
     team: Option<String>,
     map: Option<String>,
     mode: Option<String>,
@@ -154,6 +156,13 @@ fn parse_args() -> Args {
             "--no-hud" => a.no_hud = true,
             "--exec" => {
                 a.exec = next;
+                i += 1;
+            }
+            "--spec-at" => {
+                a.spec_at = next.and_then(|s| {
+                    let v: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                    (v.len() == 3).then(|| glam::vec3(v[0], v[1], v[2]))
+                });
                 i += 1;
             }
             "--look-at" => {
@@ -898,12 +907,15 @@ async fn amain(args: Args) {
                 if let Some(p) = args.pitch.filter(|_| g.alive) {
                     g.pitch = p;
                 }
-                if let Some(at) = args.look_at.filter(|_| g.alive) {
-                    let d = (at - g.eye()).normalize_or_zero();
+                if let Some(p) = args.spec_at.filter(|_| !g.alive) {
+                    g.spec_pos = p;
+                }
+                if let Some(at) = args.look_at {
+                    let d = (at - g.camera().0).normalize_or_zero();
                     g.yaw = toon_shared::yaw_of(d);
                     g.pitch = d.y.clamp(-1.0, 1.0).asin();
                 }
-                if g.alive && get_time() - start > 6.0 {
+                if (g.alive || args.spec_at.is_some()) && get_time() - start > 6.0 {
                     if let Some(cmd) = exec_once.take() {
                         g.rcon_pass = args.rcon.clone().unwrap_or_default();
                         for c in cmd.split(';').map(str::trim).filter(|c| !c.is_empty()) {
