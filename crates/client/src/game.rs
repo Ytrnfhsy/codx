@@ -1986,6 +1986,7 @@ impl GameClient {
         let now = self.now;
         VmState {
             draw: self.draw_now(),
+            loaded: self.weapons[self.slot as usize & 1].1 > 0,
             sight: self.sight(),
             mods: self.mods(),
             weapon: self.weapon(),
@@ -2487,7 +2488,12 @@ impl GameClient {
         });
 
         // local visuals: the bullet's arc through the world, and remote players on it
-        let muzzle = self.viewmodel_muzzle_world();
+        // (an arrow leaves from where it is seen on the bow)
+        let muzzle = if w == WeaponId::Bow {
+            self.view_to_world(crate::render::bow_pose(draw, self.ads_t).tip)
+        } else {
+            self.viewmodel_muzzle_world()
+        };
         let mut b = toon_shared::ballistics::Ballistics::of(w);
         if w.draw_time() > 0.0 {
             let (speed, _) = WeaponId::draw_power(draw);
@@ -2581,6 +2587,14 @@ impl GameClient {
                 a.play_later(Sfx::Shell, 0.35 + self.rng.range(0.0, 0.2), 0.25);
             }
         }
+    }
+
+    /// A point in front of the eye (x right, y up, −z ahead) in the world.
+    pub fn view_to_world(&self, v: Vec3) -> Vec3 {
+        let f = look_dir(self.yaw, self.pitch);
+        let r = f.cross(Vec3::Y).normalize_or(Vec3::X);
+        let u = r.cross(f);
+        self.eye() + r * v.x + u * v.y - f * v.z
     }
 
     pub fn viewmodel_muzzle_world(&self) -> Vec3 {

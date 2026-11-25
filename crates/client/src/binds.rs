@@ -98,8 +98,8 @@ impl Action {
             Action::Reload => t("Перезарядка", "Reload"),
             Action::Primary => t("Основна зброя", "Primary"),
             Action::Secondary => t("Додаткова зброя", "Secondary"),
-            Action::Grenade => t("Граната", "Grenade"),
-            Action::Smoke => t("Димова граната", "Smoke grenade"),
+            Action::Grenade => t("Бойова граната", "Lethal grenade"),
+            Action::Smoke => t("Тактична граната", "Tactical grenade"),
             Action::Knife => t("Ніж", "Knife"),
             Action::Use => t("Дія (бомба, зброя, лут)", "Use (bomb, gun, loot)"),
             Action::Killstreak => t("Кілстрік", "Killstreak"),
@@ -460,6 +460,9 @@ fn set_capturing(v: bool) {
     }
 }
 
+/// One row of the key table.
+const ROW_H: f32 = 31.0;
+
 /// The Controls page's state: which slot waits for a key.
 #[derive(Default)]
 pub struct Editor {
@@ -470,6 +473,11 @@ impl Editor {
     /// Draws the bindings in two columns at (x, y) across `w`. Click a slot, then press a
     /// key or a mouse button; Escape cancels, Backspace clears. Returns true when `b`
     /// changed.
+    /// Height the key table takes (rows and the hint under them).
+    pub fn height() -> f32 {
+        Action::ALL.len().div_ceil(2) as f32 * ROW_H + 30.0
+    }
+
     pub fn draw(&mut self, ui: &mut crate::ui::Ui, b: &mut Binds, x: f32, y: f32, w: f32) -> bool {
         use crate::ui::*;
         let mut changed = false;
@@ -501,13 +509,15 @@ impl Editor {
             }
         }
         let rows = Action::ALL.len().div_ceil(2);
-        let col_w = (w - 20.0) / 2.0;
+        let col_w = (w - 28.0) / 2.0;
         let slot_w = 78.0;
         for (i, a) in Action::ALL.iter().enumerate() {
             let (col, row) = (i / rows, i % rows);
-            let cx = x + col as f32 * (col_w + 20.0);
-            let cy = y + row as f32 * 34.0;
-            ui.text(a.name(), cx, cy + 21.0, 15, TEXT);
+            let cx = x + col as f32 * (col_w + 28.0);
+            let cy = y + row as f32 * ROW_H;
+            // the name in what is left of the row beside the two keys
+            let room = col_w - 2.0 * (slot_w + 6.0) - 8.0;
+            ui.text(&ui.fit(a.name(), 15, false, room), cx, cy + 19.0, 15, TEXT);
             for slot in 0..2 {
                 let bx = cx + col_w - (2 - slot) as f32 * (slot_w + 6.0);
                 let waiting = self.listening == Some((*a, slot));
@@ -517,9 +527,9 @@ impl Editor {
                     b.get(*a)[slot].label()
                 };
                 // while a slot waits for a key, clicks go to it, not to other buttons
-                let clicked = ui.button2(&label, bx, cy, slot_w, 30.0) && !was_listening;
+                let clicked = ui.button2(&label, bx, cy, slot_w, ROW_H - 3.0) && !was_listening;
                 if waiting {
-                    draw_rectangle_lines(bx, cy, slot_w, 30.0, 3.0, ACCENT);
+                    draw_rectangle_lines(bx, cy, slot_w, ROW_H - 3.0, 3.0, ACCENT);
                 }
                 if clicked {
                     self.listening = Some((*a, slot));
@@ -537,7 +547,7 @@ impl Editor {
                 "Click a key to change it. Every action has two.",
             )
         };
-        ui.text(hint, x, y + rows as f32 * 34.0 + 22.0, 14, MUTED);
+        ui.text(hint, x, y + rows as f32 * ROW_H + 20.0, 14, MUTED);
         set_capturing(self.listening.is_some());
         changed
     }

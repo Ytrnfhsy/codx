@@ -71,6 +71,8 @@ pub struct VmState {
     pub bare: bool,
     /// How far a bow is drawn (0..1).
     pub draw: f32,
+    /// An arrow (a round) is in: the bow shows one on the string.
+    pub loaded: bool,
 }
 
 fn smooth(x: f32) -> f32 {
@@ -223,6 +225,183 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
     }
 }
 
+/// Where a bow and its arrow are in front of the eye (view space: x right, y up, the eye
+/// looking down −z), drawn `draw` of the way (0..1) and aimed `ads`.
+pub struct BowPose {
+    pub grip: Vec3,
+    pub top: Vec3,
+    pub bottom: Vec3,
+    /// Where the string is pulled (and the arrow's tail sits).
+    pub nock: Vec3,
+    /// The arrow's point.
+    pub tip: Vec3,
+    /// The bow's long axis (top up), and the way it bends back towards the archer.
+    up: Vec3,
+    bend: f32,
+    len: f32,
+}
+
+impl BowPose {
+    /// A point along a limb: s = 1 the top tip, −1 the bottom one.
+    fn limb(&self, s: f32) -> Vec3 {
+        self.grip + self.up * (self.len * s) + Vec3::Z * (self.bend * s * s)
+    }
+}
+
+pub fn bow_pose(draw: f32, ads: f32) -> BowPose {
+    let d = smooth(draw);
+    let a = smooth(ads);
+    // held left of the line of sight, the top leaning a little right; aimed, it comes up
+    // and in towards the middle
+    let grip = vec3(-0.12 + 0.03 * a, -0.085 + 0.03 * a + 0.015 * d, -0.56);
+    let cant = 0.2 - 0.05 * d;
+    let up = vec3(cant.sin(), cant.cos(), 0.0);
+    let len = 0.47 - 0.035 * d;
+    // the limbs curve back towards the archer, more as the string is drawn
+    let bend = 0.13 + 0.06 * d;
+    let mut p = BowPose {
+        grip,
+        top: Vec3::ZERO,
+        bottom: Vec3::ZERO,
+        nock: Vec3::ZERO,
+        tip: Vec3::ZERO,
+        up,
+        bend,
+        len,
+    };
+    p.top = p.limb(1.0);
+    p.bottom = p.limb(-1.0);
+    // the string at rest runs straight between the tips; drawn, back to the cheek
+    let brace = (p.top + p.bottom) * 0.5;
+    // (nocked and ready even at rest: the hand a little back from the grip)
+    p.nock = brace + vec3(0.15, -0.05, 0.22) * (0.25 + 0.75 * d);
+    // the arrow passes the grip and points at the target, a little under the middle
+    let aim = vec3(-0.02, -0.04, -4.0);
+    let dir = (aim - p.nock).normalize_or(Vec3::NEG_Z);
+    p.tip = p.nock + dir * 0.74;
+    p
+}
+
+/// A box from `a` to `b`, `w` wide and `h` thick, turned to lie along it.
+fn seg(m: &mut ToonMesh, a: Vec3, b: Vec3, w: f32, h: f32, c: [u8; 3], ow: f32) {
+    let d = b - a;
+    let len = d.length();
+    if len < 1e-4 {
+        return;
+    }
+    let rot = Quat::from_rotation_arc(Vec3::NEG_Z, d / len);
+    m.boxed(
+        &Mat4::from_rotation_translation(rot, (a + b) * 0.5),
+        vec3(w * 0.5, h * 0.5, len * 0.5),
+        c,
+        ow,
+    );
+}
+
+/// An arrow from its tail to its point: shaft, steel head, two vanes.
+pub fn add_arrow(m: &mut ToonMesh, tail: Vec3, tip: Vec3, ow: f32) {
+    let d = (tip - tail).normalize_or(Vec3::NEG_Z);
+    seg(m, tail, tip - d * 0.03, 0.009, 0.009, [176, 128, 72], ow);
+    seg(m, tip - d * 0.05, tip, 0.016, 0.006, [80, 82, 90], ow);
+    let rot = Quat::from_rotation_arc(Vec3::NEG_Z, d);
+    for (k, c) in [(0.0f32, [236, 232, 222]), (1.0, [210, 64, 52])] {
+        let side = rot * Quat::from_rotation_z(k * std::f32::consts::FRAC_PI_2);
+        let at = tail + d * 0.07;
+        m.boxed(
+            &Mat4::from_rotation_translation(side, at),
+            vec3(0.002, 0.016, 0.045),
+            c,
+            0.0,
+        );
+    }
+}
+
+/// The bow in the hands: the left arm out to the grip, the right hand on the string
+/// (drawing it back to the cheek), the arrow between them pointing at the target.
+fn draw_bow(vm: &VmState, mats: &Materials, settings: &Settings) {
+    let ow = if settings.outlines { 0.004 } else { 0.0 };
+    let p = bow_pose(vm.draw, vm.ads);
+    // the whole of it moves with the walk, the sway, switching and sprinting
+    let mut off = vec3(
+        vm.bob_phase.sin() * 0.012,
+        -(vm.bob_phase.cos().abs()) * 0.016,
+        0.0,
+    ) * vm.bob
+        + vec3(-vm.sway.x, vm.sway.y, 0.0);
+    off.y -= 0.35 * smooth(vm.raise);
+    off += vec3(0.06, -0.14, 0.05) * smooth(vm.sprint);
+    off.z += vm.recoil * 0.02;
+    let o = |v: Vec3| v + off;
+    let mut m = ToonMesh::new();
+    // the bow: a thick grip, limbs thinning to the tips
+    let wood = [140, 92, 50];
+    seg(
+        &mut m,
+        o(p.limb(-0.16)),
+        o(p.limb(0.16)),
+        0.034,
+        0.03,
+        [74, 52, 36],
+        ow,
+    );
+    let n = 6;
+    for side in [-1.0f32, 1.0] {
+        for i in 0..n {
+            let (s0, s1) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
+            let w = 0.026 - 0.012 * s0;
+            seg(
+                &mut m,
+                o(p.limb(side * s0)),
+                o(p.limb(side * s1)),
+                w,
+                0.016,
+                wood,
+                ow,
+            );
+        }
+    }
+    // the string, bent where it is pulled
+    let reload = vm.reload;
+    let string = [226, 220, 204];
+    seg(&mut m, o(p.top), o(p.nock), 0.003, 0.003, string, 0.0);
+    seg(&mut m, o(p.nock), o(p.bottom), 0.003, 0.003, string, 0.0);
+    // the right hand: on the string, or reaching back for the next arrow
+    let quiver = vec3(0.3, -0.3, 0.05);
+    let (hand, arrow) = match reload {
+        Some(t) => {
+            let k = smooth((t - 0.15) / 0.65);
+            (quiver.lerp(p.nock, k), t > 0.45)
+        }
+        None if vm.loaded => (p.nock, true),
+        None => (vec3(0.2, -0.24, -0.34), false),
+    };
+    if arrow {
+        let along = (p.tip - p.nock).normalize_or(Vec3::NEG_Z);
+        add_arrow(&mut m, o(hand), o(hand + along * 0.74), ow);
+    }
+    let sleeve = vm.sleeve;
+    for (h, shoulder, r) in [
+        (
+            p.grip + vec3(-0.005, 0.0, 0.0),
+            vec3(-0.42, -0.52, 0.02),
+            0.042,
+        ),
+        (
+            hand + vec3(0.012, -0.012, 0.0),
+            vec3(0.36, -0.42, 0.0),
+            0.04,
+        ),
+    ] {
+        let (h, shoulder) = (o(h), shoulder + off);
+        let d = h - shoulder;
+        let elbow = shoulder + d * 0.35;
+        seg(&mut m, shoulder, elbow, 0.08, 0.08, sleeve, ow);
+        seg(&mut m, elbow, h, 0.064, 0.064, sleeve, ow);
+        m.sphere(&Mat4::from_translation(h), r, vm.hand, ow);
+    }
+    mats.draw_toon(&m);
+}
+
 /// Renders the world. Returns name tags for the HUD.
 pub fn render_world(
     g: &mut GameClient,
@@ -366,6 +545,13 @@ pub fn render_world(
     g.level.draw_grass(mats, &g.world, view.pos, settings.grass);
     if g.ruins.busy() {
         mats.draw_toon(&g.ruins.build(&g.map, get_time()));
+    }
+    // arrows flying and stuck
+    {
+        let fx = g.killcam.as_ref().map(|k| &k.fx).unwrap_or(&g.fx);
+        let mut am = ToonMesh::new();
+        fx.arrows(&mut am, if settings.outlines { 0.012 } else { 0.0 });
+        mats.draw_toon(&am);
     }
 
     // dynamic objects
@@ -942,6 +1128,10 @@ pub fn render_viewmodel(
 fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     use std::f32::consts::PI;
     let w = vm.weapon;
+    if w == WeaponId::Bow && !vm.bare {
+        draw_bow(vm, mats, settings);
+        return;
+    }
     let def = w.def();
     let ads = vm.ads;
     let hip = vec3(0.26, -0.27, -0.66);

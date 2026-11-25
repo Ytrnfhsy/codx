@@ -361,6 +361,19 @@ impl Killcam {
                     a.play_shot(sfx, from, eye, 0.7);
                 }
             }
+            // rockets and arrows fly where they can be seen
+            let kind = s.weapon.shot();
+            if s.id != 255 && kind != toon_shared::weapons::Shot::Bullet {
+                let speed = toon_shared::ballistics::Ballistics::of(s.weapon).velocity;
+                self.fx.fly(
+                    from,
+                    to,
+                    speed,
+                    kind == toon_shared::weapons::Shot::Rocket,
+                    s.flesh,
+                );
+                continue;
+            }
             self.fx.tracer(from, to);
             if s.flesh {
                 self.fx.flesh(to);
@@ -742,6 +755,7 @@ impl Killcam {
         let since = |t: f64| (self.pt - t) as f32;
         VmState {
             draw: 0.0,
+            loaded: true,
             sight: self.info.gear.sight,
             mods: self.info.gear.mods,
             weapon: self.weapon,

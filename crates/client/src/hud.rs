@@ -4479,8 +4479,11 @@ impl GameClient {
             }
             Overlay::Controls => {
                 crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
-                let pw = 760.0f32.min(w - 20.0);
-                let (x, y) = ((w - pw) / 2.0, (h - crate::menu::CONTROLS_H).max(0.0) / 2.0);
+                let pw = 900.0f32.min(w - 20.0);
+                let (x, y) = (
+                    (w - pw) / 2.0,
+                    (h - crate::menu::controls_h()).max(0.0) / 2.0,
+                );
                 if crate::menu::controls_page(ui, &mut self.binds_editor, settings, x, y, pw) {
                     self.overlay = Overlay::Settings;
                 }

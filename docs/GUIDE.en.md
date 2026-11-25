@@ -512,7 +512,12 @@ says who pinged what. A map marker (`M`) is a different thing: a yellow pin.
   ground. The blast is a grenade's, only stronger (~5.5 m), and it breaks buildings. You can blow
   yourself up.
 * The **crossbow** and the **bow** are quiet (no flash; enemies and bots hear them only close
-  by), and the arrow flies slowly and drops a lot. **The bow is drawn**: hold the fire button and
+  by), and the arrow flies slowly and drops a lot: you can see it fly (a 3D arrow with a faint
+  streak, on the same arc as on the server), and one that hits a wall or the ground stays
+  stuck there for half a minute. The bow is held like an archer's: the left arm out, the bow
+  left of your eye, the right hand drawing the string back to the cheek, the string bending
+  and the arrow coming back and pointing at the target; after a shot the right hand takes the
+  next arrow. **The bow is drawn**: hold the fire button and
   a bar under the crosshair fills (a full draw takes 0.75 s, then it turns gold), let go and the
   arrow flies. While drawing, the bow comes up left of your eye and cants, the view closes in a
   little, the crosshair tightens (a full draw sends the arrow exactly where you look), and a ring

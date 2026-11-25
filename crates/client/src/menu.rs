@@ -377,7 +377,7 @@ fn star_button(ui: &mut Ui, fav: bool, x: f32, y: f32, w: f32, h: f32) -> bool {
     clicked
 }
 
-/// The Controls page in a panel at (x, y), `pw` wide (its height is `CONTROLS_H`).
+/// The Controls page in a panel at (x, y), `pw` wide (its height is `controls_h()`).
 /// Returns true when the player is done with it.
 pub fn controls_page(
     ui: &mut Ui,
@@ -387,13 +387,13 @@ pub fn controls_page(
     y: f32,
     pw: f32,
 ) -> bool {
-    ui.panel(x, y, pw, CONTROLS_H);
+    ui.panel(x, y, pw, controls_h());
     ui.bold(t("Клавіші", "Controls"), x + 24.0, y + 40.0, 26, ACCENT);
     if ed.draw(ui, &mut s.binds, x + 24.0, y + 64.0, pw - 48.0) {
         crate::binds::use_binds(&s.binds);
         s.save();
     }
-    let by = y + CONTROLS_H - 60.0;
+    let by = y + controls_h() - 60.0;
     if !ed.listening() && ui.button2(t("Скинути все", "Reset all"), x + 24.0, by, 176.0, 44.0)
     {
         s.binds = Default::default();
@@ -408,8 +408,10 @@ pub fn controls_page(
     false
 }
 
-/// Height of the Controls panel.
-pub const CONTROLS_H: f32 = 580.0;
+/// Height of the Controls panel: the title, the table, the buttons.
+pub fn controls_h() -> f32 {
+    64.0 + crate::binds::Editor::height() + 70.0
+}
 
 pub fn draw_menu(
     ui: &mut Ui,
@@ -1011,8 +1013,8 @@ pub fn draw_menu(
             }
         }
         Page::Controls => {
-            let pw = 760.0f32.min(w - 20.0);
-            let (cx, cy) = ((w - pw) / 2.0, (h - CONTROLS_H).max(0.0) / 2.0);
+            let pw = 900.0f32.min(w - 20.0);
+            let (cx, cy) = ((w - pw) / 2.0, (h - controls_h()).max(0.0) / 2.0);
             // Esc leaves the page unless it was only cancelling a key being chosen
             let esc = is_key_pressed(KeyCode::Escape) && !st.binds_editor.listening();
             let back = controls_page(ui, &mut st.binds_editor, s, cx, cy, pw) || esc;

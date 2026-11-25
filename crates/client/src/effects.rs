@@ -81,6 +81,8 @@ pub struct Effects {
     parts: Vec<Particle>,
     tracers: Vec<Tracer>,
     flights: Vec<Flight>,
+    /// Arrows stuck where they landed: point, direction, age.
+    stuck: std::collections::VecDeque<(Vec3, Vec3, f32)>,
     /// Slow shots that came down this frame: where, which way, into a body.
     pub landed: Vec<(Vec3, Vec3, bool)>,
     rng: Rng,
@@ -94,6 +96,7 @@ impl Effects {
             parts: Vec::new(),
             tracers: Vec::new(),
             flights: Vec::new(),
+            stuck: Default::default(),
             landed: Vec::new(),
             rng: Rng::new(99),
         }
@@ -524,9 +527,22 @@ impl Effects {
             if f.t >= f.dur {
                 let d = (f.at(f.dur) - f.at(f.dur - 0.05)).normalize_or_zero();
                 self.landed.push((f.to, d, f.flesh));
+                // an arrow stays in the wall or the ground a while
+                if !f.rocket && !f.flesh {
+                    self.stuck.push_back((f.to, d, 0.0));
+                    if self.stuck.len() > 40 {
+                        self.stuck.pop_front();
+                    }
+                }
             }
         }
         self.flights.retain(|f| f.t < f.dur);
+        for s in &mut self.stuck {
+            s.2 += dt;
+        }
+        while self.stuck.front().is_some_and(|s| s.2 > 30.0) {
+            self.stuck.pop_front();
+        }
         for p in trail {
             self.smoke_trail(p);
             self.push(Particle {
@@ -611,11 +627,39 @@ impl Effects {
         }
     }
 
+    /// Arrows in the air (pointing the way they fly on their arc) and stuck in things.
+    pub fn arrows(&self, m: &mut crate::mesh::ToonMesh, ow: f32) {
+        for f in self.flights.iter().filter(|f| !f.rocket) {
+            let p = f.at(f.t);
+            let d = (f.at(f.t + 0.02) - p).normalize_or_zero();
+            if d == Vec3::ZERO {
+                continue;
+            }
+            crate::render::add_arrow(m, p - d * 0.74, p, ow);
+        }
+        for &(at, d, _) in &self.stuck {
+            // (a quarter of it in)
+            let tip = at + d * 0.18;
+            crate::render::add_arrow(m, tip - d * 0.74, tip, ow);
+        }
+    }
+
     pub fn draw_tracers(&self) {
         for f in &self.flights {
             let p = f.at(f.t);
             let d = (f.at(f.t + 0.02) - p).normalize_or_zero();
-            if f.rocket {
+            if !f.rocket {
+                // a faint streak behind the arrow: its arc can be followed
+                let mut prev = f.at((f.t - 0.12).max(0.0));
+                for k in 1..=4 {
+                    let q = f.at((f.t - 0.12 + 0.03 * k as f32).max(0.0));
+                    let a = 0.12 + 0.1 * k as f32;
+                    draw_line_3d(prev, q, Color::new(1.0, 1.0, 0.95, a));
+                    prev = q;
+                }
+                continue;
+            }
+            {
                 draw_line_3d(p - d * 0.45, p, Color::from_rgba(90, 100, 66, 255));
                 draw_cube(
                     p,
@@ -629,9 +673,6 @@ impl Effects {
                     None,
                     Color::from_rgba(255, 200, 100, 255),
                 );
-            } else {
-                draw_line_3d(p - d * 0.7, p, Color::from_rgba(150, 110, 60, 255));
-                draw_line_3d(p - d * 0.7, p - d * 0.6, Color::from_rgba(220, 60, 50, 255));
             }
         }
         for t in &self.tracers {

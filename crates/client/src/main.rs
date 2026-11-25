@@ -60,8 +60,14 @@ struct Args {
     gun: Option<String>,
     /// (smoke tests) leave the loadout screen open
     open_loadout: bool,
+    /// (smoke tests) the Controls page open
+    open_controls: bool,
     /// (smoke tests) hold the trigger down once alive
     hold_fire: bool,
+    /// (smoke tests) hold the trigger for a second, then let go (a bow's shot)
+    tap_fire: bool,
+    /// (smoke tests) keep looking this far up (radians; negative: down)
+    pitch: Option<f32>,
     /// (screenshots) no HUD over the world
     no_hud: bool,
     /// (smoke tests) an admin command sent once alive (needs --rcon)
@@ -138,7 +144,13 @@ fn parse_args() -> Args {
                 i += 1;
             }
             "--open-loadout" => a.open_loadout = true,
+            "--open-controls" => a.open_controls = true,
             "--hold-fire" => a.hold_fire = true,
+            "--tap-fire" => a.tap_fire = true,
+            "--pitch" => {
+                a.pitch = next.and_then(|s| s.parse().ok());
+                i += 1;
+            }
             "--no-hud" => a.no_hud = true,
             "--exec" => {
                 a.exec = next;
@@ -351,6 +363,7 @@ async fn amain(args: Args) {
     let start = get_time();
     let mut auto_done = false;
     let mut auto_switch = false;
+    let mut alive_at: Option<f64> = None;
     let mut exec_once = args.exec.clone();
     let mut low_res: Option<(RenderTarget, i32)> = None;
     let mut reel_rt: Option<RenderTarget> = None;
@@ -867,7 +880,24 @@ async fn amain(args: Args) {
                     g.switch_to(1);
                     auto_switch = false;
                 }
-                g.hold_fire = args.hold_fire && g.alive && get_time() - start > 5.0;
+                let held = get_time() - start;
+                if g.alive
+                    && !g.is_protected()
+                    && g.state == toon_shared::protocol::MatchState::Playing
+                    && alive_at.is_none()
+                {
+                    alive_at = Some(get_time());
+                }
+                // (a tap: drawn for a second, from a while after spawning)
+                let since_alive = alive_at.map_or(0.0, |a| get_time() - a);
+                g.hold_fire = g.alive
+                    && (args.hold_fire && held > 5.0
+                        || args.tap_fire
+                            && alive_at.is_some()
+                            && (0.3..1.5).contains(&since_alive));
+                if let Some(p) = args.pitch.filter(|_| g.alive) {
+                    g.pitch = p;
+                }
                 if let Some(at) = args.look_at.filter(|_| g.alive) {
                     let d = (at - g.eye()).normalize_or_zero();
                     g.yaw = toon_shared::yaw_of(d);
@@ -883,6 +913,9 @@ async fn amain(args: Args) {
                 }
                 if args.open_loadout && g.alive && get_time() - start > 5.0 {
                     g.overlay = Overlay::Class;
+                }
+                if args.open_controls && g.alive && get_time() - start > 5.0 {
+                    g.overlay = Overlay::Controls;
                 }
                 g.update(dt, &settings, Some(&audio));
                 // the 3D world goes into its own target: a 32-bit depth buffer whatever the
