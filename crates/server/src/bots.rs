@@ -153,6 +153,9 @@ pub struct Bot {
     /// Something heard/felt outside the view: turn there.
     alert: Option<(Vec3, f64)>,
     wobble_phase: f32,
+    /// How the bot reads its target's movement: a velocity that catches up with a change
+    /// of direction only after a moment, like a person's eye.
+    vel_seen: Vec3,
     shot_streak: u32,
     last_fire: f64,
     was_ads: bool,
@@ -244,6 +247,7 @@ impl Bot {
             last_percept: 0.0,
             alert: None,
             wobble_phase: rng.range(0.0, 100.0),
+            vel_seen: Vec3::ZERO,
             shot_streak: 0,
             last_fire: -10.0,
             was_ads: false,
@@ -491,15 +495,33 @@ impl Game {
                 None => bot.target = None,
             }
         }
+        // (a person sees where the target was a moment ago, not where it is now)
+        let lag_t = time - sk.track_lag as f64;
         let target = bot
             .target
             .and_then(|t| self.p(t))
             .filter(|t| t.alive)
-            .map(|t| (t.id, t.chest(), t.eye(), t.body.pos, t.body.vel));
+            .map(|t| {
+                let then = t
+                    .history
+                    .iter()
+                    .rev()
+                    .find(|h| h.t <= lag_t)
+                    .map_or(t.body.pos, |h| h.pos);
+                let back = then - t.body.pos;
+                (
+                    t.id,
+                    t.chest() + back,
+                    t.eye() + back,
+                    t.body.pos,
+                    t.body.vel,
+                    t.body.on_ground,
+                )
+            });
         if target.is_none() {
             bot.target = None;
         }
-        if let Some((_, _, _, tp, _)) = target {
+        if let Some((_, _, _, tp, _, _)) = target {
             bot.last_seen = Some((tp, time));
         }
 
@@ -514,21 +536,40 @@ impl Game {
             (true, false) => 0.55,
             _ => 1.0,
         };
+        // a target running across the view, or in the air (a jump, a kick off a wall), is
+        // much harder to hold the sights on — the weaker the shooter, the more so
+        let moving = match target {
+            Some((_, chest, _, _, tvel, grounded)) => {
+                let to = (chest - eye).normalize_or_zero();
+                let across = (tvel - to * tvel.dot(to)).length();
+                (1.0 + (across / 4.5).min(1.6) * lerp(1.6, 1.1, skill))
+                    * if grounded {
+                        1.0
+                    } else {
+                        lerp(1.9, 1.35, skill)
+                    }
+            }
+            None => 1.0,
+        };
         let wobble = vec2(
             (w * 1.3).sin() + (w * 3.1).sin() * 0.5,
             (w * 1.7).cos() * 0.8 + (w * 2.6).sin() * 0.3,
         ) * sk.aim_wobble
-            * steady;
+            * steady
+            * moving;
         bot.aim_err = bot.aim_err.lerp(wobble, (sk.aim_settle * dt).min(1.0));
         let mut aim_err_angle = 10.0;
         let mut dist_to_target = 0.0;
-        if let Some((_, chest, head, _, tvel)) = target {
-            // where it will be when the bullet arrives (better bots lead better), held
-            // higher by the drop over the distance
-            // (a far target crosses the view slowly: it is followed without lagging behind)
-            let lag = sk.track_lag * (40.0 / chest.distance(eye).max(1.0)).clamp(0.15, 1.0);
-            let seen = chest.lerp(head, sk.head_bias) - tvel * lag;
-            let (aim, _) = lead(eye, seen, tvel * lerp(0.4, 1.0, skill), ballistic.velocity);
+        if let Some((_, chest, head, _, tvel, _)) = target {
+            // its movement is read with a delay: a sharp turn fools a weak shooter for a
+            // good part of a second, a veteran only briefly
+            let read = lerp(0.55, 0.22, skill);
+            bot.vel_seen = bot.vel_seen.lerp(tvel, (dt / read).min(1.0));
+            // aimed ahead of where it was seen: by the moment it was seen ago and the
+            // bullet's flight (better bots lead more fully)
+            let seen = chest.lerp(head, sk.head_bias);
+            let ahead = bot.vel_seen * lerp(0.5, 0.82, skill);
+            let (aim, _) = lead(eye, seen + ahead * sk.track_lag, ahead, ballistic.velocity);
             let d = aim - eye;
             dist_to_target = d.length();
             let want_yaw = yaw_of(d) + bot.aim_err.x;
@@ -665,7 +706,7 @@ impl Game {
                 && self.rng.chance(lerp(0.004, 0.015, skill))
             {
                 bot.nade_ready = time + 15.0;
-                if let Some((_, chest, _, _, _)) = target {
+                if let Some((_, chest, _, _, _, _)) = target {
                     // low ballistic arc for the configured throw speed: R = v² sin(2θ) / g
                     let d = chest - eye;
                     let flat = vec3(d.x, 0.0, d.z);
@@ -727,7 +768,7 @@ impl Game {
             // hurt or reloading: duck behind something the enemy cannot see through
             if (reloading || hp < 40.0) && time > bot.cover_check {
                 bot.cover_check = time + 2.0;
-                if let Some((_, _, enemy_eye, _, _)) = target {
+                if let Some((_, _, enemy_eye, _, _, _)) = target {
                     let cands = self.nav.sample_near(pos, 9.0, 8, &mut self.rng);
                     bot.cover = cands
                         .into_iter()

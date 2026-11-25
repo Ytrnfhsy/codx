@@ -276,3 +276,70 @@ fn spawn_protection_rules() {
     );
     assert!(!g.p(human).unwrap().alive, "protection should be gone");
 }
+
+/// Duel against a juking target: full speed one way, then sharply the other, every
+/// `period` seconds (strafing, wall kicks). Returns (shots, hits).
+fn juke_accuracy(skill: f32, seed: u64, dist: f32, period: f32) -> (u32, u32) {
+    let (mut g, human) = game(skill, 2, seed, 0.0);
+    wait_playing(&mut g);
+    let bot = g.players.iter().flatten().find(|p| p.is_bot()).unwrap().id;
+    let m4 = DEFAULT_CLASSES[0].1;
+    if let Some(b) = g.pm(bot) {
+        b.loadout = m4;
+        b.weapons[0].id = m4.primary;
+        b.weapons[0].mag = 30;
+        b.weapons[0].reserve = 900;
+        b.slot = 0;
+    }
+    let mut x = 0.0f32;
+    for k in 0..(8.0 / TICK_DT) as usize {
+        let t = k as f32 * TICK_DT;
+        // 5.5 m/s (a sprint), turning round sharply
+        let v = if period <= 0.0 {
+            0.0
+        } else if ((t / period) as i32) % 2 == 0 {
+            5.5
+        } else {
+            -5.5
+        };
+        x += v * TICK_DT;
+        if let Some(h) = g.pm(human) {
+            h.body.pos = vec3(x, 0.0, 18.0 - dist);
+            h.body.vel = vec3(v, 0.0, 0.0);
+            h.hp = 1000.0;
+            h.alive = true;
+        }
+        if let Some(b) = g.pm(bot) {
+            b.body.pos = vec3(0.0, 0.0, 18.0);
+            b.body.vel = glam::Vec3::ZERO;
+        }
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+    }
+    let b = g.p(bot).unwrap();
+    (b.shots_fired, b.shots_hit)
+}
+
+fn juke(skill: f32, dist: f32, period: f32) -> (f32, u32, u32) {
+    let (f, h) = (0..10)
+        .map(|s| juke_accuracy(skill, 70 + s, dist, period))
+        .fold((0, 0), |a, x| (a.0 + x.0, a.1 + x.1));
+    (h as f32 / f.max(1) as f32, f, h)
+}
+
+#[test]
+fn juking_makes_bots_miss() {
+    let mut last = 0.0;
+    for skill in [0.1f32, 0.4, 0.7, 1.0] {
+        let jukes = juke(skill, 20.0, 0.45).0;
+        let still = juke(skill, 20.0, 0.0).0;
+        println!("skill {skill}: juking {jukes:.3}, standing {still:.3}");
+        // turning sharply is worth it at every level, most against the weaker bots
+        assert!(jukes < still * 0.6, "skill {skill}: {jukes} vs {still}");
+        assert!(jukes >= last - 0.02, "better bots read jukes better");
+        last = jukes;
+    }
+    // a normal bot hits somebody turning sharply only now and then
+    assert!(juke(0.4, 20.0, 0.45).0 < 0.1);
+}
