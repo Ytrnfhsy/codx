@@ -66,6 +66,8 @@ struct Args {
     hold_fire: bool,
     /// (smoke tests) hold the trigger for a second, then let go (a bow's shot)
     tap_fire: bool,
+    /// (smoke tests) aim down the sights once alive
+    ads: bool,
     /// (smoke tests) keep looking this far up (radians; negative: down)
     pitch: Option<f32>,
     /// (screenshots) no HUD over the world
@@ -149,6 +151,7 @@ fn parse_args() -> Args {
             "--open-controls" => a.open_controls = true,
             "--hold-fire" => a.hold_fire = true,
             "--tap-fire" => a.tap_fire = true,
+            "--ads" => a.ads = true,
             "--pitch" => {
                 a.pitch = next.and_then(|s| s.parse().ok());
                 i += 1;
@@ -899,6 +902,7 @@ async fn amain(args: Args) {
                 }
                 // (a tap: drawn for a second, from a while after spawning)
                 let since_alive = alive_at.map_or(0.0, |a| get_time() - a);
+                g.hold_ads = args.ads && g.alive && held > 5.0;
                 g.hold_fire = g.alive
                     && (args.hold_fire && held > 5.0
                         || args.tap_fire

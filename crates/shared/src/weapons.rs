@@ -208,11 +208,11 @@ pub static WEAPONS: [WeaponDef; 22] = [
        spread 4.2, 3.2, 1.0, 0.0, ads 0.25, recoil 3.2, 1.0, speed 0.95, zoom 1.15, head 1.0, scoped false, heft 1.0),
     // ---- sniper rifles: the classic, the anti-materiel one, the monster
     w!(Awm, "AWM", "AWM", Sniper, dmg 110.0 => 110.0, range 500.0 => 600.0, rpm 45.0, auto false, mag 5, res 20, reload 3.4, pellets 1,
-       spread 7.0, 0.0, 6.0, 0.0, ads 0.4, recoil 4.2, 0.8, speed 0.9, zoom 4.0, head 1.5, scoped true, heft 0.95),
+       spread 7.0, 0.0, 6.0, 0.0, ads 0.4, recoil 4.2, 0.8, speed 0.9, zoom 8.0, head 1.5, scoped true, heft 0.95),
     w!(Barrett, "Barrett M82", "Barrett M82", Sniper, dmg 140.0 => 140.0, range 600.0 => 800.0, rpm 120.0, auto false, mag 10, res 30, reload 3.8, pellets 1,
-       spread 8.0, 0.02, 7.0, 1.5, ads 0.55, recoil 5.5, 1.2, speed 0.82, zoom 4.5, head 1.5, scoped true, heft 1.2),
+       spread 8.0, 0.02, 7.0, 1.5, ads 0.55, recoil 5.5, 1.2, speed 0.82, zoom 8.0, head 1.5, scoped true, heft 1.2),
     w!(Alligator, "«Алігатор»", "Alligator", Sniper, dmg 250.0 => 250.0, range 800.0 => 1000.0, rpm 30.0, auto false, mag 5, res 15, reload 4.5, pellets 1,
-       spread 9.0, 0.0, 8.0, 0.0, ads 0.7, recoil 7.0, 1.5, speed 0.75, zoom 5.0, head 1.5, scoped true, heft 1.4),
+       spread 9.0, 0.0, 8.0, 0.0, ads 0.7, recoil 7.0, 1.5, speed 0.75, zoom 8.0, head 1.5, scoped true, heft 1.4),
     // ---- pistols: the plain one, the automatic one, the revolver
     w!(Fort17, "Форт-17", "Fort-17", Pistol, dmg 34.0 => 22.0, range 10.0 => 25.0, rpm 400.0, auto false, mag 12, res 48, reload 1.6, pellets 1,
        spread 2.4, 0.3, 1.0, 0.5, ads 0.14, recoil 1.0, 0.4, speed 1.05, zoom 1.2, head 1.4, scoped false, heft 0.25),
@@ -317,6 +317,13 @@ impl WeaponId {
         }
     }
     /// Makes no sound anybody far off hears (and shows nobody on a radar).
+    /// The magnification its own scope can be turned between (the same twice: fixed).
+    pub fn zoom_range(self) -> (f32, f32) {
+        match self {
+            WeaponId::Alligator => (8.0, 12.0),
+            w => (w.def().ads_zoom, w.def().ads_zoom),
+        }
+    }
     pub fn silent(self) -> bool {
         matches!(self, WeaponId::Crossbow | WeaponId::Bow)
     }

@@ -267,6 +267,8 @@ pub struct GameClient {
     pub draw_from: Option<f64>,
     /// (smoke tests) the trigger held down
     pub hold_fire: bool,
+    /// (smoke tests) aiming down the sights held
+    pub hold_ads: bool,
     /// The draw was let down (R): no new draw until the trigger is let go.
     draw_blocked: bool,
     /// How long the trigger has been held (a machine gun spinning up).
@@ -314,6 +316,8 @@ pub struct GameClient {
     pub hud_hp: f32,
     /// How far each hand's variable scope is turned up (0 weakest .. 1 strongest).
     pub scope_turn: [f32; 2],
+    /// The last enemy the scope rested on: how far, and when.
+    pub range_lock: Option<(f32, f64)>,
     pub sway: Vec2,
     step_acc: f32,
     pub breath: f32,
@@ -625,6 +629,7 @@ impl GameClient {
             next_fire: 0.0,
             draw_from: None,
             hold_fire: false,
+            hold_ads: false,
             draw_blocked: false,
             spin_held: 0.0,
             reload_until: None,
@@ -656,6 +661,7 @@ impl GameClient {
             view_roll: 0.0,
             hud_hp: 0.0,
             scope_turn: [0.0; 2],
+            range_lock: None,
             sway: Vec2::ZERO,
             step_acc: 0.0,
             breath: 4.0,
@@ -2094,7 +2100,34 @@ impl GameClient {
     /// Magnification when aiming: a scope's (a variable one at what it is turned to),
     /// otherwise the gun's own.
     pub fn ads_zoom(&self) -> f32 {
+        // a rifle's own scope that turns (no scope from the loot on it)
+        if self.gun_scope_turns() {
+            let (lo, hi) = self.weapon().zoom_range();
+            let k = self.scope_turn[self.slot as usize & 1].clamp(0.0, 1.0);
+            return lo + (hi - lo) * k;
+        }
         toon_shared::inventory::aimed_zoom(self.ws().ads_zoom, self.sight(), self.sight_zoom_now())
+    }
+
+    /// The gun in hand has its own variable scope and nothing put over it.
+    pub fn gun_scope_turns(&self) -> bool {
+        let (lo, hi) = self.weapon().zoom_range();
+        hi > lo && self.sight() < 2
+    }
+
+    /// The scope can be turned (its own, or one from the loot).
+    pub fn scope_turns(&self) -> bool {
+        self.gun_scope_turns() || toon_shared::inventory::sight_variable(self.sight())
+    }
+
+    /// The distance the scope's holdover is set for: what the crosshair rests on, but an
+    /// enemy it rested on in the last two seconds is kept (lifting the barrel over him
+    /// to hold over must not lose his range).
+    pub fn hold_range(&self) -> Option<f32> {
+        match self.range_lock {
+            Some((d, t)) if self.now - t < 2.0 => Some(d),
+            _ => self.scope_target().map(|r| r.0),
+        }
     }
 
     /// What the sight on the gun in hand magnifies right now.
@@ -2160,14 +2193,19 @@ impl GameClient {
     /// The scope's rangefinder: how far off is what the crosshair rests on (a player or
     /// the world), up to 2 km.
     pub fn scope_range(&self) -> Option<f32> {
+        self.scope_target().map(|r| r.0)
+    }
+
+    /// What the crosshair rests on: how far, and whether it is a player.
+    pub fn scope_target(&self) -> Option<(f32, bool)> {
         const MAX: f32 = 2000.0;
         let eye = self.eye();
         let dir = self.aim_dir();
-        let mut best = self.world.raycast(eye, dir, MAX).map(|h| h.0);
+        let mut best = self.world.raycast(eye, dir, MAX).map(|h| (h.0, false));
         for r in self.remotes.values().filter(|r| r.alive) {
-            let len = best.unwrap_or(MAX);
+            let len = best.map_or(MAX, |b| b.0);
             if let Some((t, _)) = ray_player(eye, dir, r.pos, r.yaw, r.stance, len) {
-                best = Some(t);
+                best = Some((t, true));
             }
         }
         best
@@ -2895,8 +2933,9 @@ impl GameClient {
                 self.want_stance = Stance::Prone;
             }
             // (a click shorter than a frame still counts)
-            let ads_held =
-                can_act && (binds::down(Action::Aim) || binds::pressed(Action::Aim)) && !downed;
+            let ads_held = can_act
+                && (binds::down(Action::Aim) || binds::pressed(Action::Aim) || self.hold_ads)
+                && !downed;
             let reloading = self.reload_until.is_some();
             if self.winded && (!key(Action::Sprint) || self.stamina >= self.sprint_max() * 0.35) {
                 self.winded = false;
@@ -3107,14 +3146,20 @@ impl GameClient {
                 self.switch_to(1);
             }
             let wheel = mouse_wheel().1;
-            let variable = toon_shared::inventory::sight_variable(self.sight());
+            let variable = self.scope_turns();
+            // (the range of an enemy under the crosshair is kept a moment for the holdover)
+            if self.scoped() {
+                if let Some((d, true)) = self.scope_target() {
+                    self.range_lock = Some((d, now));
+                }
+            }
             if can_act && wheel.abs() > 0.1 && variable && self.ads_t > 0.5 {
                 // aiming through a variable scope: the wheel turns its magnification
                 // (five steps from the weakest to the strongest)
                 let k = &mut self.scope_turn[self.slot as usize & 1];
                 *k = (*k + wheel.signum() * 0.25).clamp(0.0, 1.0);
                 // (the server keeps it for the killcam of whoever we shoot)
-                let zoom = (self.sight_zoom_now() * 10.0).round() as u8;
+                let zoom = (self.ads_zoom() * 10.0).round() as u8;
                 self.net.send(C2S::ScopeZoom {
                     slot: self.slot & 1,
                     zoom,

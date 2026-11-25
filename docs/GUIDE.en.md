@@ -39,7 +39,13 @@ Modes:
   yet. Through a sniper or any other magnifying scope the fog draws back (up to 2.5 times
   further), and the server sends the players in the scope's view up to 850 m away. Over the
   right arm of the scope's cross there is a rangefinder: the distance to whatever the
-  crosshair rests on (a player or a wall, up to 2 km).
+  crosshair rests on (a player or a wall, up to 2 km). Under the centre is a **holdover
+  ladder**: a mark per 100 m (numbers are hundreds of metres, left and right by turns) worked
+  out from the gun's real ballistics and the current zoom: put the mark for its range on the
+  target and the dropping bullet hits. A yellow mark sets itself at the hold for the range
+  found, and the words under it say where to hold ("412 m · between 4 and 5"); an enemy's
+  range is kept for 2 s, so lifting the barrel over him does not lose it. The sniper rifles'
+  optics are 8×, the Alligator's 8–12× (mouse wheel).
   **Squads** ("Create server" → "Squads": everyone on their own / duos / fours; on a server
   `brsquad <1|2|4>` or `br.squad` in the config). Before the match a player is not on the
   island but in the **lobby**: your character on a podium in the middle, your squadmates next to
