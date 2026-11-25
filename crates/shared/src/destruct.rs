@@ -788,9 +788,15 @@ impl Wreck {
         let mut idx = Vec::new();
         for (sl, dy) in slices.into_iter().zip(drops) {
             for b in sl {
+                // up there its jib and cab were out of reach and only drawn; lying on the
+                // ground they are solid things to stand on and hide behind (a cable or a
+                // pane of glass stays something you pass)
+                let size = b.max - b.min;
+                let solid = b.solid || (b.visible && size.min_element() >= 0.1);
                 let b = MapBox {
                     min: b.min + Vec3::Y * dy,
                     max: b.max + Vec3::Y * dy,
+                    solid,
                     ..b
                 };
                 idx.push(self.add(map, world, b, ch));
@@ -1140,6 +1146,7 @@ mod tests {
             .find(|b| b.max.x - b.min.x > 20.0)
             .expect("the jib went with it");
         assert!(jib.max.y < 3.0, "{jib:?}");
+        assert!(jib.solid, "the jib on the ground can be stood on");
         // every slice of it lies on something: nothing of it hangs over empty air
         let w2 = World::from_map(&m);
         for &i in &ch.topples[0].boxes {
