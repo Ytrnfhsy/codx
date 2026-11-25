@@ -219,8 +219,9 @@ impl GameClient {
             draw_rectangle(cx - 0.5, cy - 3.0, 1.0, 6.0, c);
         }
         // crosshair
+        // (a bow has no sights: its crosshair stays when aiming)
         if self.alive
-            && self.ads_t < 0.5
+            && (self.ads_t < 0.5 || self.weapon().draw_time() > 0.0)
             && !self.sprinting
             && self.overlay == Overlay::None
             && self.piloting.is_none()
@@ -254,6 +255,23 @@ impl GameClient {
                 Color::new(1.0, 1.0, 1.0, 0.85)
             };
             draw_rectangle(cx - bw / 2.0, by, bw * d, 4.0, c);
+            // where the arrow would come down: a small ring on the spot and its distance
+            if let Some((at, dist)) = self.arrow_landing() {
+                if let Some(sp) = view.project(at) {
+                    let a = 0.35 + 0.55 * d;
+                    let ring = Color::new(1.0, 0.85, 0.35, a);
+                    draw_circle_lines(sp.x, sp.y, 7.0, 3.0, Color::new(0.0, 0.0, 0.0, a * 0.6));
+                    draw_circle_lines(sp.x, sp.y, 7.0, 1.6, ring);
+                    draw_circle(sp.x, sp.y, 1.6, ring);
+                    ui.shadowed(
+                        &format!("{dist:.0} {}", t("м", "m")),
+                        sp.x + 11.0,
+                        sp.y + 5.0,
+                        14,
+                        Color::new(1.0, 1.0, 1.0, a),
+                    );
+                }
+            }
         }
         // hitmarker
         draw_hitmarker(
@@ -3576,34 +3594,30 @@ impl GameClient {
             ui.shadowed(&format!("/ {res}"), x + mw + 8.0, y + 42.0, 24, MUTED);
             ui.shadowed(def.name(), x, y + 70.0, 18, TEXT);
         }
-        // grenades
+        // grenades: the lethal ones, then the tactical ones
+        let (lethal, tactical) = (self.lethal_now(), self.tactical_now());
         for i in 0..self.grenades {
-            draw_circle(
+            crate::loadout_menu::draw_grenade(
+                crate::loadout_menu::Nade::Lethal(lethal),
                 x + 200.0 + i as f32 * 22.0,
                 y + 30.0,
-                8.0,
-                Color::from_rgba(90, 140, 70, 255),
+                1.0,
             );
-            draw_circle_lines(x + 200.0 + i as f32 * 22.0, y + 30.0, 8.0, 2.0, BLACK);
         }
-        // smoke grenades: grey cans after the frags
         for i in 0..self.smokes {
-            let sx = x + 200.0 + (self.grenades + i) as f32 * 22.0;
-            draw_rectangle(
-                sx - 6.0,
-                y + 21.0,
-                12.0,
-                18.0,
-                Color::from_rgba(150, 156, 162, 255),
+            crate::loadout_menu::draw_grenade(
+                crate::loadout_menu::Nade::Tactical(tactical),
+                x + 200.0 + (self.grenades + i) as f32 * 22.0,
+                y + 30.0,
+                1.0,
             );
-            draw_rectangle(sx - 6.0, y + 28.0, 12.0, 4.0, WHITE);
-            draw_rectangle_lines(sx - 6.0, y + 21.0, 12.0, 18.0, 2.0, BLACK);
         }
         if self.smoke_held {
             ui.centered(
                 &tr!(
-                    "Димова: відпусти {}, щоб кинути",
-                    "Smoke: release {} to throw",
+                    "{}: відпусти {}, щоб кинути",
+                    "{}: release {} to throw",
+                    tactical.name(),
                     key(Action::Smoke)
                 ),
                 w / 2.0,
@@ -3612,7 +3626,19 @@ impl GameClient {
                 TEXT,
             );
         }
-        if let Some(start) = self.cooking {
+        if self.cooking.is_some() && lethal == toon_shared::weapons::Lethal::Molotov {
+            ui.centered(
+                &tr!(
+                    "Молотов: відпусти {}, щоб кинути",
+                    "Molotov: release {} to throw",
+                    key(Action::Grenade)
+                ),
+                w / 2.0,
+                h * 0.62,
+                20,
+                TEXT,
+            );
+        } else if let Some(start) = self.cooking {
             let left = (self.tuning.grenade.fuse as f64 - (self.now - start)).max(0.0);
             ui.centered(
                 &tr!("Граната: {left:.1}", "Grenade: {left:.1}"),

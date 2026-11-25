@@ -69,6 +69,8 @@ pub struct VmState {
     pub flash: bool,
     /// Battle royale, no gun in this hand: only the knife.
     pub bare: bool,
+    /// How far a bow is drawn (0..1).
+    pub draw: f32,
 }
 
 fn smooth(x: f32) -> f32 {
@@ -169,6 +171,11 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         1.0 + (zoom - 1.0) * 0.25
     } else {
         zoom
+    };
+    // a drawn bow narrows the view a little: the eye settles on the target
+    let zoom = match &g.killcam {
+        None => zoom * g.draw_zoom(),
+        Some(_) => zoom,
     };
     if first_person {
         fovy = 2.0 * ((fovy * 0.5).tan() / zoom).atan();
@@ -942,13 +949,24 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
     let mut pitch = 0.0f32;
     let mut yaw = 0.0f32;
     let mut roll = 0.0f32;
+    // a bow is raised left of the line of sight and canted, never across the eye; the
+    // arrow comes back with the string
+    let bow = w.draw_time() > 0.0;
+    let mut nock = Vec3::ZERO;
+    if bow {
+        let k = smooth(ads.max(vm.draw));
+        pos = hip.lerp(vec3(-0.17, -0.12, -0.6), k);
+        roll -= 0.38 * k;
+        yaw += 0.06 * k;
+        nock = vec3(0.0, 0.0, 0.12 * smooth(vm.draw));
+    }
     // bob & sway
     pos += vec3(
         vm.bob_phase.sin() * 0.012,
         -(vm.bob_phase.cos().abs()) * 0.016,
         0.0,
     ) * vm.bob;
-    pos += vec3(-vm.sway.x, vm.sway.y, 0.0) * (1.0 - ads * 0.7);
+    pos += vec3(-vm.sway.x, vm.sway.y, 0.0) * if bow { 1.0 } else { 1.0 - ads * 0.7 };
     // recoil: kick back and up, with a little random-looking roll
     pos.z += vm.recoil * 0.035;
     pitch += vm.recoil * 0.06;
@@ -967,7 +985,7 @@ fn draw_viewmodel(vm: &VmState, mats: &Materials, settings: &Settings) {
         pitch -= 0.15 * k;
     }
     // reload: tilt the gun, pull the magazine, slap a new one in, rack the bolt
-    let mut mag_off = Vec3::ZERO;
+    let mut mag_off = nock;
     let mut hand_to_mag = 0.0f32;
     let mut pump = 0.0f32;
     let shotgun = def.class == WeaponClass::Shotgun;

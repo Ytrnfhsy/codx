@@ -9,7 +9,7 @@ use crate::ui::*;
 use macroquad::prelude::*;
 use toon_shared::lang::t;
 use toon_shared::tr;
-use toon_shared::weapons::{WeaponClass, WeaponId};
+use toon_shared::weapons::{Lethal, Tactical, WeaponClass, WeaponId};
 
 /// The columns: a kind of gun and its title.
 fn columns() -> [(WeaponClass, &'static str); 8] {
@@ -23,6 +23,61 @@ fn columns() -> [(WeaponClass, &'static str); 8] {
         (WeaponClass::Pistol, t("Пістолети", "Pistols")),
         (WeaponClass::Launcher, t("Особливі", "Special")),
     ]
+}
+
+/// A grenade to draw as an icon.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Nade {
+    Lethal(Lethal),
+    Tactical(Tactical),
+}
+
+/// A small grenade icon centred on (x, y); `k` scales it (1 = the HUD's size).
+pub fn draw_grenade(n: Nade, x: f32, y: f32, k: f32) {
+    let ink = Color::from_rgba(12, 12, 18, 255);
+    let rgb = |c: [u8; 3]| Color::from_rgba(c[0], c[1], c[2], 255);
+    match n {
+        Nade::Lethal(Lethal::Frag) => {
+            draw_rectangle(
+                x - 3.0 * k,
+                y - 12.0 * k,
+                6.0 * k,
+                5.0 * k,
+                rgb([70, 74, 80]),
+            );
+            draw_circle(x, y, 8.0 * k, rgb([90, 140, 70]));
+            draw_circle_lines(x, y, 8.0 * k, 2.0, ink);
+        }
+        Nade::Lethal(Lethal::Molotov) => {
+            // a bottle with a burning rag
+            draw_rectangle(
+                x - 6.0 * k,
+                y - 4.0 * k,
+                12.0 * k,
+                14.0 * k,
+                rgb([120, 150, 70]),
+            );
+            draw_rectangle(
+                x - 2.5 * k,
+                y - 11.0 * k,
+                5.0 * k,
+                8.0 * k,
+                rgb([120, 150, 70]),
+            );
+            draw_rectangle_lines(x - 6.0 * k, y - 4.0 * k, 12.0 * k, 14.0 * k, 2.0, ink);
+            draw_circle(x, y - 13.0 * k, 4.0 * k, rgb([255, 150, 40]));
+            draw_circle(x, y - 14.0 * k, 2.0 * k, rgb([255, 230, 120]));
+        }
+        Nade::Tactical(t) => {
+            let (body, band) = match t {
+                Tactical::Smoke => ([150, 156, 162], [255, 255, 255]),
+                Tactical::Flash => ([70, 74, 84], [250, 210, 60]),
+            };
+            draw_rectangle(x - 6.0 * k, y - 9.0 * k, 12.0 * k, 18.0 * k, rgb(body));
+            draw_rectangle(x - 6.0 * k, y - 2.0 * k, 12.0 * k, 4.0 * k, rgb(band));
+            draw_rectangle_lines(x - 6.0 * k, y - 9.0 * k, 12.0 * k, 18.0 * k, 2.0, ink);
+        }
+    }
 }
 
 fn guns_of(c: WeaponClass) -> Vec<WeaponId> {
@@ -124,7 +179,19 @@ impl GameClient {
         let (bx, by, bw, bh) = (w - mx - 720.0 * k, 36.0 * k, 720.0 * k, 84.0 * k);
         round_rect(bx, by, bw, bh, 16.0 * k, PANEL);
         ui.text(
-            t("Твій набір", "Your loadout"),
+            &ui.fit(
+                &format!(
+                    "{} · {} ×{} · {} ×{}",
+                    t("Твій набір", "Your loadout"),
+                    pick.lethal.name(),
+                    pick.lethal.count(),
+                    pick.tactical.name(),
+                    pick.tactical.count()
+                ),
+                fs(16.0),
+                false,
+                bw - 430.0 * k,
+            ),
             bx + 24.0 * k,
             by + 28.0 * k,
             fs(16.0),
@@ -136,7 +203,7 @@ impl GameClient {
             pick.secondary.def().name()
         );
         ui.bold(
-            &ui.fit(&summary, fs(21.0), true, bw - 300.0 * k),
+            &ui.fit(&summary, fs(21.0), true, bw - 430.0 * k),
             bx + 24.0 * k,
             by + 60.0 * k,
             fs(21.0),
@@ -158,7 +225,7 @@ impl GameClient {
         );
 
         // ---- the grid
-        let top = 150.0 * k;
+        let top = 168.0 * k;
         let gap = 18.0 * k;
         let ncol = columns().len() as f32;
         let colw = (w - 2.0 * mx - gap * (ncol - 1.0)) / ncol;
@@ -193,6 +260,54 @@ impl GameClient {
         ]
         .iter()
         .position(|&key| is_key_pressed(key));
+        // 9 and 0: the next lethal / tactical grenade
+        if is_key_pressed(KeyCode::Key9) {
+            pick.lethal = match pick.lethal {
+                Lethal::Frag => Lethal::Molotov,
+                Lethal::Molotov => Lethal::Frag,
+            };
+        }
+        if is_key_pressed(KeyCode::Key0) {
+            pick.tactical = match pick.tactical {
+                Tactical::Smoke => Tactical::Flash,
+                Tactical::Flash => Tactical::Smoke,
+            };
+        }
+        // the two groups on their own tinted ground: main guns gold, the rest blue
+        let col_x = |ci: usize| mx + ci as f32 * (colw + gap);
+        let side0 = columns().iter().position(|c| c.0.is_sidearm()).unwrap_or(6);
+        let ground_h = h - foot - top + 22.0 * k;
+        for (x0, x1, tint, label) in [
+            (
+                col_x(0),
+                col_x(side0 - 1) + colw,
+                MAIN_TINT,
+                t("ОСНОВНА ЗБРОЯ", "PRIMARY"),
+            ),
+            (
+                col_x(side0),
+                col_x(columns().len() - 1) + colw,
+                SIDE_TINT,
+                t("ДОДАТКОВА ЗБРОЯ Й ГРАНАТИ", "SECONDARY & GRENADES"),
+            ),
+        ] {
+            let pad = 8.0 * k;
+            round_rect(
+                x0 - pad,
+                top - 22.0 * k,
+                x1 - x0 + 2.0 * pad,
+                ground_h,
+                16.0 * k,
+                Color::new(tint.r, tint.g, tint.b, 0.10),
+            );
+            ui.bold(
+                &ui.fit(label, fs(13.0), true, x1 - x0),
+                x0 + 4.0 * k,
+                top - 6.0 * k,
+                fs(13.0),
+                Color::new(tint.r, tint.g, tint.b, 0.9),
+            );
+        }
         let mut chosen_by_key = None;
         if let Some(d) = digit {
             match self.pick_col {
@@ -207,14 +322,14 @@ impl GameClient {
             let x = mx + ci as f32 * (colw + gap);
             let pistols = class.is_sidearm();
             let keyed = self.pick_col == Some(ci);
-            round_rect(
-                x,
-                top,
-                colw,
-                head_h,
-                12.0 * k,
-                if keyed { PANEL2 } else { PANEL },
-            );
+            round_rect(x, top, colw, head_h, 12.0 * k, {
+                let base = if pistols { SIDE_CARD } else { MAIN_CARD };
+                if keyed {
+                    lighter(base)
+                } else {
+                    base
+                }
+            });
             let badge = if pistols {
                 Color::new(0.47, 0.75, 1.0, 1.0)
             } else {
@@ -281,13 +396,14 @@ impl GameClient {
                             Color::new(1.0, 1.0, 1.0, 0.25),
                         );
                     }
+                    let base = if pistols { SIDE_CARD } else { MAIN_CARD };
                     round_rect(
                         x,
                         y,
                         colw,
                         cardh,
                         14.0 * k,
-                        if hover { PANEL2 } else { PANEL },
+                        if hover { lighter(base) } else { base },
                     );
                 }
                 let d = gun.def();
@@ -379,6 +495,81 @@ impl GameClient {
             }
         }
 
+        // ---- grenades: two cards under the sidearms
+        let nrow = columns()[side0..]
+            .iter()
+            .map(|c| guns_of(c.0).len())
+            .max()
+            .unwrap_or(3) as f32;
+        let ny = top + head_h + 14.0 * k + nrow * (cardh + 14.0 * k);
+        let nh = (h - foot - ny).min(cardh * 1.15);
+        for (gi, lethal) in [true, false].into_iter().enumerate() {
+            let x = col_x(side0 + gi);
+            round_rect(x, ny, colw, nh, 14.0 * k, NADE_CARD);
+            let (title, key) = if lethal {
+                (t("Бойова", "Lethal"), "9")
+            } else {
+                (t("Тактична", "Tactical"), "0")
+            };
+            ui.bold(key, x + 14.0 * k, ny + 24.0 * k, fs(16.0), MUTED);
+            ui.bold(title, x + 34.0 * k, ny + 24.0 * k, fs(17.0), TEXT);
+            let rh = ((nh - 36.0 * k) / 2.0 - 4.0 * k).max(20.0 * k);
+            for (oi, nade) in (0..2)
+                .map(|i| {
+                    if lethal {
+                        Nade::Lethal(Lethal::ALL[i])
+                    } else {
+                        Nade::Tactical(Tactical::ALL[i])
+                    }
+                })
+                .enumerate()
+            {
+                let ry = ny + 34.0 * k + oi as f32 * (rh + 4.0 * k);
+                let (name, count, about, on) = match nade {
+                    Nade::Lethal(l) => (l.name(), l.count(), l.about(), pick.lethal == l),
+                    Nade::Tactical(tc) => (tc.name(), tc.count(), tc.about(), pick.tactical == tc),
+                };
+                let hover = mouse_in(ui.mouse, x + 6.0 * k, ry, colw - 12.0 * k, rh);
+                round_rect(
+                    x + 6.0 * k,
+                    ry,
+                    colw - 12.0 * k,
+                    rh,
+                    10.0 * k,
+                    if on {
+                        Color::new(1.0, 0.79, 0.29, 0.28)
+                    } else if hover {
+                        Color::new(1.0, 1.0, 1.0, 0.10)
+                    } else {
+                        Color::new(0.0, 0.0, 0.0, 0.18)
+                    },
+                );
+                let ik = (rh / 40.0).clamp(0.6, 1.3);
+                draw_grenade(nade, x + 26.0 * k, ry + rh / 2.0 + 2.0 * ik, ik);
+                let tx = x + 46.0 * k;
+                ui.bold(
+                    &ui.fit(&format!("{name} ×{count}"), fs(15.0), true, colw - 56.0 * k),
+                    tx,
+                    ry + rh * 0.45,
+                    fs(15.0),
+                    if on { ACCENT } else { TEXT },
+                );
+                ui.text(
+                    &ui.fit(about, fs(12.0), false, colw - 56.0 * k),
+                    tx,
+                    ry + rh * 0.45 + 16.0 * k,
+                    fs(12.0),
+                    MUTED,
+                );
+                if hover && ui.clicked {
+                    match nade {
+                        Nade::Lethal(l) => pick.lethal = l,
+                        Nade::Tactical(tc) => pick.tactical = tc,
+                    }
+                }
+            }
+        }
+
         let hint = match self.pick_col {
             Some(c) => tr!(
                 "{}: натисни номер зброї (1–{})",
@@ -387,8 +578,8 @@ impl GameClient {
                 guns_of(columns()[c].0).len()
             ),
             None => t(
-                "Клік — вибрати · 1–8, потім номер — вибір з клавіатури · Enter — в бій · Esc — закрити · набір запам'ятовується",
-                "Click to pick · 1–8 then a number from the keyboard · Enter to fight · Esc to close · the loadout is remembered",
+                "Клік — вибрати · 1–8, потім номер — вибір з клавіатури · 9 / 0 — гранати · Enter — в бій · Esc — закрити · набір запам'ятовується",
+                "Click to pick · 1–8 then a number from the keyboard · 9 / 0 for grenades · Enter to fight · Esc to close · the loadout is remembered",
             )
             .to_string(),
         };
@@ -408,6 +599,18 @@ impl GameClient {
         }
         None
     }
+}
+
+/// The ground and the cards of the main guns (warm), of the sidearms (cool) and of the
+/// grenades (green).
+const MAIN_TINT: Color = Color::new(1.0, 0.79, 0.29, 1.0);
+const SIDE_TINT: Color = Color::new(0.47, 0.75, 1.0, 1.0);
+const MAIN_CARD: Color = Color::new(0.21, 0.20, 0.24, 1.0);
+const SIDE_CARD: Color = Color::new(0.13, 0.21, 0.31, 1.0);
+const NADE_CARD: Color = Color::new(0.14, 0.23, 0.22, 1.0);
+
+fn lighter(c: Color) -> Color {
+    Color::new(c.r + 0.07, c.g + 0.07, c.b + 0.08, c.a)
 }
 
 /// The dark text on light (accent) buttons.

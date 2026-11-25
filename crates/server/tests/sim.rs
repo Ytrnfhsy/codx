@@ -488,3 +488,52 @@ fn bots_get_tired_sprinting() {
         "a bot sprinted {longest} s without a break"
     );
 }
+
+#[test]
+fn the_loadout_picks_what_g_and_q_throw() {
+    use toon_shared::weapons::{Lethal, Tactical};
+    let (mut g, a) = setup(MapId::Depot, Mode::Tdm);
+    g.handle(
+        a,
+        C2S::SetLoadout(toon_shared::weapons::Loadout {
+            lethal: Lethal::Molotov,
+            tactical: Tactical::Flash,
+            ..DEFAULT_CLASSES[0].1
+        }),
+    );
+    for _ in 0..(20.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        if g.state == MatchState::Playing && g.p(a).is_some_and(|p| p.alive) {
+            break;
+        }
+    }
+    g.grenades.clear();
+    assert_eq!(g.p(a).unwrap().grenades, 1, "one molotov");
+    assert_eq!(g.p(a).unwrap().smokes, 2, "two flashbangs");
+    {
+        let p = g.pm(a).unwrap();
+        p.protected_until = 0.0;
+    }
+    let eye = g.p(a).unwrap().eye();
+    for smoke in [false, true] {
+        g.handle(
+            a,
+            C2S::Grenade {
+                origin: eye.to_array(),
+                dir: [0.3, -1.0, 0.0],
+                cook: 0.0,
+                smoke,
+            },
+        );
+    }
+    let kinds: Vec<u8> = g.grenades.iter().map(|n| n.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            toon_shared::inventory::THROW_MOLOTOV,
+            toon_shared::inventory::THROW_FLASH
+        ]
+    );
+    assert!(g.grenades.iter().all(|n| !n.smoke));
+}

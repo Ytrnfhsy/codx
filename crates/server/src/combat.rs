@@ -1053,6 +1053,20 @@ impl Game {
         } else {
             p.grenades -= 1;
         }
+        // the team modes: what the loadout carries instead of a frag or a smoke
+        let kind = if self.mode == toon_shared::Mode::Br {
+            0
+        } else if smoke {
+            match p.loadout.tactical {
+                toon_shared::weapons::Tactical::Flash => toon_shared::inventory::THROW_FLASH,
+                toon_shared::weapons::Tactical::Smoke => 0,
+            }
+        } else {
+            match p.loadout.lethal {
+                toon_shared::weapons::Lethal::Molotov => toon_shared::inventory::THROW_MOLOTOV,
+                toon_shared::weapons::Lethal::Frag => 0,
+            }
+        };
         let eye = p.eye();
         let origin = if origin.is_finite() && origin.distance(eye) < 1.2 {
             origin
@@ -1071,7 +1085,11 @@ impl Game {
         if dir == Vec3::ZERO || !vel.is_finite() {
             return;
         }
-        let (fuse, cook) = if smoke {
+        let (fuse, cook) = if kind == toon_shared::inventory::THROW_MOLOTOV {
+            (5.0, 0.0)
+        } else if kind == toon_shared::inventory::THROW_FLASH {
+            (1.5, 0.0)
+        } else if smoke {
             (SMOKE_FUSE, 0.0)
         } else {
             (gt.fuse, cook.clamp(0.0, (gt.fuse - 0.3).max(0.0)))
@@ -1083,8 +1101,8 @@ impl Game {
             pos: origin,
             vel,
             explode_at: time + (fuse - cook) as f64,
-            smoke,
-            kind: 0,
+            smoke: smoke && kind == 0,
+            kind,
         });
     }
 

@@ -58,6 +58,8 @@ struct Args {
     gun: Option<String>,
     /// (smoke tests) leave the loadout screen open
     open_loadout: bool,
+    /// (smoke tests) hold the trigger down once alive
+    hold_fire: bool,
     team: Option<String>,
     map: Option<String>,
     mode: Option<String>,
@@ -128,6 +130,7 @@ fn parse_args() -> Args {
                 i += 1;
             }
             "--open-loadout" => a.open_loadout = true,
+            "--hold-fire" => a.hold_fire = true,
             "--class" => {
                 a.class = next.and_then(|s| s.parse().ok());
                 i += 1;
@@ -841,6 +844,7 @@ async fn amain(args: Args) {
                     g.switch_to(1);
                     auto_switch = false;
                 }
+                g.hold_fire = args.hold_fire && g.alive && get_time() - start > 5.0;
                 if args.open_loadout && g.alive && get_time() - start > 5.0 {
                     g.overlay = Overlay::Class;
                 }

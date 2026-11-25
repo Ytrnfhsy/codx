@@ -1436,7 +1436,7 @@ impl Game {
             },
         ];
         p.grenades = l.grenades();
-        p.smokes = 1;
+        p.smokes = l.tacticals();
         p.driving = None;
         p.reload_end = None;
         p.switch_end = time + 0.3;

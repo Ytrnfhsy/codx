@@ -43,6 +43,8 @@ fn random_msg(rng: &mut Rng, life: u16, seq: &mut u32) -> C2S {
         1 => C2S::SetLoadout(Loadout {
             primary: w,
             secondary: weapons[rng.below(weapons.len())],
+            lethal: toon_shared::weapons::Lethal::ALL[rng.below(2)],
+            tactical: toon_shared::weapons::Tactical::ALL[rng.below(2)],
         }),
         2 => C2S::Spawn,
         3..=5 => {

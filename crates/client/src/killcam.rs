@@ -698,6 +698,7 @@ impl Killcam {
         let ws = tuning.weapon(self.weapon);
         let since = |t: f64| (self.pt - t) as f32;
         VmState {
+            draw: 0.0,
             sight: self.info.gear.sight,
             mods: self.info.gear.mods,
             weapon: self.weapon,

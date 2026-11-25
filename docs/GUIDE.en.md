@@ -493,7 +493,10 @@ says who pinged what. A map marker (`M`) is a different thing: a yellow pin.
 * The **crossbow** and the **bow** are quiet (no flash; enemies and bots hear them only close
   by), and the arrow flies slowly and drops a lot. **The bow is drawn**: hold the fire button and
   a bar under the crosshair fills (a full draw takes 0.75 s, then it turns gold), let go and the
-  arrow flies. A weak draw is a slower arrow that drops sooner and hits softer (down to 30 % of
+  arrow flies. While drawing, the bow comes up left of your eye and cants, the view closes in a
+  little, the crosshair tightens (a full draw sends the arrow exactly where you look), and a ring
+  with the distance glows where the arrow would come down. A full draw holds steady for ~2 s,
+  then the arms start to shake. `R` lets the string down without a shot. A weak draw is a slower arrow that drops sooner and hits softer (down to 30 % of
   the damage). The server never allows more draw than the time since the last shot gave.
 * Battle royale ammo: assault and marksman rifles take rifle rounds, machine guns MG rounds, the
   RPG rockets (at most 3 in the backpack), the crossbow and the bow "arrows and bolts".
@@ -511,8 +514,12 @@ breath" before a long shot and switch to the gun that reaches the target.
 a grid of 8 columns by kind. Each card shows the gun's silhouette, damage, rate of fire and range
 (from the server's settings). A click on a main gun makes it your primary, on a pistol or a
 launcher (RPG, crossbow, bow) your secondary. From the keyboard: a column's number (1–8), then
-the gun's number in it; Enter to fight. The loadout is remembered for next time. There are no
-perks in the game: the gun and your hands decide everything.
+the gun's number in it; Enter to fight. Main guns sit on a warm ground, the secondary ones on a blue one. Under the secondary ones are
+the **grenades**: the lethal one on `G` (two frags you can cook, or one molotov: fire where it
+lands) and the tactical one on `Q` (one smoke, or two flashbangs that blind whoever looks their
+way); `9` and `0` switch them from the keyboard. In the battle royale grenades come only from
+loot. The loadout is remembered for next time. There are no perks in the game: the gun and your
+hands decide everything.
 
 **Killstreaks** (kills in a row without dying):
 

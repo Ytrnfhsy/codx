@@ -260,6 +260,10 @@ pub struct GameClient {
     next_fire: f64,
     /// When the bow's string started being drawn (held trigger).
     pub draw_from: Option<f64>,
+    /// (smoke tests) the trigger held down
+    pub hold_fire: bool,
+    /// The draw was let down (R): no new draw until the trigger is let go.
+    draw_blocked: bool,
     /// How long the trigger has been held (a machine gun spinning up).
     spin_held: f32,
     pub reload_until: Option<(f64, f64)>,
@@ -290,6 +294,8 @@ pub struct GameClient {
     pub sprinting: bool,
     pub grenades: u8,
     pub smokes: u8,
+    /// The loadout of this life (which grenades the counts above are).
+    pub kit: Loadout,
     pub cooking: Option<f64>,
     pub melee_until: f64,
     pub melee_ready: f64,
@@ -598,6 +604,8 @@ impl GameClient {
             slot: 0,
             next_fire: 0.0,
             draw_from: None,
+            hold_fire: false,
+            draw_blocked: false,
             spin_held: 0.0,
             reload_until: None,
             switch_until: 0.0,
@@ -617,6 +625,7 @@ impl GameClient {
             sprinting: false,
             grenades: 0,
             smokes: 0,
+            kit: toon_shared::weapons::DEFAULT_CLASSES[0].1,
             cooking: None,
             melee_until: 0.0,
             melee_ready: 0.0,
@@ -936,7 +945,8 @@ impl GameClient {
                 ];
                 self.slot = 0;
                 self.grenades = loadout.grenades();
-                self.smokes = 1;
+                self.smokes = loadout.tacticals();
+                self.kit = loadout;
                 self.reload_until = None;
                 self.switch_until = now + 0.3;
                 self.switch_dur = 0.3;
@@ -1916,6 +1926,7 @@ impl GameClient {
     pub fn vm_state(&self) -> VmState {
         let now = self.now;
         VmState {
+            draw: self.draw_now(),
             sight: self.sight(),
             mods: self.mods(),
             weapon: self.weapon(),
@@ -1953,7 +1964,11 @@ impl GameClient {
             Stance::Crouch => 0.8,
             Stance::Prone => 0.65,
         };
-        let base = hip + (def.ads_spread - hip) * self.ads_t;
+        let mut base = hip + (def.ads_spread - hip) * self.ads_t;
+        // a bow is as steady as it is drawn: a full draw puts the arrow where you look
+        if self.weapon().draw_time() > 0.0 {
+            base *= 1.0 - 0.9 * smooth(self.draw_now());
+        }
         let speed = vec2(self.body.vel.x, self.body.vel.z).length();
         let mv = (speed / self.tuning.movement.walk_speed).min(1.3)
             * def.move_spread
@@ -2043,7 +2058,20 @@ impl GameClient {
     /// Aim sway while aiming down sights (radians). Heavier/longer guns sway more;
     /// crouching, lying down and (for scopes) holding breath steady it.
     pub fn sway_offset(&self) -> Vec2 {
-        if self.ads_t < 0.5 || !self.alive {
+        if !self.alive {
+            return Vec2::ZERO;
+        }
+        // a bow held fully drawn: steady for two seconds, then the arms start shaking
+        if self.draw_from.is_some() {
+            let tired = (self.draw_held() - 2.0).max(0.0);
+            let k = 0.0006 + (tired * 0.004).min(0.012);
+            let t = self.now as f32;
+            return vec2(
+                (t * 1.3).sin() + (t * 7.1).sin() * 0.5 * tired.min(1.0),
+                (t * 1.9).sin() * 0.8 + (t * 8.3).sin() * 0.5 * tired.min(1.0),
+            ) * k;
+        }
+        if self.ads_t < 0.5 {
             return Vec2::ZERO;
         }
         let scoped = self.weapon().def().scoped;
@@ -2281,6 +2309,55 @@ impl GameClient {
     pub fn aim_dir(&self) -> Vec3 {
         let s = self.sway_offset();
         look_dir(self.yaw + s.x, self.pitch + s.y)
+    }
+
+    /// What `G` throws in this life (the battle royale has only frags on it).
+    pub fn lethal_now(&self) -> toon_shared::weapons::Lethal {
+        if self.mode == Mode::Br {
+            toon_shared::weapons::Lethal::Frag
+        } else {
+            self.kit.lethal
+        }
+    }
+
+    /// What `Q` throws in this life.
+    pub fn tactical_now(&self) -> toon_shared::weapons::Tactical {
+        if self.mode == Mode::Br {
+            toon_shared::weapons::Tactical::Smoke
+        } else {
+            self.kit.tactical
+        }
+    }
+
+    /// How much a drawn bow narrows the view (1 = not at all).
+    pub fn draw_zoom(&self) -> f32 {
+        1.0 + 0.3 * smooth(self.draw_now())
+    }
+
+    /// Seconds a full draw has been held (the arms tire after a while).
+    pub fn draw_held(&self) -> f32 {
+        let t = self.weapon().draw_time();
+        match self.draw_from {
+            Some(s) if t > 0.0 => ((self.now - s) as f32 - t).max(0.0),
+            _ => 0.0,
+        }
+    }
+
+    /// Where an arrow loosed now would come down (and how far that is), if it hits
+    /// anything within its range.
+    pub fn arrow_landing(&self) -> Option<(Vec3, f32)> {
+        let w = self.weapon();
+        if w.draw_time() <= 0.0 || self.draw_from.is_none() {
+            return None;
+        }
+        let mut b = toon_shared::ballistics::Ballistics::of(w);
+        let (speed, _) = WeaponId::draw_power(self.draw_now());
+        b.velocity *= speed;
+        b.max_range *= speed;
+        let eye = self.eye();
+        let path = toon_shared::ballistics::trace_path(&self.world, eye, self.aim_dir(), &b);
+        let end = path.end();
+        (path.hit_world || end.y < eye.y - 30.0).then(|| (end, path.length()))
     }
 
     /// How far the bow is drawn now (0..1).
@@ -2556,7 +2633,7 @@ impl GameClient {
         if playing_input && self.piloting.is_some() {
             self.pilot_look(md, settings.sensitivity * 0.0011, settings.invert_y);
         } else if playing_input {
-            let zoom = 1.0 + (self.ads_zoom() - 1.0) * self.ads_t;
+            let zoom = (1.0 + (self.ads_zoom() - 1.0) * self.ads_t) * self.draw_zoom();
             let sens = settings.sensitivity * 0.0011 / zoom;
             self.yaw -= md.x * sens;
             let dy = md.y * sens * if settings.invert_y { -1.0 } else { 1.0 };
@@ -2927,7 +3004,7 @@ impl GameClient {
             let can_act = can_act
                 && self.body.chute == toon_shared::physics::Chute::None
                 && !self.body.swimming(&self.world);
-            let trig_down = can_act && binds::down(Action::Fire);
+            let trig_down = can_act && (binds::down(Action::Fire) || self.hold_fire);
             // also catch very quick clicks (press + release within one frame)
             let trig_pressed =
                 can_act && (binds::pressed(Action::Fire) || (trig_down && !self.trigger_was_down));
@@ -2973,7 +3050,15 @@ impl GameClient {
             if bow {
                 // the bow: hold to draw, let go to loose
                 let mag = self.weapons[self.slot as usize].1;
-                if busy || mag == 0 || now < self.next_fire {
+                if !trig_down {
+                    self.draw_blocked = false;
+                }
+                if self.draw_from.is_some() && pressed(Action::Reload) {
+                    // let the string down gently: no shot
+                    self.draw_from = None;
+                    self.draw_blocked = true;
+                }
+                if busy || mag == 0 || now < self.next_fire || self.draw_blocked {
                     self.draw_from = None;
                 } else if trig_down {
                     self.draw_from.get_or_insert(now);
@@ -3054,9 +3139,11 @@ impl GameClient {
                 self.reload_until = None;
             }
             if let Some(start) = self.cooking {
+                // (a molotov has no fuse to cook)
+                let cookable = self.lethal_now() == toon_shared::weapons::Lethal::Frag;
                 let release = !binds::down(Action::Grenade)
                     || !can_act
-                    || now - start > (self.tuning.grenade.fuse - 0.35) as f64;
+                    || cookable && now - start > (self.tuning.grenade.fuse - 0.35) as f64;
                 if release {
                     self.cooking = None;
                     if self.alive {
@@ -3878,4 +3965,10 @@ pub fn ping_label(what: PingWhat) -> String {
         PingWhat::AirDrop => t("Скидання припасів", "Supply drop").into(),
         PingWhat::Car(k) => k.name().into(),
     }
+}
+
+/// Eases 0..1 in and out.
+fn smooth(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
 }

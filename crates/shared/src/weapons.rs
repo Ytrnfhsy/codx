@@ -340,10 +340,80 @@ impl WeaponId {
     }
 }
 
+/// The grenade thrown with `G` in the team modes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Lethal {
+    /// Two frags that can be cooked.
+    #[default]
+    Frag,
+    /// One bottle that bursts into a patch of fire where it lands.
+    Molotov,
+}
+
+/// The grenade thrown with `Q` in the team modes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Tactical {
+    /// A cloud nobody sees through.
+    #[default]
+    Smoke,
+    /// Two flashbangs that blind whoever looks their way.
+    Flash,
+}
+
+impl Lethal {
+    pub const ALL: [Lethal; 2] = [Lethal::Frag, Lethal::Molotov];
+    pub fn name(self) -> &'static str {
+        match self {
+            Lethal::Frag => crate::lang::t("Осколкова", "Frag"),
+            Lethal::Molotov => crate::lang::t("Молотов", "Molotov"),
+        }
+    }
+    pub fn count(self) -> u8 {
+        match self {
+            Lethal::Frag => 2,
+            Lethal::Molotov => 1,
+        }
+    }
+    pub fn about(self) -> &'static str {
+        match self {
+            Lethal::Frag => crate::lang::t("вибух, можна притримати", "a blast, can be cooked"),
+            Lethal::Molotov => crate::lang::t("вогонь на місці падіння", "fire where it lands"),
+        }
+    }
+}
+
+impl Tactical {
+    pub const ALL: [Tactical; 2] = [Tactical::Smoke, Tactical::Flash];
+    pub fn name(self) -> &'static str {
+        match self {
+            Tactical::Smoke => crate::lang::t("Димова", "Smoke"),
+            Tactical::Flash => crate::lang::t("Світлошумова", "Flashbang"),
+        }
+    }
+    pub fn count(self) -> u8 {
+        match self {
+            Tactical::Smoke => 1,
+            Tactical::Flash => 2,
+        }
+    }
+    pub fn about(self) -> &'static str {
+        match self {
+            Tactical::Smoke => crate::lang::t("хмара на 18 с", "a cloud for 18 s"),
+            Tactical::Flash => {
+                crate::lang::t("засліплює тих, хто дивиться", "blinds who looks at it")
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Loadout {
     pub primary: WeaponId,
     pub secondary: WeaponId,
+    #[serde(default)]
+    pub lethal: Lethal,
+    #[serde(default)]
+    pub tactical: Tactical,
 }
 
 impl Loadout {
@@ -355,9 +425,13 @@ impl Loadout {
             DEFAULT_CLASSES[0].1
         }
     }
-    /// Frag grenades to start a life with.
+    /// Lethal grenades to start a life with.
     pub fn grenades(&self) -> u8 {
-        2
+        self.lethal.count()
+    }
+    /// Tactical grenades to start a life with.
+    pub fn tacticals(&self) -> u8 {
+        self.tactical.count()
     }
     pub fn reserve_for(&self, w: WeaponId, t: &crate::tuning::Tuning) -> u16 {
         t.weapon(w).reserve
@@ -370,6 +444,8 @@ pub const DEFAULT_CLASSES: [(&str, Loadout); 5] = [
         Loadout {
             primary: WeaponId::Uar15,
             secondary: WeaponId::Fort17,
+            lethal: Lethal::Frag,
+            tactical: Tactical::Smoke,
         },
     ),
     (
@@ -377,6 +453,8 @@ pub const DEFAULT_CLASSES: [(&str, Loadout); 5] = [
         Loadout {
             primary: WeaponId::Mp7,
             secondary: WeaponId::Glock18,
+            lethal: Lethal::Frag,
+            tactical: Tactical::Smoke,
         },
     ),
     (
@@ -384,6 +462,8 @@ pub const DEFAULT_CLASSES: [(&str, Loadout); 5] = [
         Loadout {
             primary: WeaponId::Pkm,
             secondary: WeaponId::Fort17,
+            lethal: Lethal::Frag,
+            tactical: Tactical::Smoke,
         },
     ),
     (
@@ -391,6 +471,8 @@ pub const DEFAULT_CLASSES: [(&str, Loadout); 5] = [
         Loadout {
             primary: WeaponId::Ksg,
             secondary: WeaponId::Glock18,
+            lethal: Lethal::Frag,
+            tactical: Tactical::Smoke,
         },
     ),
     (
@@ -398,6 +480,8 @@ pub const DEFAULT_CLASSES: [(&str, Loadout); 5] = [
         Loadout {
             primary: WeaponId::Awm,
             secondary: WeaponId::Revolver,
+            lethal: Lethal::Frag,
+            tactical: Tactical::Smoke,
         },
     ),
 ];
