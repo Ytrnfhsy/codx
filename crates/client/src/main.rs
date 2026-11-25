@@ -60,6 +60,8 @@ struct Args {
     open_loadout: bool,
     /// (smoke tests) hold the trigger down once alive
     hold_fire: bool,
+    /// (screenshots) no HUD over the world
+    no_hud: bool,
     /// (smoke tests) an admin command sent once alive (needs --rcon)
     exec: Option<String>,
     /// (smoke tests) keep looking at this point
@@ -135,6 +137,7 @@ fn parse_args() -> Args {
             }
             "--open-loadout" => a.open_loadout = true,
             "--hold-fire" => a.hold_fire = true,
+            "--no-hud" => a.no_hud = true,
             "--exec" => {
                 a.exec = next;
                 i += 1;
@@ -980,7 +983,12 @@ async fn amain(args: Args) {
                     hot: false,
                 };
                 g.skin_preview = None;
-                let action = g.draw_hud(&mut ui, &view, &tags, &mut settings, fps);
+                // (--no-hud: clean pictures of the world once the game is on)
+                let action = if args.no_hud && g.alive {
+                    None
+                } else {
+                    g.draw_hud(&mut ui, &view, &tags, &mut settings, fps)
+                };
                 if let Some(rect) = g.skin_preview {
                     render::draw_skin_preview(&mats, settings.skin, rect, get_time() as f32);
                 }
