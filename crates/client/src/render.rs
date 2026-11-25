@@ -242,23 +242,31 @@ pub struct BowPose {
 }
 
 impl BowPose {
-    /// A point along a limb: s = 1 the top tip, −1 the bottom one.
+    /// A point along a limb: s = 1 the top tip, −1 the bottom one. The limbs bow back
+    /// towards the archer, which from the eye looks like a curve to the right.
     fn limb(&self, s: f32) -> Vec3 {
-        self.grip + self.up * (self.len * s) + Vec3::Z * (self.bend * s * s)
+        let side = vec3(self.up.y, -self.up.x, 0.0);
+        self.grip
+            + self.up * (self.len * s)
+            + Vec3::Z * (self.bend * s * s)
+            + side * (self.bend * 0.55 * s * s)
     }
 }
 
 pub fn bow_pose(draw: f32, ads: f32) -> BowPose {
+    // Laid out from how an archer sees it (the viewmodel camera: 62° high): the grip a
+    // little right of and below the middle of the screen, the bow tall and leaning right
+    // over it, the left arm reaching in from the bottom left; drawn, the right hand is at
+    // the bottom right and the arrow runs from it over the left hand to the target in the
+    // middle.
     let d = smooth(draw);
     let a = smooth(ads);
-    // held left of the line of sight, the top leaning a little right; aimed, it comes up
-    // and in towards the middle
-    let grip = vec3(-0.12 + 0.03 * a, -0.085 + 0.03 * a + 0.015 * d, -0.56);
-    let cant = 0.2 - 0.05 * d;
+    let grip = vec3(0.095 - 0.02 * a, -0.084 + 0.012 * a, -0.6);
+    let cant = 0.34 - 0.03 * d;
     let up = vec3(cant.sin(), cant.cos(), 0.0);
-    let len = 0.47 - 0.035 * d;
+    let len = 0.46 - 0.03 * d;
     // the limbs curve back towards the archer, more as the string is drawn
-    let bend = 0.13 + 0.06 * d;
+    let bend = 0.12 + 0.05 * d;
     let mut p = BowPose {
         grip,
         top: Vec3::ZERO,
@@ -271,13 +279,14 @@ pub fn bow_pose(draw: f32, ads: f32) -> BowPose {
     };
     p.top = p.limb(1.0);
     p.bottom = p.limb(-1.0);
-    // the string at rest runs straight between the tips; drawn, back to the cheek
-    let brace = (p.top + p.bottom) * 0.5;
-    // (nocked and ready even at rest: the hand a little back from the grip)
-    p.nock = brace + vec3(0.15, -0.05, 0.22) * (0.25 + 0.75 * d);
-    // the arrow passes the grip and points at the target, a little under the middle
-    let aim = vec3(-0.02, -0.04, -4.0);
-    let dir = (aim - p.nock).normalize_or(Vec3::NEG_Z);
+    // at rest the string runs nearly straight between the tips (the arrow nocked and
+    // ready); drawn, the hand takes it back to under the cheek
+    let brace = (p.top + p.bottom) * 0.5 + vec3(0.02, 0.0, 0.04);
+    let full = vec3(0.145, -0.099, -0.25);
+    p.nock = brace.lerp(full, 0.3 + 0.7 * d);
+    // the arrow passes over the left hand to the middle of the screen
+    let through = vec3(0.05, 0.0, -0.95);
+    let dir = (through - p.nock).normalize_or(Vec3::NEG_Z);
     p.tip = p.nock + dir * 0.74;
     p
 }
@@ -348,7 +357,7 @@ fn draw_bow(vm: &VmState, mats: &Materials, settings: &Settings) {
     for side in [-1.0f32, 1.0] {
         for i in 0..n {
             let (s0, s1) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
-            let w = 0.026 - 0.012 * s0;
+            let w = 0.03 - 0.014 * s0;
             seg(
                 &mut m,
                 o(p.limb(side * s0)),
@@ -366,39 +375,45 @@ fn draw_bow(vm: &VmState, mats: &Materials, settings: &Settings) {
     seg(&mut m, o(p.top), o(p.nock), 0.003, 0.003, string, 0.0);
     seg(&mut m, o(p.nock), o(p.bottom), 0.003, 0.003, string, 0.0);
     // the right hand: on the string, or reaching back for the next arrow
-    let quiver = vec3(0.3, -0.3, 0.05);
+    let quiver = vec3(0.34, -0.34, -0.12);
     let (hand, arrow) = match reload {
         Some(t) => {
             let k = smooth((t - 0.15) / 0.65);
             (quiver.lerp(p.nock, k), t > 0.45)
         }
         None if vm.loaded => (p.nock, true),
-        None => (vec3(0.2, -0.24, -0.34), false),
+        None => (vec3(0.22, -0.24, -0.34), false),
     };
     if arrow {
         let along = (p.tip - p.nock).normalize_or(Vec3::NEG_Z);
         add_arrow(&mut m, o(hand), o(hand + along * 0.74), ow);
     }
     let sleeve = vm.sleeve;
-    for (h, shoulder, r) in [
-        (
-            p.grip + vec3(-0.005, 0.0, 0.0),
-            vec3(-0.42, -0.52, 0.02),
-            0.042,
-        ),
-        (
-            hand + vec3(0.012, -0.012, 0.0),
-            vec3(0.36, -0.42, 0.0),
-            0.04,
-        ),
-    ] {
-        let (h, shoulder) = (o(h), shoulder + off);
-        let d = h - shoulder;
-        let elbow = shoulder + d * 0.35;
-        seg(&mut m, shoulder, elbow, 0.08, 0.08, sleeve, ow);
-        seg(&mut m, elbow, h, 0.064, 0.064, sleeve, ow);
-        m.sphere(&Mat4::from_translation(h), r, vm.hand, ow);
-    }
+    // the left arm straight out to the grip, a leather bracer on the forearm
+    let (lh, le, ls) = (
+        o(p.grip + vec3(-0.012, -0.004, 0.0)),
+        o(vec3(-0.27, -0.25, -0.4)),
+        o(vec3(-0.42, -0.4, -0.12)),
+    );
+    seg(&mut m, ls, le, 0.1, 0.1, sleeve, ow);
+    let wrist = le.lerp(lh, 0.42);
+    seg(&mut m, le, wrist, 0.088, 0.088, sleeve, ow);
+    seg(&mut m, wrist, lh, 0.08, 0.08, [118, 76, 42], ow);
+    m.sphere(&Mat4::from_translation(lh), 0.05, vm.hand, ow);
+    // the right hand on the string (its arm runs off the bottom right)
+    let rh = o(hand + vec3(0.016, -0.016, 0.0));
+    let re = o(vec3(0.3, -0.3, -0.12));
+    seg(
+        &mut m,
+        re + vec3(0.2, -0.2, 0.05),
+        re,
+        0.09,
+        0.09,
+        sleeve,
+        ow,
+    );
+    seg(&mut m, re, rh, 0.07, 0.07, sleeve, ow);
+    m.sphere(&Mat4::from_translation(rh), 0.046, vm.hand, ow);
     mats.draw_toon(&m);
 }
 
