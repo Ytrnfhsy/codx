@@ -376,7 +376,8 @@ pub fn wreck() -> Map {
             color: WHITEWASH,
             roof: ADOBE,
             ground: &[
-                (Side::MinX, door(-16.0)),
+                // (south of the flight that climbs along this wall inside)
+                (Side::MinX, door(-22.2)),
                 (Side::MaxZ, door(47.0)),
                 (Side::MinZ, window(50.0)),
             ],
@@ -437,7 +438,8 @@ pub fn wreck() -> Map {
             color: WHITEWASH,
             roof: ROOF_CLAY,
             ground: &[
-                (Side::MinX, door(28.0)),
+                // (south of the flight that climbs along this wall inside)
+                (Side::MinX, door(24.2)),
                 (Side::MinZ, door(44.0)),
                 (Side::MaxX, window(28.0)),
             ],

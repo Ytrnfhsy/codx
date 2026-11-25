@@ -138,7 +138,8 @@ fn skeleton(b: &mut MapBuilder, st: &Style) {
         0.0,
         h,
         0.3,
-        &[wide_door(-8.0), wide_door(7.0), window(0.0)],
+        // (the west door east of the scaffolding's stairs, which climb along this face)
+        &[wide_door(-2.6), wide_door(7.0), window(2.4)],
         pal::BRICK,
     );
     b.wall_z(3.3, fz - 0.3, -fx + 0.15, 0.0, h, 0.3, &[], pal::BRICK);

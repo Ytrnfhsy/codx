@@ -190,6 +190,11 @@ pub struct GameClient {
 
     pub state: MatchState,
     pub time_left: f32,
+    /// Sabotage: the last countdown second sounded before respawns end.
+    overtime_tick: i32,
+    /// When respawns ended (for the banner), and whether we knew it last frame.
+    pub overtime_at: f64,
+    was_overtime: bool,
     pub scores: [i32; 2],
     pub overtime: bool,
     pub me: MeSnap,
@@ -555,6 +560,9 @@ impl GameClient {
             gs: w.settings,
             state: MatchState::Warmup,
             time_left: 0.0,
+            overtime_tick: 0,
+            overtime_at: -100.0,
+            was_overtime: false,
             scores: [0, 0],
             overtime: false,
             me: MeSnap::default(),
@@ -2311,6 +2319,41 @@ impl GameClient {
         look_dir(self.yaw + s.x, self.pitch + s.y)
     }
 
+    /// Sabotage: seconds left before respawns end (shown in the last ten), unless the bomb
+    /// is down and the clock stands.
+    pub fn overtime_in(&self) -> Option<f32> {
+        let planted = self.bomb.as_ref().is_some_and(|b| b.planted_at.is_some());
+        (self.mode == Mode::Sab
+            && self.state == MatchState::Playing
+            && !self.overtime
+            && !planted
+            && self.time_left > 0.0
+            && self.time_left <= 10.0)
+            .then_some(self.time_left)
+    }
+
+    /// The countdown's ticks and the siren when respawns end.
+    fn overtime_cues(&mut self, audio: Option<&Audio>) {
+        if let Some(left) = self.overtime_in() {
+            let n = left.ceil() as i32;
+            if n != self.overtime_tick {
+                self.overtime_tick = n;
+                if let Some(a) = audio {
+                    a.play(if n <= 3 { Sfx::TickHigh } else { Sfx::Tick }, 0.8);
+                }
+            }
+        } else {
+            self.overtime_tick = 0;
+        }
+        if self.overtime && !self.was_overtime && self.mode == Mode::Sab {
+            self.overtime_at = self.now;
+            if let Some(a) = audio {
+                a.play(Sfx::Siren, 0.85);
+            }
+        }
+        self.was_overtime = self.overtime;
+    }
+
     /// What `G` throws in this life (the battle royale has only frags on it).
     pub fn lethal_now(&self) -> toon_shared::weapons::Lethal {
         if self.mode == Mode::Br {
@@ -3391,6 +3434,7 @@ impl GameClient {
                 }
             }
         }
+        self.overtime_cues(audio);
         self.fx.update(dt);
         for (at, d, flesh) in std::mem::take(&mut self.fx.landed) {
             if flesh {

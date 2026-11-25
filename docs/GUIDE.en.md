@@ -21,7 +21,10 @@ Modes:
   (5 s), after which the bomb is theirs. A bomb on the ground (its carrier died) can be picked
   up by **either** team. When the round time runs out it goes to **overtime** (sudden death):
   no respawns, and the team that blows up its target, defuses the bomb or wipes out the other
-  side wins. Over a teammate carrying the bomb you see a bomb icon with "COVER" and the
+  side wins. Ten seconds before overtime a big countdown "Respawns end in…" runs in the
+  middle of the screen with a beep each second (the last three higher and red, the screen's
+  edges flashing), and when it starts a siren sounds and an "OVERTIME — NO MORE RESPAWNS"
+  banner shows. While the bomb is planted the clock stands and there is no countdown. Over a teammate carrying the bomb you see a bomb icon with "COVER" and the
   distance (even through walls), so the team knows whom to cover; an enemy carrier is not
   marked. The game goes on until a team has won N rounds (2 by default).
 * **Battle royale (BR)**: every man for himself on the 2×2 km "Island" (hills, a river with
@@ -302,6 +305,10 @@ Bots can walk stairs and ladders, climb onto roofs and balconies and jump down.
   * whatever is left with nothing holding it up (a roof with no walls, a floor with no
     supports) falls and lies as a heap of rubble you can climb;
   * trees and posts snap at the foot and fall away from the blast, crown and all;
+  * a tall thing on a narrow foot (a crane's mast, a tower, a chimney) whose support is cut
+    falls over **whole**: it turns about the edge of its foot with everything hanging on it
+    (the jib, the cab, the cable and its load), lands with the jib flat and rests on whatever
+    it falls across;
   * the ground gets a crater: a pit with a scorched bottom on the small maps, a dent in the
     hills with the grass blown off on the Island.
 
@@ -921,7 +928,8 @@ crates/
 ```
 
 * **Destruction** — `shared/destruct.rs`: a blast cuts cubes out of the map's boxes, pieces
-  left unsupported fall into a heap, posts and trees topple, the terrain gets a crater. The
+  left unsupported fall into a heap, posts and trees topple, tall narrow things (cranes,
+  towers) fall over whole, the terrain gets a crater. The
   code is deterministic, so the server sends only the list of blasts and the clients and the
   server end up with the same map (checked by `crates/server/tests/wreck.rs`).
 

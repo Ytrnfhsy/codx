@@ -87,6 +87,11 @@ pub enum Sfx {
     Crumble,
     /// A tree going over: a creak, a crack and the thump of it hitting the ground.
     TreeFall,
+    /// A countdown second (the last three a note higher).
+    Tick,
+    TickHigh,
+    /// The alarm when respawns end (sabotage overtime).
+    Siren,
 }
 
 impl Sfx {
@@ -1601,6 +1606,26 @@ impl Synth {
                 7.0,
             )),
             Sfx::Bomb => mono(&Synth::chord(&[(0.0, 330.0), (0.25, 247.0)], 0.35, 5.0)),
+            Sfx::Tick => mono(&Synth::chord(&[(0.0, 880.0)], 0.18, 16.0)),
+            Sfx::TickHigh => mono(&Synth::chord(&[(0.0, 1175.0), (0.0, 1760.0)], 0.22, 12.0)),
+            Sfx::Siren => {
+                // two rising and falling wails, then a low horn under them
+                let len = 2.2;
+                let mut b = Self::buf(len);
+                let mut ph = 0.0f32;
+                for (i, v) in b.iter_mut().enumerate() {
+                    let t = Self::t(i);
+                    let f = 620.0 + 260.0 * (t * std::f32::consts::PI * 1.8).sin().abs();
+                    ph += f / SR;
+                    let saw = 2.0 * (ph - ph.floor()) - 1.0;
+                    let env = (t / 0.05).min(1.0) * (1.0 - (t / len).powf(3.0));
+                    *v = (saw * 0.35 + (ph * std::f32::consts::TAU).sin() * 0.65) * env;
+                }
+                let horn = Synth::chord(&[(0.0, 165.0), (0.0, 220.0)], 1.6, 1.5);
+                Synth::mix(&mut b, &horn, 0.0, 0.6);
+                Synth::norm(&mut b, 0.8);
+                mono(&b)
+            }
         }
     }
 }
@@ -1660,6 +1685,9 @@ fn all() -> Vec<Sfx> {
         Sfx::Ping,
         Sfx::Crumble,
         Sfx::TreeFall,
+        Sfx::Tick,
+        Sfx::TickHigh,
+        Sfx::Siren,
     ]);
     for w in WeaponId::all() {
         v.extend([Sfx::MagOutOf(w), Sfx::MagInOf(w), Sfx::BoltOf(w)]);

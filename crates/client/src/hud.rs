@@ -18,7 +18,8 @@ pub enum HudAction {
 }
 
 fn fmt_time(t: f32) -> String {
-    let t = t.max(0.0) as u32;
+    // (rounded up, as countdowns are: 0:00 only when it is over)
+    let t = t.max(0.0).ceil() as u32;
     format!("{}:{:02}", t / 60, t % 60)
 }
 
@@ -496,7 +497,66 @@ impl GameClient {
             }
             _ => {}
         }
+        // the last ten seconds before respawns end: big, in the middle, ticking
+        if let Some(left) = self.overtime_in() {
+            let n = left.ceil().max(1.0);
+            let frac = left - left.floor();
+            // each second's number pops in big and settles
+            let pop = 1.0 + 0.35 * frac.powi(3);
+            let urgent = n <= 3.0;
+            let c = if urgent { BAD } else { ACCENT };
+            let size = (64.0 * pop) as u16;
+            ui.centered(
+                t("ВІДРОДЖЕННЯ ВИМКНЕТЬСЯ ЧЕРЕЗ", "RESPAWNS END IN"),
+                cx,
+                h * 0.22,
+                24,
+                TEXT,
+            );
+            ui.centered(&format!("{n:.0}"), cx, h * 0.22 + 70.0, size, c);
+            if urgent {
+                // the screen's edges pulse red
+                let a = 0.25 * frac;
+                for (x, y, ww, hh) in [
+                    (0.0, 0.0, w, 14.0),
+                    (0.0, h - 14.0, w, 14.0),
+                    (0.0, 0.0, 14.0, h),
+                    (w - 14.0, 0.0, 14.0, h),
+                ] {
+                    draw_rectangle(x, y, ww, hh, Color::new(0.9, 0.15, 0.1, a));
+                }
+            }
+        }
         if self.overtime {
+            let since = (self.now - self.overtime_at) as f32;
+            if since < 4.0 {
+                // the moment it starts: a banner nobody can miss
+                let a = (1.0 - (since - 3.2).max(0.0) / 0.8).clamp(0.0, 1.0);
+                draw_rectangle(
+                    0.0,
+                    h * 0.2,
+                    w,
+                    96.0,
+                    Color::new(0.55, 0.05, 0.05, 0.75 * a),
+                );
+                ui.centered(
+                    t(
+                        "ОВЕРТАЙМ — ВІДРОДЖЕННЯ ВИМКНЕНО",
+                        "OVERTIME — NO MORE RESPAWNS",
+                    ),
+                    cx,
+                    h * 0.2 + 46.0,
+                    36,
+                    Color::new(1.0, 1.0, 1.0, a),
+                );
+                ui.centered(
+                    t("одне життя — бережи його", "one life: keep it"),
+                    cx,
+                    h * 0.2 + 80.0,
+                    18,
+                    Color::new(1.0, 0.85, 0.8, a),
+                );
+            }
             ui.centered(
                 t("ОВЕРТАЙМ — без відродження", "OVERTIME — no respawns"),
                 cx,

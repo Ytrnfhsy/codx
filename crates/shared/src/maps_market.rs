@@ -972,7 +972,8 @@ fn east(b: &mut MapBuilder) -> Vec3 {
     cart(b, h, 40.0, 18.5, true, 0);
     cart(b, h, 56.0, -18.6, true, 5);
     dumpster(b, h, 51.0, 19.9);
-    dumpster(b, h, 25.0, -19.9);
+    // (along the lane from the warehouse door, not in front of it)
+    dumpster(b, h, 31.6, -19.9);
     fence_x(b, h, 62.0, 66.0, 18.5);
     fence_x(b, h, 43.0, 46.5, -18.5);
     for (x, z, s) in [(29.0, 20.0, 1.1), (30.2, 20.1, 0.8), (53.0, -17.0, 1.0)] {

@@ -60,6 +60,10 @@ struct Args {
     open_loadout: bool,
     /// (smoke tests) hold the trigger down once alive
     hold_fire: bool,
+    /// (smoke tests) an admin command sent once alive (needs --rcon)
+    exec: Option<String>,
+    /// (smoke tests) keep looking at this point
+    look_at: Option<glam::Vec3>,
     team: Option<String>,
     map: Option<String>,
     mode: Option<String>,
@@ -131,6 +135,17 @@ fn parse_args() -> Args {
             }
             "--open-loadout" => a.open_loadout = true,
             "--hold-fire" => a.hold_fire = true,
+            "--exec" => {
+                a.exec = next;
+                i += 1;
+            }
+            "--look-at" => {
+                a.look_at = next.and_then(|s| {
+                    let v: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                    (v.len() == 3).then(|| glam::vec3(v[0], v[1], v[2]))
+                });
+                i += 1;
+            }
             "--class" => {
                 a.class = next.and_then(|s| s.parse().ok());
                 i += 1;
@@ -331,6 +346,7 @@ async fn amain(args: Args) {
     let start = get_time();
     let mut auto_done = false;
     let mut auto_switch = false;
+    let mut exec_once = args.exec.clone();
     let mut low_res: Option<(RenderTarget, i32)> = None;
     let mut frame_start = std::time::Instant::now();
     let mut fps_window = (std::time::Instant::now(), 0u32);
@@ -845,6 +861,19 @@ async fn amain(args: Args) {
                     auto_switch = false;
                 }
                 g.hold_fire = args.hold_fire && g.alive && get_time() - start > 5.0;
+                if let Some(at) = args.look_at.filter(|_| g.alive) {
+                    let d = (at - g.eye()).normalize_or_zero();
+                    g.yaw = toon_shared::yaw_of(d);
+                    g.pitch = d.y.clamp(-1.0, 1.0).asin();
+                }
+                if g.alive && get_time() - start > 6.0 {
+                    if let Some(cmd) = exec_once.take() {
+                        g.rcon_pass = args.rcon.clone().unwrap_or_default();
+                        for c in cmd.split(';').map(str::trim).filter(|c| !c.is_empty()) {
+                            g.send_chat(format!("/rcon {c}"), false);
+                        }
+                    }
+                }
                 if args.open_loadout && g.alive && get_time() - start > 5.0 {
                     g.overlay = Overlay::Class;
                 }

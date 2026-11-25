@@ -248,6 +248,58 @@ impl Map {
     }
 }
 
+/// A doorway in a wall (an opening down to the floor): its middle on the floor and the
+/// way across the wall.
+#[derive(Clone, Copy, Debug)]
+pub struct Doorway {
+    pub at: Vec3,
+    pub across: Vec3,
+    pub width: f32,
+}
+
+thread_local! {
+    static DOORWAYS: std::cell::RefCell<Option<Vec<Doorway>>> = const { std::cell::RefCell::new(None) };
+    /// How many doorways there were at each `mark` (by its box count).
+    static DOORWAY_MARKS: std::cell::RefCell<Vec<(usize, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn doorways_now() -> usize {
+    DOORWAYS.with(|d| d.borrow().as_ref().map_or(0, |v| v.len()))
+}
+
+fn doorways_since(n: usize, f: impl Fn(&mut Doorway)) {
+    DOORWAYS.with(|d| {
+        if let Some(v) = d.borrow_mut().as_mut() {
+            let k = v.len();
+            for w in &mut v[n.min(k)..] {
+                f(w);
+            }
+        }
+    });
+}
+
+fn note_doorways(ops: &[Opening], at: impl Fn(f32) -> Vec3, across: Vec3) {
+    DOORWAYS.with(|d| {
+        if let Some(v) = d.borrow_mut().as_mut() {
+            for o in ops.iter().filter(|o| o.bottom < 0.3 && o.top > 1.9) {
+                v.push(Doorway {
+                    at: at(o.at) + Vec3::Y * o.bottom,
+                    across,
+                    width: o.w,
+                });
+            }
+        }
+    });
+}
+
+/// Builds a map and notes every doorway its walls got (for checks: none is blocked).
+pub fn with_doorways(build: impl FnOnce() -> Map) -> (Map, Vec<Doorway>) {
+    DOORWAYS.with(|d| *d.borrow_mut() = Some(Vec::new()));
+    let m = build();
+    let v = DOORWAYS.with(|d| d.borrow_mut().take()).unwrap_or_default();
+    (m, v)
+}
+
 /// An opening in a wall, measured along the wall and from the wall's base.
 #[derive(Clone, Copy, Debug)]
 pub struct Opening {
@@ -436,7 +488,9 @@ impl MapBuilder {
     pub fn lift(&mut self, h: f32, f: impl FnOnce(&mut Self)) {
         let (nb, nl, no) = (self.boxes.len(), self.ladders.len(), self.loot.len());
         let nd = self.doors.len();
+        let nw = doorways_now();
         f(self);
+        doorways_since(nw, |w| w.at.y += h);
         for d in &mut self.doors[nd..] {
             for p in d.shut.iter_mut().chain(d.open.iter_mut()) {
                 p.y += h;
@@ -457,6 +511,8 @@ impl MapBuilder {
 
     /// Where the builder stands now, for `mirror_since`.
     pub fn mark(&self) -> (usize, usize) {
+        let n = doorways_now();
+        DOORWAY_MARKS.with(|m| m.borrow_mut().push((self.boxes.len(), n)));
         (self.boxes.len(), self.ladders.len())
     }
 
@@ -465,6 +521,23 @@ impl MapBuilder {
     /// colours.
     pub fn mirror_since(&mut self, mark: (usize, usize), recolor: impl Fn([u8; 3]) -> [u8; 3]) {
         let (nb, nl) = (self.boxes.len(), self.ladders.len());
+        let since =
+            DOORWAY_MARKS.with(|m| m.borrow().iter().rev().find(|e| e.0 == mark.0).map(|e| e.1));
+        if let Some(n) = since {
+            DOORWAYS.with(|d| {
+                if let Some(v) = d.borrow_mut().as_mut() {
+                    let k = v.len();
+                    let copies: Vec<Doorway> = v[n.min(k)..]
+                        .iter()
+                        .map(|w| Doorway {
+                            at: vec3(-w.at.x, w.at.y, -w.at.z),
+                            ..*w
+                        })
+                        .collect();
+                    v.extend(copies);
+                }
+            });
+        }
         for k in mark.0..nb {
             let b = self.boxes[k];
             self.boxes.push(MapBox {
@@ -566,6 +639,7 @@ impl MapBuilder {
     }
 
     /// Wall along X (from x0 to x1) centered on `z`, with openings.
+    #[allow(clippy::too_many_arguments)]
     pub fn wall_x(
         &mut self,
         x0: f32,
@@ -580,6 +654,7 @@ impl MapBuilder {
         for (a, b, ya, yb) in wall_segments(x0, x1, h, ops) {
             self.block(a, y0 + ya, z - t / 2.0, b, y0 + yb, z + t / 2.0, c);
         }
+        note_doorways(ops, |at| vec3(at, y0, z), Vec3::Z);
         self.trims(true, z, y0, h, t, ops, c);
     }
 
@@ -598,6 +673,7 @@ impl MapBuilder {
         for (a, b, ya, yb) in wall_segments(z0, z1, h, ops) {
             self.block(x - t / 2.0, y0 + ya, a, x + t / 2.0, y0 + yb, b, c);
         }
+        note_doorways(ops, |at| vec3(x, y0, at), Vec3::X);
         self.trims(false, x, y0, h, t, ops, c);
     }
 

@@ -187,6 +187,20 @@ impl Ruins {
                 }
             }
             for tp in &g.topples {
+                // (a crane or a tower raises dust all along where it hit)
+                let step = (tp.boxes.len() / 6).max(1);
+                for &i in tp.boxes.iter().skip(step).step_by(step).take(6) {
+                    let b = &map.boxes[i];
+                    fx.dust(
+                        vec3(
+                            (b.min.x + b.max.x) * 0.5,
+                            b.min.y,
+                            (b.min.z + b.max.z) * 0.5,
+                        ),
+                        2.0,
+                        [170, 160, 140],
+                    );
+                }
                 if let Some(&i) = tp.boxes.first() {
                     let b = &map.boxes[i];
                     fx.dust(

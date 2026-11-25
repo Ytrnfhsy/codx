@@ -1026,11 +1026,12 @@ pub fn fuel_station(b: &mut MapBuilder, l: Lot) {
         WHITE,
         Some([220, 60, 50]),
     );
+    // shelves along the back wall (clear of the door in the west one)
     b.wood(
-        sx0 + 1.0,
+        sx0 + 6.2,
         0.0,
         sz0 + 1.0,
-        sx0 + 2.0,
+        sx0 + 7.2,
         1.4,
         sz0 + 7.0,
         [200, 200, 210],

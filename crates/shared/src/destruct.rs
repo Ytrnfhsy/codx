@@ -175,6 +175,13 @@ fn touch(a: &MapBox, b: &MapBox) -> bool {
         && a.max.z > b.min.z - e
 }
 
+/// The box round some of the map's boxes.
+fn bounds(map: &Map, ix: &[usize]) -> (Vec3, Vec3) {
+    ix.iter().fold((Vec3::MAX, Vec3::MIN), |(lo, hi), &i| {
+        (lo.min(map.boxes[i].min), hi.max(map.boxes[i].max))
+    })
+}
+
 fn alive(b: &MapBox) -> bool {
     b.visible || b.solid
 }
@@ -553,6 +560,10 @@ impl Wreck {
                 .collect();
             if group.len() == 1 && poles.len() == 1 {
                 self.topple(map, world, group[0], &hangers, pos, &mut ch);
+            } else if self.is_column(map, &group) {
+                // a mast, a tower, a chimney: it goes over whole, with all that hangs on it
+                let all = self.hanging_on(map, &group);
+                self.fall_over(map, world, &group, &all, pos, &mut ch);
             } else {
                 let mut all = group.clone();
                 all.extend(hangers);
@@ -584,6 +595,176 @@ impl Wreck {
             }
         }
         ch
+    }
+
+    /// A tall thing on a narrow foot (a crane's mast, a tower, a chimney): it falls
+    /// over whole rather than coming down in a heap.
+    fn is_column(&self, map: &Map, group: &[usize]) -> bool {
+        if group.is_empty() || group.len() > 200 {
+            return false;
+        }
+        let (lo, hi) = bounds(map, group);
+        if hi.y - lo.y < 5.0 {
+            return false;
+        }
+        let (flo, fhi) = group
+            .iter()
+            .map(|&i| map.boxes[i])
+            .filter(|b| b.min.y < lo.y + 0.5)
+            .fold((Vec3::MAX, Vec3::MIN), |(a, z), b| {
+                (a.min(b.min), z.max(b.max))
+            });
+        let foot = fhi - flo;
+        foot.x <= 3.5 && foot.z <= 3.5 && hi.y - lo.y > 2.0 * foot.x.max(foot.z)
+    }
+
+    /// Everything not solid that hangs on `group`, however many pieces away (a crane's
+    /// jib, the cab, the trolley and its cable), and is not fixed to anything standing.
+    fn hanging_on(&self, map: &Map, group: &[usize]) -> Vec<usize> {
+        let mut out: Vec<usize> = Vec::new();
+        let mut k = 0;
+        let mut frontier: Vec<usize> = group.to_vec();
+        while k < frontier.len() && out.len() < 400 {
+            let b = map.boxes[frontier[k]];
+            k += 1;
+            for i in self
+                .grid
+                .near(b.min - Vec3::splat(0.05), b.max + Vec3::splat(0.05))
+            {
+                let o = &map.boxes[i];
+                if o.solid || !alive(o) || !Self::breakable(map, o) || !touch(o, &b) {
+                    continue;
+                }
+                if out.contains(&i) || group.contains(&i) {
+                    continue;
+                }
+                let fixed = self
+                    .grid
+                    .near(o.min - Vec3::ONE, o.max + Vec3::ONE)
+                    .into_iter()
+                    .any(|j| {
+                        let s = &map.boxes[j];
+                        s.solid && !group.contains(&j) && alive(s) && touch(o, s)
+                    });
+                if !fixed {
+                    out.push(i);
+                    frontier.push(i);
+                }
+            }
+        }
+        out
+    }
+
+    /// A column goes over as one piece about the edge of its foot, the way that leaves
+    /// least of it to dig into the ground (a crane lands with its jib flat), and comes to
+    /// rest on whatever it falls across.
+    fn fall_over(
+        &mut self,
+        map: &mut Map,
+        world: &mut World,
+        group: &[usize],
+        hangers: &[usize],
+        from: Vec3,
+        ch: &mut Change,
+    ) {
+        let all: Vec<MapBox> = group
+            .iter()
+            .chain(hangers)
+            .map(|&i| map.boxes[i])
+            .filter(alive)
+            .collect();
+        let (lo, _) = bounds(map, group);
+        let (flo, fhi) = group
+            .iter()
+            .map(|&i| map.boxes[i])
+            .filter(|b| b.min.y < lo.y + 0.5)
+            .fold((Vec3::MAX, Vec3::MIN), |(a, z), b| {
+                (a.min(b.min), z.max(b.max))
+            });
+        let c = (flo + fhi) * 0.5;
+        let half = (fhi - flo) * 0.5;
+        // the way over: least sticking out past the foot's edge, then away from the blast
+        let away = vec2(c.x - from.x, c.z - from.z).normalize_or_zero();
+        let dirs = [Vec3::X, -Vec3::X, Vec3::Z, -Vec3::Z];
+        let score = |d: Vec3| {
+            let edge = if d.x != 0.0 { half.x } else { half.z };
+            let over = all
+                .iter()
+                .flat_map(|b| {
+                    [
+                        b.min,
+                        b.max,
+                        vec3(b.min.x, 0.0, b.max.z),
+                        vec3(b.max.x, 0.0, b.min.z),
+                    ]
+                })
+                .map(|p| (p - c).dot(d) - edge)
+                .fold(0.0f32, f32::max);
+            over - 0.5 * (away.x * d.x + away.y * d.z)
+        };
+        let dir = dirs
+            .into_iter()
+            .min_by(|a, b| score(*a).total_cmp(&score(*b)))
+            .unwrap_or(Vec3::X);
+        let edge = if dir.x != 0.0 { half.x } else { half.z };
+        let pivot = vec3(c.x, lo.y, c.z) + dir * edge;
+        let turn = |p: Vec3| -> Vec3 {
+            let d = p - pivot;
+            let along = d.x * dir.x + d.z * dir.z;
+            let side = if dir.x != 0.0 {
+                vec3(0.0, 0.0, d.z)
+            } else {
+                vec3(d.x, 0.0, 0.0)
+            };
+            pivot + dir * d.y + side + vec3(0.0, -along, 0.0)
+        };
+        for &i in group.iter().chain(hangers) {
+            self.kill(map, world, i, ch);
+        }
+        let laid: Vec<MapBox> = all
+            .iter()
+            .map(|b| {
+                let (a, z) = (turn(b.min), turn(b.max));
+                MapBox {
+                    min: a.min(z),
+                    max: a.max(z),
+                    ..*b
+                }
+            })
+            .collect();
+        // down onto the ground at its foot, as one; a piece that lies across a roof or a
+        // wall rests on top of it (all worked out before any of it is put down)
+        let bottom = laid.iter().map(|b| b.min.y).fold(f32::MAX, f32::min);
+        let ground = self.floor_at(
+            map,
+            pivot.x - 0.5,
+            pivot.z - 0.5,
+            pivot.x + 0.5,
+            pivot.z + 0.5,
+            pivot.y + 0.5,
+        );
+        let lift: Vec<f32> = laid
+            .iter()
+            .map(|b| {
+                let base = ground + (b.min.y - bottom);
+                let under = self.floor_at(map, b.min.x, b.min.z, b.max.x, b.max.z, base + 8.0);
+                ground - bottom + (under - ground).max(0.0)
+            })
+            .collect();
+        let mut idx = Vec::new();
+        for (b, dy) in laid.into_iter().zip(lift) {
+            let b = MapBox {
+                min: b.min + Vec3::Y * dy,
+                max: b.max + Vec3::Y * dy,
+                ..b
+            };
+            idx.push(self.add(map, world, b, ch));
+        }
+        ch.topples.push(Topple {
+            pivot: vec3(pivot.x, ground, pivot.z),
+            dir,
+            boxes: idx,
+        });
     }
 
     /// The solid breakable boxes joined to box `s`, and whether any of them stands on
@@ -886,6 +1067,58 @@ mod tests {
         let t = &m.boxes[ch.topples[0].boxes[0]];
         assert!(t.max.x - t.min.x > 3.0, "{t:?}");
         assert!(t.max.y < 1.0);
+    }
+
+    #[test]
+    fn a_crane_goes_over_whole() {
+        let mut b = MapBuilder::new();
+        b.ground_and_bounds(
+            Vec2::new(-40.0, -40.0),
+            Vec2::new(40.0, 40.0),
+            [90, 140, 70],
+            [120, 120, 120],
+            3.0,
+        );
+        b.crane(0.0, 0.0, 18.0);
+        let mut m = crate::maps::test_yard();
+        m.boxes = b.boxes;
+        m.min = Vec2::new(-40.0, -40.0);
+        m.max = Vec2::new(40.0, 40.0);
+        let mut w = World::from_map(&m);
+        let mut wr = Wreck::new(&m);
+        let before = live(&m);
+        let ch = wr.blast(
+            &mut m,
+            &mut w,
+            Blast {
+                pos: [0.0, 2.0, 0.0],
+                power: 1.2,
+            },
+        );
+        assert_eq!(ch.topples.len(), 1, "it falls over as one");
+        // the jib (22 m long along x) lies flat on the ground, still in one piece
+        let jib = ch.topples[0]
+            .boxes
+            .iter()
+            .map(|&i| m.boxes[i])
+            .find(|b| b.max.x - b.min.x > 20.0)
+            .expect("the jib went with it");
+        assert!(jib.max.y < 3.0, "{jib:?}");
+        // nothing of it is left up in the air
+        let fallen = &ch.topples[0].boxes;
+        for (i, b) in m.boxes.iter().enumerate() {
+            if !b.visible || b.min.x < -30.0 || b.max.x > 30.0 {
+                continue;
+            }
+            if fallen.contains(&i) {
+                // (the cab sits on the side of the mast, so on top of it now)
+                assert!(b.max.y < 6.0, "still standing up: {b:?}");
+            } else {
+                assert!(b.min.y < 3.0, "left hanging: {b:?}");
+            }
+        }
+        // and it did not shatter: about as many boxes as before
+        assert!(live(&m) < before + 12, "{} → {}", before, live(&m));
     }
 
     #[test]
