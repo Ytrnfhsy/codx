@@ -3,7 +3,7 @@
 [Українською](GUIDE.md) · The game in brief: [README](../README.md).
 
 A multiplayer first-person shooter that plays like **Call of Duty 4: Modern Warfare**
-(classes, perks, killstreaks, aiming down sights, sprinting, crouching and lying prone, grenades,
+(22 guns from a pistol to an RPG and a bow, killstreaks, aiming down sights, sprinting, crouching and lying prone, grenades,
 the knife, health that comes back, a minimap with a radar), but with **cartoon** graphics: big
 heads, bright helmets in the team's colour, black outlines and toon lighting.
 
@@ -60,8 +60,6 @@ Modes:
   nobody is left on their feet the squad is out; the last squad wins. Bots in squads land
   together, keep close to the leader (a real player) and pick up the downed.
   Everybody lands with only a **knife** (left mouse button or `V`) and finds everything else.
-  Class perks do not count in the battle royale (so no Martyrdom: no live grenade drops from
-  the dead).
   **Vehicles**: jeeps stand by every town and village and at the bases, boats on the lake and
   the river (`F`: get in / out). The first one in drives (`W`/`S`: throttle and brake,
   `A`/`D`: steering, space: handbrake; the driver cannot shoot), up to three passengers can
@@ -72,7 +70,7 @@ Modes:
   crate comes down on a parachute inside the next circle: everyone is told, it shows on the map
   and the minimap, and once it lands red smoke rises over it. Inside are rare things: an 8×
   scope, two of three level III items (vest, helmet, backpack), three medkits and a heavy gun
-  (M40A3, R700, M249 or G3) with ammo. Bots run for it too.
+  (Barrett, Alligator, Negev, RPG-7 or AWM) with ammo. Bots run for it too.
   **Attachments**: a suppressor (a shot is barely heard, bots hear it only close by, and no
   muzzle flash), a compensator (recoil −30 %), an extended magazine (×1.5 rounds) and a grip
   (spread −20 %, recoil −15 %). They go on the gun in your hand or the other one if there is a
@@ -146,7 +144,7 @@ Modes:
 
 * [Quick start](#quick-start)
 * [Controls](#controls)
-* [Classes, perks, killstreaks](#classes-perks-killstreaks)
+* [Guns and killstreaks](#guns-and-killstreaks)
 * [Gun physics and fine tuning](#gun-physics-and-fine-tuning)
 * [Dedicated server](#dedicated-server)
 * [Updates](#updates)
@@ -222,7 +220,7 @@ Each bot strays a little from the overall level, and a change in the admin panel
 * **They only see in front of them** (a 100–150° field of view) and notice an enemy **not at
   once**: later if they are far away, at the edge of the view, crouching, lying or standing
   still; sooner if they shoot. An enemy behind their back is not seen. They **hear** shots and
-  footsteps (except with the Dead Silence perk) and turn towards the sound.
+  footsteps (but not the quiet shots of a bow or a crossbow) and turn towards the sound.
 * **They miss**: easy bots have a large error that never goes away (a shaking hand), a slow
   reaction, they lag behind a moving target and hold recoil worse. Recoil and the spread while
   moving work on bots just as on players.
@@ -358,8 +356,8 @@ And a few **easter eggs** are hidden on the Island. We will not say where: go an
   button in the pause menu next to "Continue"; `F1` again or the same button for "Not ready
   (break)"). It is turned off in the server's config: `"ready_check": false`.
 * **Shooting through**: a bullet goes through a body into the next player, weaker each time: a
-  sniper round keeps ~60 % of its force, a machine gun 50 %, a rifle 40 %, an SMG 20 %, the
-  Desert Eagle 30 %, other pistols ~12 % (so it stays in), buckshot never; a vest (in the body)
+  sniper round keeps ~60 % of its force, a machine gun 50 %, a marksman rifle 55 %, a rifle 40 %, an SMG 20 %,
+  the revolver 30 %, other pistols ~12 % (so it stays in), buckshot never; a vest (in the body)
   or a helmet (in the head) takes another 22 % per level. Below 15 % the bullet stops.
 * **Multi kills**: kills less than 4 s apart: "Double", "Triple", "Quad", "Multi kill ×N" (+25
   points for each after the first; from a triple on, announced in the chat).
@@ -383,9 +381,10 @@ And a few **easter eggs** are hidden on the Island. We will not say where: go an
   the enemy always red, whichever side you play (on the models, sleeves, name tags, the kill
   feed, the table; spectators see the real colours of the sides). Ragdolls move the same model.
   The hitboxes fit the models (there is a test).
-* **Guns**: each of the 15 has a recognisable outline (the M4's handle, the wooden AK with its
-  curved magazine, the bullpup P90, the M249's box and the RPD's drum with bipods, the
-  M40A3/R700 scopes, the silver Desert Eagle). All the models at once:
+* **Guns**: each of the 22 has a recognisable outline (the Fort-221 and KSG bullpups, the KSG's
+  twin tubes, the Bizon's helical magazine, the slanted Vector, the huge muzzle brakes of the
+  Barrett and the Alligator, the rocket sticking out of the RPG, the bow with its string and
+  arrow). All the models at once:
   `toon-warfare --model-gallery`.
 * **Smoke grenade** (`Q`, one per life; it is thrown when you let go of the key): after 1.6 s a
   cartoon cloud ~10 m across blooms and stays for 18 s. Nothing can be seen through it: no
@@ -393,7 +392,7 @@ And a few **easter eggs** are hidden on the Island. We will not say where: go an
   bomb carrier in Sabotage throws smoke before a site by itself). On the minimap the cloud is a
   grey circle.
 * **Sound** is synthesised at start-up (no files, ~0.2 s), in stereo and in parallel on all
-  cores (~0.3 s): each of the 15 guns sounds its own way (the bullet's supersonic crack, the
+  cores (~0.3 s): each of the 22 guns sounds its own way (the bullet's supersonic crack, the
   muzzle blast through resonant filters, the thump in the chest, the click of the bolt), and the
   street answers: reverb by convolution with "velvet noise" (no metallic ringing) in which the
   high frequencies fade first. Far shots are a dull rumble with an echo, explosions a crack, a
@@ -401,12 +400,14 @@ And a few **easter eggs** are hidden on the Island. We will not say where: go an
   right), the helicopter, an "ouch" when hit. Any sound can be replaced with a real recording:
   put an `.ogg`/`.wav` into `assets/sounds/` (the names are in `assets/sounds/README.md`); broken
   files are skipped.
-* **Recorded gun sounds** (built into the game, ~1.3 MB of OGG): the M4A1, AK-47, MP5, P90,
-  M249, RPD, R700, M40A3, M9, USP and Desert Eagle shots, several takes each that take turns,
-  levelled with the rest. Each gun can have its own reload (`mag_out_<gun>`, `mag_in_<gun>`,
-  `bolt_<gun>`): there are recordings for the AK-47/AK-74u, MP5, P90, M249, RPD and the USP's
-  slide; the rest are synthesised. The G3, the shotguns and the other sounds are still
-  synthesised. Cutting them from the original recordings: `tools/cut_sounds.py`.
+* **Recorded gun sounds** (built into the game, ~1.3 MB of OGG): a few recorded "families" of
+  shots (the files `gun_m4`, `gun_ak47`, `gun_mp5`, `gun_p90`, `gun_m249`, `gun_rpd`, `gun_r700`,
+  `gun_m40`, `gun_m9`, `gun_usp`, `gun_deagle`), several takes each; every gun uses its family's
+  (the UAR-15 and Fort-221 m4, the AK-12 and SCAR-H ak47, the SVD, Mk14, Barrett and Alligator
+  m40, the AWM r700, the Negev m249, the PKM rpd, the revolver deagle and so on). Each gun can
+  have its own reload (`mag_out_<family>`, `mag_in_<family>`, `bolt_<family>`). The RPG's shot
+  (a dull thump and the rocket motor's roar) and the bow and crossbow strings are synthesised,
+  as are the shotguns. Cutting them from the original recordings: `tools/cut_sounds.py`.
 * **Positional sound** (best with headphones): every sound in the world (shots, footsteps,
   doors, explosions, the knife, the helicopter, drones and the engines of cars and boats) is
   heard from where it comes. At start-up (~0.5 s) each is prepared for 6 directions around you
@@ -452,7 +453,7 @@ clipboard, and a held `Backspace` keeps deleting.
 | Use a killstreak | `5` (or `4`) |
 | Scoreboard | `Tab` |
 | Chat: all / team (the squad in the battle royale) | `T` / `Y` |
-| Loadout (guns and perks) | `M` |
+| Loadout (guns) | `M` |
 | Menu (loadout, team, settings, leave) | `Esc` |
 
 **Pings.** The middle mouse button points out what the crosshair rests on, and your side (the
@@ -466,12 +467,36 @@ end of its row, or the middle button on it (the ping goes once the thing is take
 press the middle button for «I need that»: everybody sees who takes it (again: no longer). A faint little cross always in the middle of the screen helps to aim. Pings are on the minimap and the big map too, a new one makes a sound and the chat
 says who pinged what. A map marker (`M`) is a different thing: a yellow pin.
 
-## Classes, perks, killstreaks
+## Guns and killstreaks
 
-**Guns** (damage falls with distance, headshots ×1.4, legs ×0.85):
-assault rifles M4A1, AK-47, G3 · SMGs MP5, P90, AK-74u · machine guns M249 SAW, RPD ·
-shotguns W1200, M1014 · sniper rifles M40A3, R700 (a scope, sway, holding your breath) ·
-pistols M9, USP .45, Desert Eagle.
+**Guns** (damage falls with distance, headshots ×1.4, legs ×0.85): 22 of them, of 8 kinds:
+
+| Kind | Guns |
+|---|---|
+| Assault rifles | UAR-15 · Fort-221 (bullpup) · AK-12 · SCAR-H (7.62 mm, goes a little through walls) |
+| SMGs | Vector (very fast, a weak round) · MP7 · PP-19 Bizon (64 rounds) |
+| Marksman rifles | SVD · Mk14 EBR (semi-automatic, scoped) |
+| Machine guns | Negev (spins up: slower for the first ~0.8 s, then full rate) · PKM (7.62 mm, through thin walls) |
+| Shotguns | AA-12 (automatic, drum) · KSG (pump, twin tubes) |
+| Sniper rifles | AWM · Barrett M82 (.50) · Alligator (14.5 mm): both big calibres go through walls and knock pieces out of them |
+| Pistols | Fort-17 · Glock 18 (full auto) · revolver |
+| Special | RPG-7 · crossbow · bow |
+
+* **Through walls.** The SCAR-H, PKM, Barrett and Alligator go through a thin enough wall (the
+  SCAR-H only a plank up to ~15 cm, the PKM up to ~40 cm, the Barrett up to ~60 cm, the Alligator
+  almost a metre) and fly on weaker: the thicker the wall, the more force is lost. Nothing goes
+  through the ground. The Barrett and the Alligator also knock a piece out of the wall they hit.
+* **RPG-7**: the rocket flies slowly (115 m/s, in an arc; you can see it and its smoke trail) and
+  goes off on the first thing it meets: a person (a direct hit and the blast), a wall or the
+  ground. The blast is a grenade's, only stronger (~5.5 m), and it breaks buildings. You can blow
+  yourself up.
+* The **crossbow** and the **bow** are quiet (no flash; enemies and bots hear them only close
+  by), and the arrow flies slowly and drops a lot. **The bow is drawn**: hold the fire button and
+  a bar under the crosshair fills (a full draw takes 0.75 s, then it turns gold), let go and the
+  arrow flies. A weak draw is a slower arrow that drops sooner and hits softer (down to 30 % of
+  the damage). The server never allows more draw than the time since the last shot gave.
+* Battle royale ammo: assault and marksman rifles take rifle rounds, machine guns MG rounds, the
+  RPG rockets (at most 3 in the backpack), the crossbow and the bow "arrows and bolts".
 
 **Ballistics.** Bullets are not instant: every gun has its own muzzle velocity and range
 (pistols 260–470 m/s and 120–180 m, SMGs 400–735 m/s and up to 350 m, shotguns 400 m/s and
@@ -483,20 +508,11 @@ their gun (a sniper up to ~400 m, a pistol ~45 m), lead and allow for the drop, 
 breath" before a long shot and switch to the gun that reaches the target.
 
 **Loadout** (`M`, and every time you pick a team): every gun at once over the whole screen, on
-a grid by kind: assault rifles, SMGs, LMGs, shotguns, sniper rifles, pistols. Each card shows the
-gun's silhouette, damage, rate of fire and range (from the server's settings). A click on a gun
-makes it your primary, on a pistol your secondary; the three rows of perks are below. From the
-keyboard: a column's number (1–6), then the gun's number in it; Enter to fight. The loadout is
-remembered for next time.
-
-**Perks**
-
-| Tier 1 | Tier 2 | Tier 3 |
-|---|---|---|
-| Frag ×3: three grenades | Stopping Power: +40% damage | Steady Aim: more accurate hip fire |
-| Bandolier: more ammo | Juggernaut: −25% damage taken | Extreme Conditioning: sprint ×2 |
-| | Sleight of Hand: reloading ×2 faster | Martyrdom: a grenade drops when you die |
-| | UAV Jammer: invisible to the enemy UAV | Dead Silence: silent footsteps |
+a grid of 8 columns by kind. Each card shows the gun's silhouette, damage, rate of fire and range
+(from the server's settings). A click on a main gun makes it your primary, on a pistol or a
+launcher (RPG, crossbow, bow) your secondary. From the keyboard: a column's number (1–8), then
+the gun's number in it; Enter to fight. The loadout is remembered for next time. There are no
+perks in the game: the gun and your hands decide everything.
 
 **Killstreaks** (kills in a row without dying):
 
@@ -577,17 +593,17 @@ How to tune:
   ```text
   tune movement                    # all movement settings with explanations and ranges
   tune weapons                     # all guns: weight, rate, mobility, aiming time
-  tune m249                        # all the machine gun's settings
+  tune negev                        # all the machine gun's settings
   tune movement.sprint_speed 8.2   # a faster sprint for everyone
-  tune m249.weight 11              # an even heavier machine gun (slower to speed up)
-  tune m249.rpm 850                # rate of fire
-  tune mp5.ads_time 0.15           # faster aiming with the MP5
+  tune negev.weight 11              # an even heavier machine gun (slower to speed up)
+  tune negev.rpm 850                # rate of fire
+  tune mp7.ads_time 0.15           # faster aiming with the MP7
   tune grenade                     # grenades: range, fuse, radius, damage, bounce
   tune grenade.throw_speed 22      # grenades fly further (range ≈ speed² / gravity)
   tune streaks                     # killstreaks: kills needed, damage, duration, speeds
   tune streaks.heli_kills 10       # the helicopter already at 10 kills
   tune streaks.fpv_blast_damage 300
-  tune w1200.auto true             # an automatic shotgun
+  tune ksg.auto true               # an automatic KSG
   tune reset m249                  # back to the factory values (or movement / grenade / streaks / all)
   save                             # write into server.json
   ```
@@ -597,11 +613,11 @@ How to tune:
   ```json
   "tuning": {
     "movement": { "sprint_speed": 8.0, "ground_accel": 45 },
-    "weapons": { "m249": { "weight": 10, "move_mult": 0.75 } }
+    "weapons": { "negev": { "weight": 10, "move_mult": 0.75 } }
   }
   ```
 
-Gun keys: `m4 ak47 g3 mp5 p90 ak74u m249 rpd w1200 m1014 m40 r700 m9 usp deagle`.
+Gun keys: `uar15 fort221 ak12 scarh vector mp7 bizon svd mk14 negev pkm aa12 ksg awm barrett alligator fort17 glock18 revolver rpg7 crossbow bow`.
 
 **Grenades** (`tune grenade`, the "Grenades" section of the web panel, `tuning.grenade` in the
 config):
@@ -883,7 +899,7 @@ and **bloom** (the sun, fire, flashes).
 
 ```text
 crates/
-  shared/   shared logic: constants, tuning.rs (movement and gun settings), guns/perks/classes,
+  shared/   shared logic: constants, tuning.rs (movement and gun settings), guns and loadouts,
             maps (generated from boxes), movement physics (AABB + a grid), raycasts and
             hitboxes, the protocol, the reliable UDP channel
   server/   the dedicated server (a library + the toon-server binary):

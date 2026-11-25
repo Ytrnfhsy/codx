@@ -77,7 +77,7 @@ pub const HELP: &str = "Команди:
   boom <x> <y> <z> [радіус] | boom <гравець> [відстань] [радіус] — вибух (перевірити, як ламаються речі)
   givebomb <id|ім'я> — дати бомбу гравцю (Саботаж)
   tune [movement|weapons|<зброя>]           — показати параметри руху/зброї
-  tune <шлях> <значення>     — змінити: tune movement.sprint_speed 8; tune m249.rpm 850
+  tune <шлях> <значення>     — змінити: tune movement.sprint_speed 8; tune negev.rpm 850
   tune reset [movement|<зброя>|all]         — повернути заводські значення
   set <ключ> <значення>      — scorelimit, timelimit, sabtime, rounds, bombtimer, planttime,
                                defusetime, ff, autobalance, maxplayers, brmaxplayers (королівська
@@ -736,7 +736,7 @@ fn list_fields(obj: &serde_json::Value, fields: &[FieldInfo], prefix: &str) -> S
 pub fn tune(g: &mut Game, rest: &str) -> String {
     let mut args = rest.split_whitespace();
     let Some(first) = args.next() else {
-        return "Тонке налаштування:\n  tune movement — параметри руху\n  tune grenade — гранати (дальність кидка тощо)\n  tune streaks — кілстріки (пороги вбивств, урон, тривалість…)\n  tune weapons — список зброї\n  tune <зброя> — параметри зброї (напр. tune m249)\n  tune <шлях> <значення> — tune movement.sprint_speed 8, tune m249.weight 10\n  tune reset [movement|grenade|streaks|<зброя>|all]".into();
+        return "Тонке налаштування:\n  tune movement — параметри руху\n  tune grenade — гранати (дальність кидка тощо)\n  tune streaks — кілстріки (пороги вбивств, урон, тривалість…)\n  tune weapons — список зброї\n  tune <зброя> — параметри зброї (напр. tune negev)\n  tune <шлях> <значення> — tune movement.sprint_speed 8, tune negev.weight 10\n  tune reset [movement|grenade|streaks|<зброя>|all]".into();
     };
     let json = serde_json::to_value(&g.tuning).unwrap_or_default();
     let first_l = first.to_lowercase();
@@ -775,12 +775,12 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
             "weapons" => WeaponId::all()
                 .map(|w| {
                     let s = g.tuning.weapon(w);
-                    format!("  {:<7} {:<13} {:>5.1} кг  {:>4.0} постр./хв  рух ×{:.2}  ADS {:.2} с", w.key(), w.def().name, s.weight, s.rpm, s.move_mult, s.ads_time)
+                    format!("  {:<7} {:<13} {:>5.1} кг  {:>4.0} постр./хв  рух ×{:.2}  ADS {:.2} с", w.key(), w.def().name(), s.weight, s.rpm, s.move_mult, s.ads_time)
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
             k => match WeaponId::from_key(k) {
-                Some(w) => format!("{} (tune {}.<ключ> <значення>):\n{}", w.def().name, w.key(), list_fields(&json["weapons"][w.key()], WeaponStats::FIELDS, "")),
+                Some(w) => format!("{} (tune {}.<ключ> <значення>):\n{}", w.def().name(), w.key(), list_fields(&json["weapons"][w.key()], WeaponStats::FIELDS, "")),
                 None => format!("Невідома група «{k}». Напиши tune"),
             },
         };
@@ -795,7 +795,7 @@ pub fn tune(g: &mut Game, rest: &str) -> String {
             (vec!["weapons".into(), WeaponId::from_key(w).unwrap().key().into(), f.to_string()], WeaponStats::FIELDS)
         }
         [f] if MoveTuning::FIELDS.iter().any(|x| x.0 == *f) => (vec!["movement".into(), f.to_string()], MoveTuning::FIELDS),
-        _ => return format!("Невірний шлях «{first}». Приклади: movement.sprint_speed, m249.rpm, grenade.throw_speed, streaks.heli_damage"),
+        _ => return format!("Невірний шлях «{first}». Приклади: movement.sprint_speed, negev.rpm, grenade.throw_speed, streaks.heli_damage"),
     };
     let field = path.last().unwrap().clone();
     let Some(info) = fields.iter().find(|x| x.0 == field) else {

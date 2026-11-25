@@ -12,7 +12,7 @@ use toon_shared::map::{Map, MapId, Spawn};
 use toon_shared::physics::{body_box, Body, Stance, World};
 use toon_shared::protocol::*;
 use toon_shared::rng::Rng;
-use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
+use toon_shared::weapons::{Cause, Killstreak, Loadout, WeaponId, DEFAULT_CLASSES};
 use toon_shared::{maps, tr, Mode, Team};
 
 pub const PREROUND_FIRST: f64 = 8.0;
@@ -38,8 +38,6 @@ pub struct HistEntry {
 }
 
 pub struct Player {
-    /// The battle royale has no classes: their perks do not count there.
-    pub no_perks: bool,
     pub id: u8,
     pub name: String,
     /// Language the server writes to this player in.
@@ -247,7 +245,6 @@ impl Player {
     pub fn new(id: u8, name: String, addr: Option<SocketAddr>, now: f64) -> Player {
         let l = DEFAULT_CLASSES[0].1;
         Player {
-            no_perks: false,
             id,
             name,
             lang: Lang::Uk,
@@ -365,12 +362,6 @@ impl Player {
     }
     pub fn weapon_mut(&mut self) -> &mut WState {
         &mut self.weapons[self.slot as usize & 1]
-    }
-    pub fn has_perk2(&self, p: Perk2) -> bool {
-        !self.no_perks && self.loadout.perk2 == p
-    }
-    pub fn has_perk3(&self, p: Perk3) -> bool {
-        !self.no_perks && self.loadout.perk3 == p
     }
     /// Position/yaw/stance at a past time (lag compensation).
     pub fn rewound(&self, t: f64) -> (Vec3, f32, Stance) {
@@ -1419,7 +1410,6 @@ impl Game {
             p.loadout = l;
         }
         let l = p.loadout;
-        p.no_perks = self.mode == Mode::Br;
         p.alive = true;
         p.hp = MAX_HEALTH;
         p.body = Body {
@@ -1512,9 +1502,10 @@ impl Game {
                 weapon,
                 origin,
                 dirs,
+                draw,
             } => {
                 let dirs: Vec<Vec3> = dirs.iter().map(|d| Vec3::from_array(*d)).collect();
-                self.fire(id, weapon, Vec3::from_array(origin), &dirs);
+                self.fire_drawn(id, weapon, Vec3::from_array(origin), &dirs, draw);
             }
             C2S::Reload => self.start_reload(id),
             C2S::Switch(slot) => self.switch_weapon(id, slot),
@@ -2695,7 +2686,7 @@ impl Game {
         }
         if !self.mode.solo() {
             let team = viewer.team.index();
-            let uav = self.uav_until[team] > self.time && !t.has_perk2(Perk2::UavJammer);
+            let uav = self.uav_until[team] > self.time;
             let pinged = self.time - t.last_shot < RADAR_PING_TIME as f64;
             if uav || pinged {
                 return false;
@@ -2703,10 +2694,7 @@ impl Game {
         }
         // footsteps: someone walking or running near enough is heard (and shown where)
         let speed = vec2(t.body.vel.x, t.body.vel.z).length();
-        if t.body.stance == toon_shared::physics::Stance::Stand
-            && speed > 1.5
-            && !t.has_perk3(Perk3::DeadSilence)
-        {
+        if t.body.stance == toon_shared::physics::Stance::Stand && speed > 1.5 {
             let hear = if speed > 6.0 { 34.0 } else { 22.0 };
             if viewer.body.pos.distance(t.body.pos) < hear {
                 return false;
@@ -2844,7 +2832,7 @@ impl Game {
                     f |= flags::FIRING;
                 }
                 if (p.team != my_team || self.mode.solo()) && p.id != id && p.alive {
-                    let uav_vis = uav && !p.has_perk2(Perk2::UavJammer);
+                    let uav_vis = uav;
                     // gunfire shows on the radar (not in the battle royale: nobody has one)
                     let pinged = self.time - p.last_shot < RADAR_PING_TIME as f64
                         && !self.mode.solo();
@@ -2859,9 +2847,7 @@ impl Game {
                     pos: p.body.pos.to_array(),
                     yaw: p.yaw,
                     pitch: p.pitch,
-                    // bit 7: Dead Silence (no footstep sounds)
                     stance: p.body.stance.to_u8()
-                        | if p.has_perk3(Perk3::DeadSilence) { stance_bits::SILENT } else { 0 }
                         // only teammates see the shield: it must not give away enemies
                         | if p.alive && p.team == my_team && !self.mode.solo() && p.protected_until > self.time { stance_bits::PROTECTED } else { 0 }
                         | if p.downed { stance_bits::DOWNED } else { 0 }

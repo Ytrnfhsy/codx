@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use toon_shared::weapons::{Loadout, DEFAULT_CLASSES};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CustomClass {
-    pub name: String,
-    pub loadout: Loadout,
+/// A loadout saved by another version (guns that no longer exist, perks…) is dropped,
+/// not the whole settings file with it.
+fn lenient_loadout<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Loadout>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).ok())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -117,11 +117,9 @@ pub struct Settings {
     pub grass: u8,
     /// Language of the game (the system's one at first start).
     pub lang: toon_shared::lang::Lang,
-    /// The loadout for the team modes (the guns and the perks picked last time).
+    /// The loadout for the team modes (the guns picked last time).
+    #[serde(deserialize_with = "lenient_loadout")]
     pub loadout: Option<Loadout>,
-    /// (Classes of older versions: the loadout starts from the one used last.)
-    pub custom: Vec<CustomClass>,
-    pub last_class: usize,
     pub recent: Vec<String>,
     /// Keys and mouse buttons for every action.
     pub binds: crate::binds::Binds,
@@ -179,28 +177,12 @@ impl Settings {
             effects: 1,
             grass: 1,
             lang,
-            custom: (1..=3)
-                .map(|i| CustomClass {
-                    name: toon_shared::tr!("Мій клас {i}", "My class {i}"),
-                    loadout: DEFAULT_CLASSES[(i - 1) % DEFAULT_CLASSES.len()].1,
-                })
-                .collect(),
-            last_class: 0,
             loadout: None,
             recent: Vec::new(),
             favorites: Vec::new(),
             master: toon_shared::consts::MASTER_DEFAULT.into(),
             binds: Default::default(),
             host: HostSettings::default(),
-        }
-    }
-}
-
-impl Default for CustomClass {
-    fn default() -> Self {
-        CustomClass {
-            name: toon_shared::lang::t("Клас", "Class").into(),
-            loadout: DEFAULT_CLASSES[0].1,
         }
     }
 }
@@ -224,17 +206,6 @@ impl Settings {
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        while s.custom.len() < 3 {
-            s.custom.push(CustomClass::default());
-        }
-        s.custom.truncate(3);
-        for c in &mut s.custom {
-            c.loadout = c.loadout.sanitized();
-        }
-        if s.loadout.is_none() {
-            let classes = s.classes();
-            s.loadout = Some(classes[s.last_class.min(classes.len() - 1)].1);
-        }
         if s.player_key == 0 {
             use std::hash::{BuildHasher, Hasher};
             let mut h = std::collections::hash_map::RandomState::new().build_hasher();
@@ -300,16 +271,12 @@ impl Settings {
         self.loadout.unwrap_or(DEFAULT_CLASSES[0].1).sanitized()
     }
 
-    /// All the classes of older versions: 5 defaults + custom ones.
+    /// Ready loadouts (for `--class` in smoke tests).
     pub fn classes(&self) -> Vec<(String, Loadout)> {
-        let mut v: Vec<(String, Loadout)> = DEFAULT_CLASSES
+        DEFAULT_CLASSES
             .iter()
             .map(|(n, l)| (n.to_string(), *l))
-            .collect();
-        for c in &self.custom {
-            v.push((c.name.clone(), c.loadout));
-        }
-        v
+            .collect()
     }
 }
 

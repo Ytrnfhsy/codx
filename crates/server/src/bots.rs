@@ -7,7 +7,7 @@ use toon_shared::physics::{MoveInput, Stance};
 use toon_shared::protocol::{flags, MatchState};
 use toon_shared::ray::smoke_blocks;
 use toon_shared::rng::Rng;
-use toon_shared::weapons::{Perk3, WeaponClass};
+use toon_shared::weapons::WeaponClass;
 use toon_shared::{look_dir, wrap_angle, yaw_basis, yaw_of, Mode, Team};
 
 pub const BOT_NAMES: [&str; 20] = [
@@ -428,9 +428,7 @@ impl Game {
                 } else {
                     sk.hearing
                 };
-                let audible = (shooting && d < hearing)
-                    || (moving && !o.has_perk3(Perk3::DeadSilence) && d < sk.footsteps)
-                    || hit_me;
+                let audible = (shooting && d < hearing) || (moving && d < sk.footsteps) || hit_me;
                 if !los && audible && heard.map(|h| d < h.1).unwrap_or(true) {
                     heard = Some((o.body.pos, d));
                 }
@@ -902,19 +900,11 @@ impl Game {
             sprint = false;
             jump = false;
         }
-        // bots get tired like players: a few seconds of sprint (twice that with Extreme
-        // Conditioning), then a walk until their breath is back
+        // bots get tired like players: a few seconds of sprint, then a walk until their
+        // breath is back
         {
             let m = &self.tuning.movement;
-            let most = m.sprint_time
-                * if self
-                    .p(id)
-                    .is_some_and(|p| p.has_perk3(Perk3::ExtremeConditioning))
-                {
-                    2.0
-                } else {
-                    1.0
-                };
+            let most = m.sprint_time;
             if bot.winded && bot.winded_by <= most * 0.65 {
                 bot.winded = false;
             }

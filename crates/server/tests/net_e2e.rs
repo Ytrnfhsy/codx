@@ -182,6 +182,7 @@ fn join_move_and_shoot_over_udp() {
                     weapon: DEFAULT_CLASSES[0].1.primary,
                     origin: eye.to_array(),
                     dirs: vec![look_dir(*yaw, 0.0).to_array()],
+                    draw: 1.0,
                 });
                 fired = true;
             }

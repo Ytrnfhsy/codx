@@ -387,7 +387,7 @@ impl Game {
         }
         self.shots.push(ShotFx {
             id: 254,
-            weapon: WeaponId::M249,
+            weapon: WeaponId::Negev,
             from: from.to_array(),
             to: (from + d * dist).to_array(),
             flesh,

@@ -1,5 +1,5 @@
 //! The loadout screen (team deathmatch and sabotage): every gun at once on a grid, one
-//! column per kind, a pistol to go with it, the perks below; one click picks, «FIGHT»
+//! column per kind, a pistol (or a launcher) to go with it; one click picks, «FIGHT»
 //! (or Enter) sends it. What was picked is remembered for next time.
 
 use crate::game::GameClient;
@@ -9,20 +9,19 @@ use crate::ui::*;
 use macroquad::prelude::*;
 use toon_shared::lang::t;
 use toon_shared::tr;
-use toon_shared::weapons::{Perk1, Perk2, Perk3, WeaponClass, WeaponId};
+use toon_shared::weapons::{WeaponClass, WeaponId};
 
 /// The columns: a kind of gun and its title.
-fn columns() -> [(WeaponClass, &'static str); 6] {
+fn columns() -> [(WeaponClass, &'static str); 8] {
     [
-        (
-            WeaponClass::Rifle,
-            t("Штурмові гвинтівки", "Assault rifles"),
-        ),
-        (WeaponClass::Smg, t("Пістолети-кулемети", "SMGs")),
+        (WeaponClass::Rifle, t("Штурмові", "Assault")),
+        (WeaponClass::Smg, t("ПП", "SMGs")),
+        (WeaponClass::Marksman, t("Марксман", "Marksman")),
         (WeaponClass::Lmg, t("Кулемети", "LMGs")),
         (WeaponClass::Shotgun, t("Дробовики", "Shotguns")),
-        (WeaponClass::Sniper, t("Снайперські", "Sniper rifles")),
+        (WeaponClass::Sniper, t("Снайперські", "Snipers")),
         (WeaponClass::Pistol, t("Пістолети", "Pistols")),
+        (WeaponClass::Launcher, t("Особливі", "Special")),
     ]
 }
 
@@ -113,8 +112,8 @@ impl GameClient {
                 self.map.id.name(),
                 self.mode.name(),
                 t(
-                    "обери основну зброю, пістолет і перки",
-                    "pick a gun, a pistol and perks"
+                    "обери основну зброю й додаткову",
+                    "pick a gun and a sidearm"
                 )
             ),
             mx + 2.0,
@@ -133,8 +132,8 @@ impl GameClient {
         );
         let summary = format!(
             "{} · {}",
-            pick.primary.def().name,
-            pick.secondary.def().name
+            pick.primary.def().name(),
+            pick.secondary.def().name()
         );
         ui.bold(
             &ui.fit(&summary, fs(21.0), true, bw - 300.0 * k),
@@ -161,12 +160,17 @@ impl GameClient {
         // ---- the grid
         let top = 150.0 * k;
         let gap = 18.0 * k;
-        let colw = (w - 2.0 * mx - gap * 5.0) / 6.0;
-        let perk_h = 150.0 * k;
+        let ncol = columns().len() as f32;
+        let colw = (w - 2.0 * mx - gap * (ncol - 1.0)) / ncol;
+        let rows = columns()
+            .iter()
+            .map(|c| guns_of(c.0).len())
+            .max()
+            .unwrap_or(1) as f32;
         let foot = 44.0 * k;
         let head_h = 52.0 * k;
-        let cards_h = h - top - head_h - 14.0 * k - perk_h - gap - foot;
-        let cardh = ((cards_h - 2.0 * 14.0 * k) / 3.0).min(220.0 * k);
+        let cards_h = h - top - head_h - 14.0 * k - foot;
+        let cardh = ((cards_h - (rows - 1.0) * 14.0 * k) / rows).min(220.0 * k);
         // stats against the best of every gun on this server
         let stat = |w: WeaponId| {
             let d = self.tuning.weapon(w);
@@ -184,6 +188,8 @@ impl GameClient {
             KeyCode::Key4,
             KeyCode::Key5,
             KeyCode::Key6,
+            KeyCode::Key7,
+            KeyCode::Key8,
         ]
         .iter()
         .position(|&key| is_key_pressed(key));
@@ -199,7 +205,7 @@ impl GameClient {
         }
         for (ci, (class, title)) in columns().iter().enumerate() {
             let x = mx + ci as f32 * (colw + gap);
-            let pistols = *class == WeaponClass::Pistol;
+            let pistols = class.is_sidearm();
             let keyed = self.pick_col == Some(ci);
             round_rect(
                 x,
@@ -287,9 +293,9 @@ impl GameClient {
                 let d = gun.def();
                 if chosen {
                     let tag = if pistols {
-                        t("ДОДАТКОВА", "SECONDARY")
+                        t("ДОД", "2ND")
                     } else {
-                        t("ОСНОВНА", "PRIMARY")
+                        t("ОСН", "1ST")
                     };
                     let tw = ui.width(tag, fs(13.0), true);
                     round_rect(
@@ -310,21 +316,21 @@ impl GameClient {
                         MUTED,
                     );
                 }
-                let name = ui.fit(d.name, fs(20.0), true, colw * 0.62);
-                let nw = ui.width(&name, fs(20.0), true);
+                let name = ui.fit(d.name(), fs(18.0), true, colw * 0.66);
+                let nw = ui.width(&name, fs(18.0), true);
                 ui.bold(
                     &name,
-                    x + colw - 16.0 * k - nw,
-                    y + 31.0 * k,
-                    fs(20.0),
+                    x + colw - 14.0 * k - nw,
+                    y + 30.0 * k,
+                    fs(18.0),
                     if chosen { ACCENT } else { TEXT },
                 );
-                let icon_h = (cardh - 130.0 * k).max(30.0 * k);
+                let icon_h = (cardh - 116.0 * k).max(26.0 * k);
                 draw_gun(
                     gun,
                     x + colw / 2.0,
-                    y + 44.0 * k + icon_h / 2.0,
-                    colw - 60.0 * k,
+                    y + 42.0 * k + icon_h / 2.0,
+                    colw - 36.0 * k,
                     icon_h,
                 );
                 // three bars: damage, rate of fire, range
@@ -339,7 +345,7 @@ impl GameClient {
                 for (j, (label, v)) in bars.iter().enumerate() {
                     let sy = y + cardh - 66.0 * k + j as f32 * 18.0 * k;
                     ui.text(label, x + 16.0 * k, sy + 10.0 * k, fs(13.0), MUTED);
-                    let (bx, bw) = (x + 82.0 * k, colw - 100.0 * k);
+                    let (bx, bw) = (x + 72.0 * k, colw - 86.0 * k);
                     round_rect(
                         bx,
                         sy + 3.0 * k,
@@ -373,80 +379,6 @@ impl GameClient {
             }
         }
 
-        // ---- the perks
-        let py = h - foot - perk_h;
-        let pw = (w - 2.0 * mx - gap * 2.0) / 3.0;
-        let groups: [(&str, Vec<(&str, bool)>, &str); 3] = [
-            (
-                t("Перк 1", "Perk 1"),
-                Perk1::ALL
-                    .iter()
-                    .map(|p| (p.name(), *p == pick.perk1))
-                    .collect(),
-                pick.perk1.desc(),
-            ),
-            (
-                t("Перк 2", "Perk 2"),
-                Perk2::ALL
-                    .iter()
-                    .map(|p| (p.name(), *p == pick.perk2))
-                    .collect(),
-                pick.perk2.desc(),
-            ),
-            (
-                t("Перк 3", "Perk 3"),
-                Perk3::ALL
-                    .iter()
-                    .map(|p| (p.name(), *p == pick.perk3))
-                    .collect(),
-                pick.perk3.desc(),
-            ),
-        ];
-        for (i, (label, opts, desc)) in groups.iter().enumerate() {
-            let x = mx + i as f32 * (pw + gap);
-            round_rect(x, py, pw, perk_h, 14.0 * k, PANEL);
-            ui.bold(label, x + 18.0 * k, py + 30.0 * k, fs(18.0), ACCENT);
-            let lw = ui.width(label, fs(18.0), true);
-            ui.text(
-                &ui.fit(desc, fs(15.0), false, pw - lw - 50.0 * k),
-                x + 30.0 * k + lw,
-                py + 30.0 * k,
-                fs(15.0),
-                MUTED,
-            );
-            let (mut cx, mut ry) = (x + 16.0 * k, py + 46.0 * k);
-            for (j, (name, on)) in opts.iter().enumerate() {
-                let tw = ui.width(name, fs(15.0), true) + 28.0 * k;
-                if cx + tw > x + pw - 12.0 * k {
-                    cx = x + 16.0 * k;
-                    ry += 48.0 * k;
-                }
-                let hover = mouse_in(ui.mouse, cx, ry, tw, 40.0 * k);
-                let c = if *on {
-                    ACCENT
-                } else if hover {
-                    Color::new(0.3, 0.35, 0.5, 1.0)
-                } else {
-                    PANEL2
-                };
-                round_rect(cx, ry, tw, 40.0 * k, 10.0 * k, c);
-                ui.bold(
-                    name,
-                    cx + 14.0 * k,
-                    ry + 26.0 * k,
-                    fs(15.0),
-                    if *on { DARK_TEXT } else { TEXT },
-                );
-                if hover && ui.clicked {
-                    match i {
-                        0 => pick.perk1 = Perk1::ALL[j],
-                        1 => pick.perk2 = Perk2::ALL[j],
-                        _ => pick.perk3 = Perk3::ALL[j],
-                    }
-                }
-                cx += tw + 10.0 * k;
-            }
-        }
         let hint = match self.pick_col {
             Some(c) => tr!(
                 "{}: натисни номер зброї (1–{})",
@@ -455,8 +387,8 @@ impl GameClient {
                 guns_of(columns()[c].0).len()
             ),
             None => t(
-                "Клік — вибрати · 1–6, потім номер — вибір з клавіатури · Enter — в бій · Esc — закрити · набір запам'ятовується",
-                "Click to pick · 1–6 then a number from the keyboard · Enter to fight · Esc to close · the loadout is remembered",
+                "Клік — вибрати · 1–8, потім номер — вибір з клавіатури · Enter — в бій · Esc — закрити · набір запам'ятовується",
+                "Click to pick · 1–8 then a number from the keyboard · Enter to fight · Esc to close · the loadout is remembered",
             )
             .to_string(),
         };

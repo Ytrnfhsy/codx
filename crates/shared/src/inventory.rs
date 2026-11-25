@@ -15,26 +15,32 @@ pub enum AmmoType {
     Shotgun,
     Sniper,
     Lmg,
+    Rocket,
+    Bolt,
 }
 
 impl AmmoType {
-    pub const ALL: [AmmoType; 6] = [
+    pub const ALL: [AmmoType; 8] = [
         AmmoType::Pistol,
         AmmoType::Smg,
         AmmoType::Rifle,
         AmmoType::Shotgun,
         AmmoType::Sniper,
         AmmoType::Lmg,
+        AmmoType::Rocket,
+        AmmoType::Bolt,
     ];
 
     pub fn of(w: WeaponId) -> AmmoType {
         match w.def().class {
             WeaponClass::Pistol => AmmoType::Pistol,
             WeaponClass::Smg => AmmoType::Smg,
-            WeaponClass::Rifle => AmmoType::Rifle,
+            WeaponClass::Rifle | WeaponClass::Marksman => AmmoType::Rifle,
             WeaponClass::Shotgun => AmmoType::Shotgun,
             WeaponClass::Sniper => AmmoType::Sniper,
             WeaponClass::Lmg => AmmoType::Lmg,
+            WeaponClass::Launcher if w == WeaponId::Rpg7 => AmmoType::Rocket,
+            WeaponClass::Launcher => AmmoType::Bolt,
         }
     }
 
@@ -50,6 +56,8 @@ impl AmmoType {
             AmmoType::Shotgun => t("Дріб", "Shotgun shells"),
             AmmoType::Sniper => t("Снайперські набої", "Sniper ammo"),
             AmmoType::Lmg => t("Кулеметна стрічка", "Machine gun belt"),
+            AmmoType::Rocket => t("Ракети до РПГ", "RPG rockets"),
+            AmmoType::Bolt => t("Стріли й болти", "Arrows and bolts"),
         }
     }
 
@@ -62,6 +70,8 @@ impl AmmoType {
             AmmoType::Shotgun => t("ДРІБ", "SHT"),
             AmmoType::Sniper => t("СНАЙП", "SNP"),
             AmmoType::Lmg => t("КУЛ", "LMG"),
+            AmmoType::Rocket => t("РАК", "RKT"),
+            AmmoType::Bolt => t("БОЛТ", "BLT"),
         }
     }
 
@@ -69,7 +79,7 @@ impl AmmoType {
     pub fn guns(self) -> Vec<&'static str> {
         WeaponId::all()
             .filter(|w| AmmoType::of(*w) == self)
-            .map(|w| w.def().name)
+            .map(|w| w.def().name())
             .collect()
     }
 
@@ -82,6 +92,8 @@ impl AmmoType {
             AmmoType::Shotgun => 24,
             AmmoType::Sniper => 25,
             AmmoType::Lmg => 200,
+            AmmoType::Rocket => 3,
+            AmmoType::Bolt => 20,
         }
     }
 
@@ -94,6 +106,8 @@ impl AmmoType {
             AmmoType::Shotgun => 8,
             AmmoType::Sniper => 5,
             AmmoType::Lmg => 50,
+            AmmoType::Rocket => 1,
+            AmmoType::Bolt => 4,
         }
     }
 }
@@ -197,8 +211,9 @@ pub fn sight_fits(level: u8, w: WeaponId) -> bool {
         WeaponClass::Pistol => level <= 1,
         WeaponClass::Shotgun => level <= 2,
         WeaponClass::Smg | WeaponClass::Lmg => level <= 3,
-        WeaponClass::Rifle => true,
+        WeaponClass::Rifle | WeaponClass::Marksman => true,
         WeaponClass::Sniper => level >= 2,
+        WeaponClass::Launcher => level <= 2,
     }
 }
 
@@ -208,8 +223,9 @@ pub fn sight_rule(w: WeaponId) -> &'static str {
         WeaponClass::Pistol => t("лише коліматор", "red dot only"),
         WeaponClass::Shotgun => t("коліматор або 2×", "red dot or 2×"),
         WeaponClass::Smg | WeaponClass::Lmg => t("до 2–4×", "up to 2–4×"),
-        WeaponClass::Rifle => t("будь-який", "any"),
+        WeaponClass::Rifle | WeaponClass::Marksman => t("будь-який", "any"),
         WeaponClass::Sniper => t("лише оптика", "scopes only"),
+        WeaponClass::Launcher => t("коліматор або 2×", "red dot or 2×"),
     }
 }
 
@@ -243,10 +259,16 @@ pub fn mod_place(kind: u8) -> usize {
 pub fn mod_fits(kind: u8, w: WeaponId) -> bool {
     let c = w.def().class;
     match kind {
-        MOD_SUPPRESSOR => c != WeaponClass::Shotgun,
-        MOD_COMPENSATOR => !matches!(c, WeaponClass::Shotgun | WeaponClass::Pistol),
-        MOD_EXTMAG => c != WeaponClass::Shotgun,
-        MOD_GRIP => matches!(c, WeaponClass::Rifle | WeaponClass::Smg | WeaponClass::Lmg),
+        MOD_SUPPRESSOR => !matches!(c, WeaponClass::Shotgun | WeaponClass::Launcher),
+        MOD_COMPENSATOR => !matches!(
+            c,
+            WeaponClass::Shotgun | WeaponClass::Pistol | WeaponClass::Launcher
+        ),
+        MOD_EXTMAG => !matches!(c, WeaponClass::Shotgun | WeaponClass::Launcher),
+        MOD_GRIP => matches!(
+            c,
+            WeaponClass::Rifle | WeaponClass::Smg | WeaponClass::Lmg | WeaponClass::Marksman
+        ),
         _ => false,
     }
 }
@@ -290,7 +312,7 @@ pub struct Inventory {
     pub helmet_hp: f32,
     pub backpack: u8,
     /// Rounds of each `AmmoType`.
-    pub ammo: [u16; 6],
+    pub ammo: [u16; 8],
     /// Seconds left of using a medkit, bandage or drink (0 = not healing), and which.
     pub healing: f32,
     pub using: u8,
@@ -462,15 +484,17 @@ mod tests {
         inv.backpack = 3;
         assert_eq!(inv.add_ammo(AmmoType::Sniper, 100), 37);
         assert_eq!(inv.medkit_cap(), 8);
-        assert_eq!(AmmoType::of(WeaponId::M40), AmmoType::Sniper);
-        assert!(AmmoType::Rifle.guns().contains(&"M4A1"));
+        assert_eq!(AmmoType::of(WeaponId::Awm), AmmoType::Sniper);
+        assert!(AmmoType::Rifle.guns().contains(&"UAR-15"));
     }
 
     #[test]
     fn attachments_fit_and_share_the_backpack() {
-        assert!(mod_fits(MOD_SUPPRESSOR, WeaponId::M9) && !mod_fits(MOD_GRIP, WeaponId::M9));
-        assert!(!mod_fits(MOD_SUPPRESSOR, WeaponId::W1200));
-        assert!(mod_fits(MOD_GRIP, WeaponId::M4) && !mod_fits(MOD_GRIP, WeaponId::M40));
+        assert!(
+            mod_fits(MOD_SUPPRESSOR, WeaponId::Fort17) && !mod_fits(MOD_GRIP, WeaponId::Fort17)
+        );
+        assert!(!mod_fits(MOD_SUPPRESSOR, WeaponId::Ksg));
+        assert!(mod_fits(MOD_GRIP, WeaponId::Uar15) && !mod_fits(MOD_GRIP, WeaponId::Awm));
         assert_eq!(mag_size(30, true), 45);
         let mut inv = Inventory::default();
         assert!(inv.stash_sight(2) && inv.stash_mod(MOD_GRIP) && !inv.stash_mod(MOD_EXTMAG));
@@ -479,14 +503,14 @@ mod tests {
 
     #[test]
     fn sights_fit_their_guns() {
-        assert!(sight_fits(4, WeaponId::M40) && sight_fits(3, WeaponId::M4));
-        assert!(sight_fits(1, WeaponId::M9) && !sight_fits(2, WeaponId::M9));
-        assert!(sight_fits(2, WeaponId::W1200) && !sight_fits(3, WeaponId::W1200));
-        assert!(sight_fits(3, WeaponId::Mp5) && !sight_fits(4, WeaponId::Mp5));
-        assert!(sight_fits(3, WeaponId::M249) && !sight_fits(4, WeaponId::Rpd));
-        assert!(sight_fits(4, WeaponId::Ak47) && sight_fits(1, WeaponId::M4));
-        assert!(!sight_fits(1, WeaponId::M40) && sight_fits(2, WeaponId::R700));
-        assert!(!sight_fits(2, WeaponId::Deagle) && !sight_fits(4, WeaponId::Usp));
+        assert!(sight_fits(4, WeaponId::Awm) && sight_fits(3, WeaponId::Uar15));
+        assert!(sight_fits(1, WeaponId::Fort17) && !sight_fits(2, WeaponId::Fort17));
+        assert!(sight_fits(2, WeaponId::Ksg) && !sight_fits(3, WeaponId::Ksg));
+        assert!(sight_fits(3, WeaponId::Mp7) && !sight_fits(4, WeaponId::Mp7));
+        assert!(sight_fits(3, WeaponId::Negev) && !sight_fits(4, WeaponId::Pkm));
+        assert!(sight_fits(4, WeaponId::Ak12) && sight_fits(1, WeaponId::Uar15));
+        assert!(!sight_fits(1, WeaponId::Awm) && sight_fits(2, WeaponId::Awm));
+        assert!(!sight_fits(2, WeaponId::Revolver) && !sight_fits(4, WeaponId::Glock18));
         assert!((0..=MAX_SIGHT).all(|l| sight_fits(0, WeaponId::all().nth(l as usize).unwrap())));
         assert!(sight_zoom(4) > sight_zoom(3) && !sight_magnifies(1));
         assert!(sight_variable(4) && sight_variable(3) && !sight_variable(2));
@@ -494,8 +518,8 @@ mod tests {
         // spares: as many as the backpack holds, the best fitting one comes out first
         let mut inv = Inventory::default();
         assert!(inv.stash_sight(4) && inv.stash_sight(1) && !inv.stash_sight(2));
-        assert_eq!(inv.take_best_sight(WeaponId::M9), 1);
-        assert_eq!(inv.take_best_sight(WeaponId::M9), 0);
-        assert_eq!(inv.take_best_sight(WeaponId::M4), 4);
+        assert_eq!(inv.take_best_sight(WeaponId::Fort17), 1);
+        assert_eq!(inv.take_best_sight(WeaponId::Fort17), 0);
+        assert_eq!(inv.take_best_sight(WeaponId::Uar15), 4);
     }
 }

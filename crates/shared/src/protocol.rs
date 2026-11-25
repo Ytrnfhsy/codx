@@ -57,6 +57,8 @@ pub enum C2S {
         weapon: WeaponId,
         origin: V3,
         dirs: Vec<V3>,
+        /// How far a bow was drawn (0..1; 1 for every other gun).
+        draw: f32,
     },
     Reload,
     Switch(u8),

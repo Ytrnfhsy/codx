@@ -54,6 +54,10 @@ struct Args {
     model_gallery: bool,
     auto: bool,
     class: Option<usize>,
+    /// (smoke tests) this gun instead of the class's (a sidearm also goes into the hand)
+    gun: Option<String>,
+    /// (smoke tests) leave the loadout screen open
+    open_loadout: bool,
     team: Option<String>,
     map: Option<String>,
     mode: Option<String>,
@@ -119,6 +123,11 @@ fn parse_args() -> Args {
             }
             "--model-gallery" => a.model_gallery = true,
             "--auto" => a.auto = true,
+            "--gun" => {
+                a.gun = next;
+                i += 1;
+            }
+            "--open-loadout" => a.open_loadout = true,
             "--class" => {
                 a.class = next.and_then(|s| s.parse().ok());
                 i += 1;
@@ -318,6 +327,7 @@ async fn amain(args: Args) {
     let mut backspace_next = 0.0f64;
     let start = get_time();
     let mut auto_done = false;
+    let mut auto_switch = false;
     let mut low_res: Option<(RenderTarget, i32)> = None;
     let mut frame_start = std::time::Instant::now();
     let mut fps_window = (std::time::Instant::now(), 0u32);
@@ -805,7 +815,20 @@ async fn amain(args: Args) {
                     g.join_team(team);
                     let classes = settings.classes();
                     let c = args.class.unwrap_or(0).min(classes.len() - 1);
-                    g.net.send(C2S::SetLoadout(classes[c].1));
+                    let mut l = classes[c].1;
+                    let gun = args
+                        .gun
+                        .as_deref()
+                        .and_then(|k| toon_shared::weapons::WeaponId::all().find(|w| w.key() == k));
+                    if let Some(w) = gun {
+                        if w.def().class.is_sidearm() {
+                            l.secondary = w;
+                            auto_switch = true;
+                        } else {
+                            l.primary = w;
+                        }
+                    }
+                    g.net.send(C2S::SetLoadout(l));
                     g.has_class = true;
                     g.overlay = Overlay::None;
                     // (screenshots and smoke tests do not wait for a click on «Ready»)
@@ -813,6 +836,14 @@ async fn amain(args: Args) {
                     auto_done = true;
                 }
 
+                // (a sidearm asked for by --gun: take it in hand once alive)
+                if auto_switch && g.alive && get_time() - start > 4.0 {
+                    g.switch_to(1);
+                    auto_switch = false;
+                }
+                if args.open_loadout && g.alive && get_time() - start > 5.0 {
+                    g.overlay = Overlay::Class;
+                }
                 g.update(dt, &settings, Some(&audio));
                 // the 3D world goes into its own target: a 32-bit depth buffer whatever the
                 // window got from the system (16 bits on some setups make far walls

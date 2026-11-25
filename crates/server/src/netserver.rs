@@ -101,7 +101,7 @@ fn state_json_raw(g: &Game) -> serde_json::Value {
             "streaks": toon_shared::tuning::StreakTuning::FIELDS,
             "weapon": toon_shared::tuning::WeaponStats::FIELDS,
         },
-        "weapon_names": toon_shared::weapons::WeaponId::all().map(|w| (w.key(), w.def().name)).collect::<Vec<_>>(),
+        "weapon_names": toon_shared::weapons::WeaponId::all().map(|w| (w.key(), w.def().name())).collect::<Vec<_>>(),
     })
 }
 

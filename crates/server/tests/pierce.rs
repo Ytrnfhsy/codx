@@ -104,6 +104,7 @@ fn row_shot(weapon: WeaponId, vest: u8) -> Vec<f32> {
             weapon,
             origin: eye.to_array(),
             dirs: vec![d.to_array()],
+            draw: 1.0,
         },
     );
     for _ in 0..10 {
@@ -123,7 +124,7 @@ fn row_shot(weapon: WeaponId, vest: u8) -> Vec<f32> {
 
 #[test]
 fn a_rifle_round_goes_through_a_row() {
-    let lost = row_shot(WeaponId::M40, 0);
+    let lost = row_shot(WeaponId::Awm, 0);
     assert!(lost.iter().all(|&l| l > 0.0), "all three hit: {lost:?}");
     assert!(
         lost[0] > lost[1] && lost[1] > lost[2],
@@ -133,7 +134,7 @@ fn a_rifle_round_goes_through_a_row() {
 
 #[test]
 fn a_pistol_round_stays_in_the_first() {
-    let lost = row_shot(WeaponId::M9, 0);
+    let lost = row_shot(WeaponId::Fort17, 0);
     assert!(
         lost[0] > 0.0 && lost[1] == 0.0 && lost[2] == 0.0,
         "{lost:?}"
@@ -142,8 +143,8 @@ fn a_pistol_round_stays_in_the_first() {
 
 #[test]
 fn vests_and_helmets_take_more_of_it() {
-    let bare = row_shot(WeaponId::M40, 0);
-    let vested = row_shot(WeaponId::M40, 3);
+    let bare = row_shot(WeaponId::Awm, 0);
+    let vested = row_shot(WeaponId::Awm, 3);
     // (level 3 gear: the sniper round still gets through the first, but weaker)
     assert!(vested[1] < bare[1], "bare {bare:?} vested {vested:?}");
     assert_eq!(vested[2], 0.0, "stopped in the second: {vested:?}");
@@ -158,7 +159,7 @@ fn quick_kills_make_a_double_and_a_triple() {
         p.protected_until = 0.0;
     }
     for (k, &v) in row.iter().enumerate() {
-        g.kill(v, Some(a), Cause::Weapon(WeaponId::M4), false);
+        g.kill(v, Some(a), Cause::Weapon(WeaponId::Uar15), false);
         assert_eq!(g.p(a).unwrap().multi, k as u8 + 1);
         g.tick(TICK_DT);
     }
@@ -173,6 +174,107 @@ fn quick_kills_make_a_double_and_a_triple() {
         p.hp = 100.0;
         p.protected_until = 0.0;
     }
-    g.kill(v, Some(a), Cause::Weapon(WeaponId::M4), false);
+    g.kill(v, Some(a), Cause::Weapon(WeaponId::Uar15), false);
     assert_eq!(g.p(a).unwrap().multi, 1);
+}
+
+/// One shot from `weapon` at the first of the row; `draw` as the client sends it, after
+/// `wait` seconds of drawing since the gun was ready. Returns the health each lost.
+fn single_shot(weapon: WeaponId, draw: f32, wait: f64) -> (Vec<f32>, bool) {
+    let (mut g, a, row) = setup(2);
+    let t = g.time;
+    for (k, &id) in row.iter().enumerate() {
+        let p = g.pm(id).unwrap();
+        p.alive = true;
+        p.hp = 1000.0;
+        p.protected_until = 0.0;
+        p.body.pos = vec3(14.0, 300.0, k as f32 * 3.0);
+        p.body.vel = Vec3::ZERO;
+        p.history.clear();
+    }
+    let lift = {
+        let p = g.pm(a).unwrap();
+        p.alive = true;
+        p.protected_until = 0.0;
+        p.body.pos = vec3(0.0, 300.0, 0.0);
+        p.body.vel = Vec3::ZERO;
+        p.slot = 0;
+        p.weapons[0] = WState {
+            id: weapon,
+            mag: 1,
+            reserve: 5,
+        };
+        p.reload_end = None;
+        p.switch_end = t - 1.0;
+        p.last_sprint = -100.0;
+        p.last_shot = t - wait - weapon.def().reload_time as f64;
+        p.shot_budget = 3.0;
+        p.eye().y
+    } - g.p(row[0]).unwrap().chest().y;
+    for &id in &row {
+        g.pm(id).unwrap().body.pos.y += lift;
+    }
+    let eye = g.p(a).unwrap().eye();
+    let chest = g.p(row[0]).unwrap().chest();
+    // (aim a touch high: the slow ones drop)
+    let d = (chest + vec3(0.0, 0.15, 0.0) - eye).normalize();
+    {
+        let p = g.pm(a).unwrap();
+        p.yaw = yaw_of(d);
+        p.pitch = d.y.asin();
+    }
+    g.handle(
+        a,
+        C2S::Fire {
+            weapon,
+            origin: eye.to_array(),
+            dirs: vec![d.to_array()],
+            draw,
+        },
+    );
+    let mut boom = false;
+    for _ in 0..(1.0 / TICK_DT) as usize {
+        for &id in &row {
+            if let Some(p) = g.pm(id) {
+                p.body.vel = Vec3::ZERO;
+            }
+        }
+        g.tick(TICK_DT);
+        boom |= g
+            .outbox
+            .iter()
+            .any(|m| matches!(m.1, toon_shared::protocol::S2C::Explosion { .. }));
+        g.outbox.clear();
+        g.shots.clear();
+    }
+    let lost = row
+        .iter()
+        .map(|&id| 1000.0 - g.p(id).map_or(1000.0, |p| p.hp))
+        .collect();
+    (lost, boom)
+}
+
+#[test]
+fn a_rocket_blows_up_on_whom_it_hits() {
+    let (lost, boom) = single_shot(WeaponId::Rpg7, 1.0, 1.0);
+    assert!(boom, "it went off");
+    assert!(lost[0] > 100.0, "direct hit and the blast: {lost:?}");
+    assert!(
+        lost[1] > 0.0,
+        "the one next to him caught the blast: {lost:?}"
+    );
+}
+
+#[test]
+fn a_bow_hits_harder_drawn_fully() {
+    let (full, _) = single_shot(WeaponId::Bow, 1.0, 1.0);
+    let (half, _) = single_shot(WeaponId::Bow, 0.3, 1.0);
+    assert!(full[0] > 80.0, "{full:?}");
+    assert!(
+        half[0] > 0.0 && half[0] < full[0] * 0.75,
+        "{half:?} vs {full:?}"
+    );
+    // claiming a full draw at once gets only what the time allowed
+    let (cheat, _) = single_shot(WeaponId::Bow, 1.0, 0.0);
+    assert!(cheat[0] < full[0] * 0.75, "{cheat:?} vs {full:?}");
 }

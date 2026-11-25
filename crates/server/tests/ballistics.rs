@@ -63,7 +63,7 @@ fn place(g: &mut Game, a: u8, b: u8) -> (Vec3, Vec3) {
         p.history.clear();
         p.slot = 0;
         p.weapons[0] = WState {
-            id: WeaponId::M40,
+            id: WeaponId::Awm,
             mag: 5,
             reserve: 10,
         };
@@ -85,9 +85,10 @@ fn shoot(g: &mut Game, a: u8, eye: Vec3, at: Vec3) {
     g.handle(
         a,
         C2S::Fire {
-            weapon: WeaponId::M40,
+            weapon: WeaponId::Awm,
             origin: eye.to_array(),
             dirs: vec![d.to_array()],
+            draw: 1.0,
         },
     );
 }
@@ -111,7 +112,7 @@ fn run(g: &mut Game, secs: f32, b: u8) -> Vec<(f32, f32)> {
 #[test]
 fn a_far_shot_needs_holdover_and_arrives_late() {
     let (mut g, a, b) = setup();
-    let speed = Ballistics::of(WeaponId::M40).velocity;
+    let speed = Ballistics::of(WeaponId::Awm).velocity;
 
     // straight at the chest: the bullet drops ~1.4 m over 450 m and passes under the feet
     let (eye, chest) = place(&mut g, a, b);
@@ -190,7 +191,7 @@ fn a_bot_leads_a_far_runner() {
         p.body.pos = from;
         p.slot = 0;
         p.weapons[0] = WState {
-            id: WeaponId::M40,
+            id: WeaponId::Awm,
             mag: 5,
             reserve: 100,
         };

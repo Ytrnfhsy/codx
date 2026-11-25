@@ -256,6 +256,18 @@ impl WeaponStats {
             WeaponClass::Pistol => (
                 1.0, 1.05, 0.1, 0.35, 0.05, 1.5, 6.0, 1.0, 0.7, 0.9, 0.8, 12.0,
             ),
+            WeaponClass::Marksman => (
+                4.8, 0.93, 0.35, 0.65, 0.0, 1.0, 3.0, 1.0, 1.2, 0.75, 0.55, 7.0,
+            ),
+            // a tube on the shoulder: slow to bring up, steadier lying down
+            WeaponClass::Launcher => (5.0, 0.92, 0.4, 0.85, 0.0, 1.0, 2.0, 1.0, 1.1, 0.8, 0.6, 8.0),
+        };
+        // the heavy ones are heavier still
+        let weight = match d.id {
+            crate::weapons::WeaponId::Barrett => 11.0,
+            crate::weapons::WeaponId::Alligator => 14.0,
+            crate::weapons::WeaponId::Crossbow => 3.0,
+            _ => weight,
         };
         WeaponStats {
             damage_max: d.damage_max,
@@ -410,8 +422,8 @@ mod tests {
             assert_eq!(t.weapon(id).mag, id.def().mag);
         }
         // the LMG is heavier and slower than an SMG
-        let lmg = t.weapon(WeaponId::M249);
-        let smg = t.weapon(WeaponId::Mp5);
+        let lmg = t.weapon(WeaponId::Negev);
+        let smg = t.weapon(WeaponId::Mp7);
         assert!(
             lmg.weight > smg.weight && lmg.move_mult < smg.move_mult && lmg.ads_time > smg.ads_time
         );
@@ -421,13 +433,13 @@ mod tests {
     fn finalize_clamps_and_repairs() {
         let mut t = Tuning::default();
         t.movement.walk_speed = -5.0;
-        t.weapons.get_mut("m4").unwrap().rpm = f32::NAN;
-        t.weapons.remove("ak47");
+        t.weapons.get_mut("uar15").unwrap().rpm = f32::NAN;
+        t.weapons.remove("ak12");
         t.weapons.insert("laser".into(), WeaponStats::default());
         t.finalize();
         assert_eq!(t.movement.walk_speed, 0.5);
-        assert_eq!(t.weapon(WeaponId::M4).rpm, 10.0);
-        assert_eq!(t.weapon(WeaponId::Ak47).mag, 30);
+        assert_eq!(t.weapon(WeaponId::Uar15).rpm, 10.0);
+        assert_eq!(t.weapon(WeaponId::Ak12).mag, 30);
         assert!(!t.weapons.contains_key("laser"));
     }
 
@@ -437,13 +449,13 @@ mod tests {
         let bytes = bincode::serialize(&t).unwrap();
         let mut back: Tuning = bincode::deserialize(&bytes).unwrap();
         back.finalize();
-        assert_eq!(back.weapon(WeaponId::Rpd), t.weapon(WeaponId::Rpd));
+        assert_eq!(back.weapon(WeaponId::Pkm), t.weapon(WeaponId::Pkm));
     }
 
     #[test]
     fn recoil_ramps_up_for_lmg() {
         let t = Tuning::default();
-        let l = t.weapon(WeaponId::M249);
+        let l = t.weapon(WeaponId::Negev);
         assert!(l.recoil_scale(20) > l.recoil_scale(1));
         assert!(l.recoil_scale(1000) <= l.recoil_max_ramp);
     }

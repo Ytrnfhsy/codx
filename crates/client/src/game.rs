@@ -19,7 +19,7 @@ use toon_shared::ray::ray_player;
 use toon_shared::rng::Rng;
 use toon_shared::tr;
 use toon_shared::tuning::{Tuning, WeaponStats};
-use toon_shared::weapons::{Cause, Killstreak, Loadout, Perk2, Perk3, WeaponId, DEFAULT_CLASSES};
+use toon_shared::weapons::{Cause, Killstreak, Loadout, WeaponId, DEFAULT_CLASSES};
 use toon_shared::weather::Weather;
 use toon_shared::{look_dir, maps, wrap_angle, yaw_basis, Mode, Team};
 
@@ -258,6 +258,10 @@ pub struct GameClient {
     pub weapons: [(WeaponId, u16, u16); 2],
     pub slot: u8,
     next_fire: f64,
+    /// When the bow's string started being drawn (held trigger).
+    pub draw_from: Option<f64>,
+    /// How long the trigger has been held (a machine gun spinning up).
+    spin_held: f32,
     pub reload_until: Option<(f64, f64)>,
     pub switch_until: f64,
     pub ads_t: f32,
@@ -593,6 +597,8 @@ impl GameClient {
             weapons: [(def.primary, 0, 0), (def.secondary, 0, 0)],
             slot: 0,
             next_fire: 0.0,
+            draw_from: None,
+            spin_held: 0.0,
             reload_until: None,
             switch_until: 0.0,
             ads_t: 0.0,
@@ -731,8 +737,8 @@ impl GameClient {
             );
             g.push_chat(
                 tr!(
-                    "{gr} — граната, {sm} — дим, {kn} — ніж, {us} — дія, {ks} — кілстрік, {ca}/{ct} — чат, {sc} — рахунок, {cl} — клас",
-                    "{gr} — grenade, {sm} — smoke, {kn} — knife, {us} — use, {ks} — killstreak, {ca}/{ct} — chat, {sc} — score, {cl} — class"
+                    "{gr} — граната, {sm} — дим, {kn} — ніж, {us} — дія, {ks} — кілстрік, {ca}/{ct} — чат, {sc} — рахунок, {cl} — спорядження",
+                    "{gr} — grenade, {sm} — smoke, {kn} — knife, {us} — use, {ks} — killstreak, {ca}/{ct} — chat, {sc} — score, {cl} — loadout"
                 ),
                 crate::ui::MUTED,
             );
@@ -1291,12 +1297,7 @@ impl GameClient {
     }
 
     fn sprint_max(&self) -> f32 {
-        let t = self.tuning.movement.sprint_time;
-        if self.perks() && self.loadout.perk3 == Perk3::ExtremeConditioning {
-            t * 2.0
-        } else {
-            t
-        }
+        self.tuning.movement.sprint_time
     }
 
     fn on_snapshot(&mut self, s: Snapshot, audio: &mut Option<&Audio>) {
@@ -1562,9 +1563,24 @@ impl GameClient {
                     .map(|r| r.muzzle)
                     .unwrap_or(Vec3::from_array(shot.from))
             };
-            self.fx.tracer(from, to);
             let path = to - from;
             let len = path.length();
+            let kind = shot.weapon.shot();
+            if shot.id != 255 && kind != toon_shared::weapons::Shot::Bullet {
+                let speed = toon_shared::ballistics::Ballistics::of(shot.weapon).velocity;
+                let rocket = kind == toon_shared::weapons::Shot::Rocket;
+                self.fx.fly(from, to, speed, rocket, shot.flesh);
+                if let Some(a) = audio {
+                    a.play_shot(
+                        Sfx::for_weapon(shot.weapon),
+                        from,
+                        eye,
+                        if shot.quiet { 0.3 } else { 0.75 },
+                    );
+                }
+                continue;
+            }
+            self.fx.tracer(from, to);
             if len > 0.1 {
                 let (_, _, pierced) = self.world.bullet_trace(from, path / len, len);
                 for p in &pierced {
@@ -1932,9 +1948,6 @@ impl GameClient {
     fn current_spread(&self) -> f32 {
         let def = self.ws();
         let mut hip = def.hip_spread;
-        if self.perks() && self.loadout.perk3 == Perk3::SteadyAim {
-            hip *= 0.65;
-        }
         hip *= match self.body.stance {
             Stance::Stand => 1.0,
             Stance::Crouch => 0.8,
@@ -1958,11 +1971,6 @@ impl GameClient {
     pub fn spread_px(&self, fovy: f32) -> f32 {
         let s = self.current_spread().to_radians();
         s.tan() / (fovy * 0.5).tan() * screen_height() * 0.5
-    }
-
-    /// Class perks count (the battle royale has no classes).
-    pub fn perks(&self) -> bool {
-        self.mode != Mode::Br
     }
 
     /// Battle royale: no gun in hand (everybody lands with just a knife).
@@ -2275,14 +2283,23 @@ impl GameClient {
         look_dir(self.yaw + s.x, self.pitch + s.y)
     }
 
-    fn fire(&mut self, audio: &Option<&Audio>) {
+    /// How far the bow is drawn now (0..1).
+    pub fn draw_now(&self) -> f32 {
+        let t = self.weapon().draw_time();
+        match self.draw_from {
+            Some(s) if t > 0.0 => ((self.now - s) as f32 / t).clamp(0.0, 1.0),
+            _ => 0.0,
+        }
+    }
+
+    fn fire(&mut self, audio: &Option<&Audio>, draw: f32) {
         let now = self.now;
         let w = self.weapon();
         let def = self.ws().clone();
         if now - self.last_fire > (def.fire_interval() * 2.5 + 0.05) as f64 {
             self.shot_streak = 0;
         }
-        self.next_fire = now + def.fire_interval() as f64;
+        self.next_fire = now + (def.fire_interval() / w.spin(self.spin_held)) as f64;
         self.weapons[self.slot as usize].1 -= 1;
         self.last_fire = now;
         let spread = self.current_spread().to_radians();
@@ -2295,11 +2312,18 @@ impl GameClient {
             weapon: w,
             origin: eye.to_array(),
             dirs: dirs.iter().map(|d| d.to_array()).collect(),
+            draw,
         });
 
         // local visuals: the bullet's arc through the world, and remote players on it
         let muzzle = self.viewmodel_muzzle_world();
-        let b = toon_shared::ballistics::Ballistics::of(w);
+        let mut b = toon_shared::ballistics::Ballistics::of(w);
+        if w.draw_time() > 0.0 {
+            let (speed, _) = WeaponId::draw_power(draw);
+            b.velocity *= speed;
+            b.max_range *= speed;
+        }
+        let slow = w.shot() != toon_shared::weapons::Shot::Bullet;
         for d in dirs.iter().take(3) {
             // bullets go through planks and cloth (as on the server)
             let path = toon_shared::ballistics::trace_path(&self.world, eye, *d, &b);
@@ -2331,6 +2355,11 @@ impl GameClient {
             for p in path.pierced.iter().filter(|p| p.0 < stop) {
                 // (wood lets less through than cloth)
                 self.fx.pierce(path.point_at(p.0), p.1 < 0.9);
+            }
+            if slow {
+                let rocket = w.shot() == toon_shared::weapons::Shot::Rocket;
+                self.fx.fly(muzzle, hit, b.velocity, rocket, flesh);
+                continue;
             }
             self.fx.tracer(muzzle, hit);
             if flesh {
@@ -2377,7 +2406,9 @@ impl GameClient {
         if let Some(a) = audio {
             let quiet = self.has_mod(toon_shared::inventory::MOD_SUPPRESSOR);
             a.play(Sfx::for_weapon(w), if quiet { 0.3 } else { 0.85 });
-            a.play_later(Sfx::Shell, 0.35 + self.rng.range(0.0, 0.2), 0.25);
+            if !slow {
+                a.play_later(Sfx::Shell, 0.35 + self.rng.range(0.0, 0.2), 0.25);
+            }
         }
     }
 
@@ -2396,12 +2427,7 @@ impl GameClient {
         if self.reload_until.is_some() || mag >= self.mag_cap() || res == 0 {
             return;
         }
-        let k = if self.perks() && self.loadout.perk2 == Perk2::SleightOfHand {
-            0.5
-        } else {
-            1.0
-        };
-        let dur = (def.reload_time * k) as f64;
+        let dur = def.reload_time as f64;
         self.reload_until = Some((self.now + dur, dur));
         self.reload_cue = 0;
         self.net.send(C2S::Reload);
@@ -2937,10 +2963,32 @@ impl GameClient {
                 || raising
                 || self.cooking.is_some()
                 || self.hand_empty();
-            if trigger && !busy && now >= self.next_fire {
+            // a machine gun spins up while the trigger is held, down when let go
+            self.spin_held = if trig_down && !busy {
+                self.spin_held + dt
+            } else {
+                (self.spin_held - dt * 2.0).max(0.0)
+            };
+            let bow = self.weapon().draw_time() > 0.0;
+            if bow {
+                // the bow: hold to draw, let go to loose
+                let mag = self.weapons[self.slot as usize].1;
+                if busy || mag == 0 || now < self.next_fire {
+                    self.draw_from = None;
+                } else if trig_down {
+                    self.draw_from.get_or_insert(now);
+                } else if self.draw_from.is_some() {
+                    let d = self.draw_now();
+                    self.draw_from = None;
+                    self.fire(&audio, d);
+                }
+            } else {
+                self.draw_from = None;
+            }
+            if trigger && !bow && !busy && now >= self.next_fire {
                 let (_, mag, res) = self.weapons[self.slot as usize];
                 if mag > 0 {
-                    self.fire(&audio);
+                    self.fire(&audio, 1.0);
                 } else {
                     if trig_pressed {
                         if let Some(a) = audio {
@@ -3257,6 +3305,13 @@ impl GameClient {
             }
         }
         self.fx.update(dt);
+        for (at, d, flesh) in std::mem::take(&mut self.fx.landed) {
+            if flesh {
+                self.fx.flesh(at);
+            } else {
+                self.bullet_hit(at, d);
+            }
+        }
         self.ruins
             .update(&self.map, &mut self.level, &mut self.fx, get_time());
         // grenade smoke trails
@@ -3818,7 +3873,7 @@ pub fn ping_label(what: PingWhat) -> String {
         PingWhat::Danger => t("Тут ворог!", "Enemy here!").into(),
         PingWhat::Enemy => t("Ворог!", "Enemy!").into(),
         PingWhat::Loot(k, _) => k.name(),
-        PingWhat::Weapon(w) => w.def().name.to_string(),
+        PingWhat::Weapon(w) => w.def().name().to_string(),
         PingWhat::DeathBox => t("Ящик із речами", "Death box").into(),
         PingWhat::AirDrop => t("Скидання припасів", "Supply drop").into(),
         PingWhat::Car(k) => k.name().into(),

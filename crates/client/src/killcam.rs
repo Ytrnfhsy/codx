@@ -210,7 +210,7 @@ impl Killcam {
             .collect();
         let weapon = match info.cause {
             Cause::Weapon(w) => w,
-            _ => WeaponId::M4,
+            _ => WeaponId::Uar15,
         };
         let team = info.killer_team;
         let mut kc = Killcam {
@@ -391,6 +391,7 @@ impl Killcam {
             }
         }
         self.fx.update(sdt);
+        self.fx.landed.clear();
         for (_, r) in &mut self.ragdolls {
             r.update(world, sdt);
         }

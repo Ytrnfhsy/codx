@@ -34,6 +34,26 @@ struct Tracer {
     t: f32,
 }
 
+/// A slow shot you can watch fly: a rocket or an arrow.
+struct Flight {
+    from: Vec3,
+    to: Vec3,
+    /// Seconds in the air so far, and in all.
+    t: f32,
+    dur: f32,
+    rocket: bool,
+    flesh: bool,
+}
+
+impl Flight {
+    /// Where it is `t` seconds out: the straight line bent up by what gravity takes off it.
+    fn at(&self, t: f32) -> Vec3 {
+        let k = (t / self.dur.max(1e-3)).clamp(0.0, 1.0);
+        let g = toon_shared::ballistics::GRAVITY;
+        self.from.lerp(self.to, k) + Vec3::Y * (0.5 * g * self.dur * self.dur * k * (1.0 - k))
+    }
+}
+
 /// What a bullet hit (how it looks when it does).
 #[derive(Clone, Copy, PartialEq)]
 pub enum Surface {
@@ -60,6 +80,9 @@ pub struct Effects {
     pub cap: usize,
     parts: Vec<Particle>,
     tracers: Vec<Tracer>,
+    flights: Vec<Flight>,
+    /// Slow shots that came down this frame: where, which way, into a body.
+    pub landed: Vec<(Vec3, Vec3, bool)>,
     rng: Rng,
 }
 
@@ -70,6 +93,8 @@ impl Effects {
             marks: Default::default(),
             parts: Vec::new(),
             tracers: Vec::new(),
+            flights: Vec::new(),
+            landed: Vec::new(),
             rng: Rng::new(99),
         }
     }
@@ -91,6 +116,21 @@ impl Effects {
     pub fn tracer(&mut self, a: Vec3, b: Vec3) {
         if self.tracers.len() < 200 {
             self.tracers.push(Tracer { a, b, t: 0.0 });
+        }
+    }
+
+    /// A rocket or an arrow flying from `from` to `to` at `speed` m/s.
+    pub fn fly(&mut self, from: Vec3, to: Vec3, speed: f32, rocket: bool, flesh: bool) {
+        if self.flights.len() < 64 {
+            let dur = from.distance(to) / speed.max(1.0);
+            self.flights.push(Flight {
+                from,
+                to,
+                t: 0.0,
+                dur,
+                rocket,
+                flesh,
+            });
         }
     }
 
@@ -475,6 +515,32 @@ impl Effects {
             t.t += dt;
         }
         self.tracers.retain(|t| t.t < 0.07);
+        let mut trail = Vec::new();
+        for f in &mut self.flights {
+            f.t += dt;
+            if f.rocket {
+                trail.push(f.at(f.t - 0.03));
+            }
+            if f.t >= f.dur {
+                let d = (f.at(f.dur) - f.at(f.dur - 0.05)).normalize_or_zero();
+                self.landed.push((f.to, d, f.flesh));
+            }
+        }
+        self.flights.retain(|f| f.t < f.dur);
+        for p in trail {
+            self.smoke_trail(p);
+            self.push(Particle {
+                pos: p,
+                vel: Vec3::ZERO,
+                life: 0.0,
+                max: 0.08,
+                size: 0.09,
+                grow: -0.5,
+                color: [255, 190, 90],
+                kind: Kind::Spark,
+                grav: 0.0,
+            });
+        }
     }
 
     /// Adds particles to an (alpha-blended) mesh.
@@ -546,6 +612,28 @@ impl Effects {
     }
 
     pub fn draw_tracers(&self) {
+        for f in &self.flights {
+            let p = f.at(f.t);
+            let d = (f.at(f.t + 0.02) - p).normalize_or_zero();
+            if f.rocket {
+                draw_line_3d(p - d * 0.45, p, Color::from_rgba(90, 100, 66, 255));
+                draw_cube(
+                    p,
+                    vec3(0.11, 0.11, 0.11),
+                    None,
+                    Color::from_rgba(90, 100, 66, 255),
+                );
+                draw_cube(
+                    p - d * 0.5,
+                    vec3(0.08, 0.08, 0.08),
+                    None,
+                    Color::from_rgba(255, 200, 100, 255),
+                );
+            } else {
+                draw_line_3d(p - d * 0.7, p, Color::from_rgba(150, 110, 60, 255));
+                draw_line_3d(p - d * 0.7, p - d * 0.6, Color::from_rgba(220, 60, 50, 255));
+            }
+        }
         for t in &self.tracers {
             let k = 1.0 - t.t / 0.07;
             let d = t.b - t.a;

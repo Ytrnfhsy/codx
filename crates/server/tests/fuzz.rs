@@ -43,7 +43,6 @@ fn random_msg(rng: &mut Rng, life: u16, seq: &mut u32) -> C2S {
         1 => C2S::SetLoadout(Loadout {
             primary: w,
             secondary: weapons[rng.below(weapons.len())],
-            ..DEFAULT_CLASSES[rng.below(DEFAULT_CLASSES.len())].1
         }),
         2 => C2S::Spawn,
         3..=5 => {
@@ -72,6 +71,7 @@ fn random_msg(rng: &mut Rng, life: u16, seq: &mut u32) -> C2S {
             weapon: w,
             origin: wild_v3(rng),
             dirs: (0..rng.below(300)).map(|_| wild_v3(rng)).collect(),
+            draw: 1.0,
         },
         7 => C2S::Reload,
         8 => C2S::Switch(rng.below(256) as u8),

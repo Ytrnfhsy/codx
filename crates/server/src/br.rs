@@ -788,7 +788,14 @@ impl Game {
                 ));
             }
         }
-        let guns = [WeaponId::M40, WeaponId::R700, WeaponId::M249, WeaponId::G3];
+        // (the rare and heavy ones: the anti-materiel rifles only come from the sky)
+        let guns = [
+            WeaponId::Barrett,
+            WeaponId::Alligator,
+            WeaponId::Negev,
+            WeaponId::Rpg7,
+            WeaponId::Awm,
+        ];
         let gun = guns[self.rng.below(guns.len())];
         let ammo = AmmoType::of(gun);
         items.push((LootKind::Ammo(ammo), ammo.box_size() * 3));
@@ -934,7 +941,12 @@ impl Game {
                 };
                 let (kind, amount) = match self.rng.f32() {
                     k if k < 0.30 => {
-                        let t = AmmoType::ALL[self.rng.below(AmmoType::ALL.len())];
+                        // (rockets and bolts are rare: the launchers are)
+                        let t = if self.rng.chance(0.1) {
+                            [AmmoType::Rocket, AmmoType::Bolt, AmmoType::Bolt][self.rng.below(3)]
+                        } else {
+                            AmmoType::ALL[self.rng.below(6)]
+                        };
                         (LootKind::Ammo(t), t.box_size())
                     }
                     k if k < 0.40 => (LootKind::Medkit, 1 + self.rng.chance(0.25) as u16),
@@ -973,22 +985,27 @@ impl Game {
     fn br_random_weapon(&mut self) -> WeaponId {
         use WeaponId::*;
         // (weapon, weight): pistols and SMGs are common, snipers and machine guns rare
-        const TABLE: [(WeaponId, f32); 15] = [
-            (M9, 1.2),
-            (Usp, 1.0),
-            (Deagle, 0.5),
-            (Mp5, 1.2),
-            (P90, 0.9),
-            (Ak74u, 0.9),
-            (W1200, 0.8),
-            (M1014, 0.5),
-            (M4, 0.8),
-            (Ak47, 0.8),
-            (G3, 0.5),
-            (M249, 0.3),
-            (Rpd, 0.3),
-            (M40, 0.35),
-            (R700, 0.25),
+        const TABLE: [(WeaponId, f32); 20] = [
+            (Fort17, 1.2),
+            (Glock18, 0.9),
+            (Revolver, 0.6),
+            (Mp7, 1.1),
+            (Vector, 0.9),
+            (Bizon, 1.0),
+            (Ksg, 0.8),
+            (Aa12, 0.4),
+            (Uar15, 0.9),
+            (Fort221, 0.8),
+            (Ak12, 0.8),
+            (ScarH, 0.45),
+            (Mk14, 0.45),
+            (Svd, 0.35),
+            (Pkm, 0.3),
+            (Negev, 0.25),
+            (Awm, 0.3),
+            (Crossbow, 0.35),
+            (Bow, 0.5),
+            (Rpg7, 0.2),
         ];
         let total: f32 = TABLE.iter().map(|e| e.1).sum();
         let mut r = self.rng.range(0.0, total);
@@ -998,7 +1015,7 @@ impl Game {
             }
             r -= k;
         }
-        M9
+        Fort17
     }
 
     /// Leaves the plane.
@@ -1030,7 +1047,6 @@ impl Game {
         // empty hands: whatever you fight with, you find (one medkit to start with)
         p.inv.medkits = 1;
         p.empty = 0b11;
-        p.no_perks = true;
         p.body = Body {
             pos,
             vel: p.body.vel,
@@ -1045,12 +1061,12 @@ impl Game {
         p.slot = 0;
         p.weapons = [
             WState {
-                id: WeaponId::M9,
+                id: WeaponId::Fort17,
                 mag: 0,
                 reserve: 0,
             },
             WState {
-                id: WeaponId::Usp,
+                id: WeaponId::Glock18,
                 mag: 0,
                 reserve: 0,
             },
@@ -1643,7 +1659,7 @@ impl Game {
                         let w = p.weapons[k];
                         gun = Some(WState { reserve: 0, ..w });
                         p.weapons[k] = WState {
-                            id: WeaponId::Usp,
+                            id: WeaponId::Glock18,
                             mag: 0,
                             reserve: 0,
                         };

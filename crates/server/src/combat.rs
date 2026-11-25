@@ -8,7 +8,7 @@ use toon_shared::lang::{pick, t};
 use toon_shared::protocol::{MatchState, ShotFx, S2C};
 use toon_shared::ray::{ray_player, ray_sphere, HitZone};
 use toon_shared::tr;
-use toon_shared::weapons::{Cause, Killstreak, Perk2, Perk3, WeaponId};
+use toon_shared::weapons::{Cause, Killstreak, WeaponId};
 use toon_shared::{look_dir, Mode, Team};
 
 /// Result of tracing one bullet.
@@ -31,7 +31,6 @@ pub struct Bullet {
     pub fired: f64,
     /// Players are checked where the shooter saw them: this much in the past (negative).
     pub rewind: f64,
-    pub stopping: bool,
     /// Pieces of the path already checked.
     pub checked: usize,
     /// Which shot it belongs to (the pellets of a shotgun share one).
@@ -51,10 +50,13 @@ pub fn body_pass(w: WeaponId, zone: HitZone, armor: u8, helmet: u8) -> f32 {
     use toon_shared::weapons::WeaponClass as C;
     let base = match w.def().class {
         C::Sniper => 0.6,
+        C::Marksman => 0.55,
         C::Lmg => 0.5,
+        // (a bolt goes in and stays; a rocket blows up)
+        C::Launcher => 0.0,
         C::Rifle => 0.4,
         C::Smg => 0.2,
-        C::Pistol if w == WeaponId::Deagle => 0.3,
+        C::Pistol if w == WeaponId::Revolver => 0.3,
         C::Pistol => 0.12,
         C::Shotgun => 0.0,
     };
@@ -190,6 +192,12 @@ impl Game {
     }
 
     pub fn fire(&mut self, id: u8, weapon: WeaponId, origin: Vec3, dirs: &[Vec3]) {
+        self.fire_drawn(id, weapon, origin, dirs, 1.0);
+    }
+
+    /// A shot; `draw` is how far a bow was drawn (the server allows no more than the time
+    /// since the last shot gave).
+    pub fn fire_drawn(&mut self, id: u8, weapon: WeaponId, origin: Vec3, dirs: &[Vec3], draw: f32) {
         if !self.combat_allowed() {
             return;
         }
@@ -213,7 +221,7 @@ impl Game {
             return;
         };
         let cur_mag = p.mag_cap(cur_mag);
-        let quiet = p.suppressed();
+        let quiet = p.suppressed() || weapon.silent();
         // The client finishes reloads/switches by its own clock, which runs ahead of ours by
         // roughly the one-way latency; accept shots that arrive slightly "early".
         let slack = (p.ping * 0.5 + 0.12).min(0.35) as f64;
@@ -248,6 +256,17 @@ impl Game {
             return;
         }
         p.shot_budget -= 1.0;
+        let draw_time = weapon.draw_time();
+        let (speed, force) = if draw_time > 0.0 {
+            // the string is drawn after the arrow is nocked: no sooner than the reload
+            // (or the previous shot) let it start
+            let nocked = (p.last_shot + def.reload_time as f64).max(p.switch_end);
+            let since = (time - nocked) as f32 + slack as f32;
+            let d = if draw.is_finite() { draw } else { 0.0 };
+            toon_shared::weapons::WeaponId::draw_power(d.min(since / draw_time))
+        } else {
+            (1.0, 1.0)
+        };
         // shooting puts the medkit away
         p.inv.healing = 0.0;
         p.weapon_mut().mag -= 1;
@@ -267,11 +286,12 @@ impl Game {
         } else {
             (p.ping * 0.5 + INTERP_DELAY).clamp(0.0, MAX_REWIND) as f64
         };
-        let stopping = p.has_perk2(Perk2::StoppingPower);
         let team = p.team;
         let t = time - rewind;
 
-        let b = Ballistics::of(weapon);
+        let mut b = Ballistics::of(weapon);
+        b.velocity *= speed;
+        b.max_range *= speed;
         let mut fired = 0;
         for (k, d) in dirs.iter().take(def.pellets.max(1) as usize).enumerate() {
             if !d.is_finite() || d.length_squared() < 0.5 {
@@ -305,11 +325,10 @@ impl Game {
                     // it covers its first tick of flight at once: point blank is instant
                     fired: time - TICK_DT as f64,
                     rewind: t - time,
-                    stopping,
                     checked: 0,
                     shot: self.shot_serial,
                     fx,
-                    power: 1.0,
+                    power: force,
                     passed: Vec::new(),
                 });
             }
@@ -336,6 +355,8 @@ impl Game {
         let mut through: Vec<(usize, f32, Vec<u8>)> = Vec::new();
         // bullets that stopped in something (their tracers end there)
         let mut stuck: Vec<usize> = Vec::new();
+        // where each stopped one stopped, and whether in a body
+        let mut stops: Vec<(usize, f32)> = Vec::new();
         for (bi, bl) in self.bullets.iter().enumerate() {
             let upto = bl.path.piece_at((time - bl.fired) as f32);
             let at = time + bl.rewind;
@@ -368,13 +389,16 @@ impl Game {
                             });
                             power *= body_pass(bl.weapon, zone, armor, helmet);
                             passed.push(v);
-                            if power < MIN_PIERCE {
+                            // (a rocket goes off on the first body it meets)
+                            if power < MIN_PIERCE || bl.weapon.blast().is_some() {
+                                stops.push((bi, bl.path.dist[i] + dist));
                                 stopped = true;
                                 break 'pieces;
                             }
                         }
                         _ => {
                             hits.push((bi, hit, bl.path.dist[i] + dist, power));
+                            stops.push((bi, bl.path.dist[i] + dist));
                             stopped = true;
                             break 'pieces;
                         }
@@ -423,10 +447,7 @@ impl Game {
             }
             match hit {
                 Hit::Player(v, _, zone) => {
-                    let mut dmg = base * zone.mult(def.head_mult);
-                    if bl.stopping {
-                        dmg *= 1.4;
-                    }
+                    let dmg = base * zone.mult(def.head_mult);
                     if !counted.contains(&(bl.owner, bl.shot)) {
                         counted.push((bl.owner, bl.shot));
                     }
@@ -451,6 +472,24 @@ impl Game {
                 Hit::None => {}
             }
         }
+        // where rockets go off and big rounds knock pieces out of walls
+        let mut booms: Vec<(Vec3, WeaponId, u8)> = Vec::new();
+        let mut chips: Vec<(Vec3, f32)> = Vec::new();
+        for &bi in &done {
+            let bl = &self.bullets[bi];
+            let in_body = stops.iter().find(|s| s.0 == bi);
+            let stop = match in_body {
+                Some(&(_, d)) => bl.path.point_at(d),
+                None => bl.path.end(),
+            };
+            if bl.weapon.blast().is_some() {
+                // (back off the wall a little: the blast is on our side of it)
+                let back = (bl.path.end() - bl.origin).normalize_or_zero() * 0.3;
+                booms.push((stop - back, bl.weapon, bl.owner));
+            } else if bl.weapon.chips() > 0.0 && bl.path.hit_world && in_body.is_none() {
+                chips.push((bl.path.end(), bl.weapon.chips()));
+            }
+        }
         done.sort_unstable();
         for bi in done.into_iter().rev() {
             self.bullets.swap_remove(bi);
@@ -462,6 +501,14 @@ impl Game {
         }
         for (owner, v, weapon, dmg, head, origin) in per_victim {
             self.damage(v, Some(owner), dmg, Cause::Weapon(weapon), head, origin);
+        }
+        for (pos, weapon, owner) in booms {
+            if let Some((radius, dmg)) = weapon.blast() {
+                self.explode(pos, radius, dmg, Some(owner), Cause::Weapon(weapon), false);
+            }
+        }
+        for (pos, r) in chips {
+            self.break_things(pos, r, false);
         }
         for (owner, i, dmg) in vehicle_dmg {
             self.damage_vehicle(i, dmg, Some(owner));
@@ -532,9 +579,6 @@ impl Game {
             return;
         }
         let mut amount = amount;
-        if v.has_perk2(Perk2::Juggernaut) {
-            amount *= 0.75;
-        }
         // battle royale: the vest takes part of a body hit, the helmet part of a head
         // hit, while they last
         if solo && !v.downed && !matches!(cause, Cause::Zone | Cause::Fall | Cause::World) {
@@ -698,7 +742,6 @@ impl Game {
         }
         let Some(v) = self.pm(victim) else { return };
         let vname = v.name.clone();
-        let martyr = v.has_perk3(Perk3::Martyrdom);
         let assist_list: Vec<u8> = v
             .attackers
             .iter()
@@ -751,18 +794,6 @@ impl Game {
                     self.drop_weapon(WState { reserve: 0, ..w }, vpos + vec3(0.6, 0.0, 0.3));
                 }
             }
-        }
-        if martyr && !matches!(cause, Cause::Bomb | Cause::Fall) {
-            let id = self.new_ent_id();
-            self.grenades.push(Grenade {
-                id,
-                owner: victim,
-                pos: vpos + vec3(0.0, 0.4, 0.0),
-                vel: vec3(0.0, 1.0, 0.0),
-                explode_at: time + 2.5,
-                smoke: false,
-                kind: 0,
-            });
         }
 
         let solo = self.mode.solo();
@@ -978,12 +1009,7 @@ impl Game {
         if p.weapon().mag >= p.mag_cap(def.mag) || p.weapon().reserve == 0 {
             return;
         }
-        let k = if p.has_perk2(Perk2::SleightOfHand) {
-            0.5
-        } else {
-            1.0
-        };
-        p.reload_end = Some(time + (def.reload_time * k) as f64 - 0.05);
+        p.reload_end = Some(time + def.reload_time as f64 - 0.05);
     }
 
     pub fn switch_weapon(&mut self, id: u8, slot: u8) {
@@ -1606,7 +1632,7 @@ impl Game {
             }
             self.shots.push(ShotFx {
                 id: 255,
-                weapon: WeaponId::M249,
+                weapon: WeaponId::Negev,
                 from: from.to_array(),
                 to: (from + d * dist).to_array(),
                 flesh,

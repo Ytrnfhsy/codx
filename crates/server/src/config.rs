@@ -338,13 +338,13 @@ mod tests {
 
     #[test]
     fn partial_tuning_overrides_merge_onto_defaults() {
-        let cfg: ServerConfig = serde_json::from_str(r#"{ "tuning": { "movement": { "sprint_speed": 9.5 }, "weapons": { "m249": { "rpm": 900, "weight": 12 } } } }"#).unwrap();
+        let cfg: ServerConfig = serde_json::from_str(r#"{ "tuning": { "movement": { "sprint_speed": 9.5 }, "weapons": { "negev": { "rpm": 900, "weight": 12 } } } }"#).unwrap();
         let t = cfg.sanitized().tuning();
         assert_eq!(t.movement.sprint_speed, 9.5);
         assert_eq!(t.movement.walk_speed, Tuning::default().movement.walk_speed);
-        let m249 = t.weapon(toon_shared::weapons::WeaponId::M249);
-        assert_eq!(m249.rpm, 900.0);
-        assert_eq!(m249.weight, 12.0);
-        assert_eq!(m249.mag, 100);
+        let negev = t.weapon(toon_shared::weapons::WeaponId::Negev);
+        assert_eq!(negev.rpm, 900.0);
+        assert_eq!(negev.weight, 12.0);
+        assert_eq!(negev.mag, 150);
     }
 }

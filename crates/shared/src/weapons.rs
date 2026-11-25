@@ -1,4 +1,4 @@
-//! Weapons, perks, loadouts and default classes in the spirit of CoD4.
+//! Weapons, loadouts and the loadouts bots and tests start from.
 
 use crate::lang::t;
 use crate::tuning::StreakTuning;
@@ -6,32 +6,49 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WeaponId {
+    // assault rifles
     #[default]
-    M4,
-    Ak47,
-    G3,
-    Mp5,
-    P90,
-    Ak74u,
-    M249,
-    Rpd,
-    W1200,
-    M1014,
-    M40,
-    R700,
-    M9,
-    Usp,
-    Deagle,
+    Uar15,
+    Fort221,
+    Ak12,
+    ScarH,
+    // submachine guns
+    Vector,
+    Mp7,
+    Bizon,
+    // marksman rifles
+    Svd,
+    Mk14,
+    // machine guns
+    Negev,
+    Pkm,
+    // shotguns
+    Aa12,
+    Ksg,
+    // sniper rifles
+    Awm,
+    Barrett,
+    Alligator,
+    // pistols
+    Fort17,
+    Glock18,
+    Revolver,
+    // launchers (the second slot, like a pistol)
+    Rpg7,
+    Crossbow,
+    Bow,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WeaponClass {
     Rifle,
     Smg,
+    Marksman,
     Lmg,
     Shotgun,
     Sniper,
     Pistol,
+    Launcher,
 }
 
 impl WeaponClass {
@@ -39,19 +56,36 @@ impl WeaponClass {
         match self {
             WeaponClass::Rifle => t("Штурмова гвинтівка", "Assault rifle"),
             WeaponClass::Smg => t("Пістолет-кулемет", "SMG"),
+            WeaponClass::Marksman => t("Марксманська гвинтівка", "Marksman rifle"),
             WeaponClass::Lmg => t("Кулемет", "LMG"),
             WeaponClass::Shotgun => t("Дробовик", "Shotgun"),
             WeaponClass::Sniper => t("Снайперська гвинтівка", "Sniper rifle"),
             WeaponClass::Pistol => t("Пістолет", "Pistol"),
+            WeaponClass::Launcher => t("Пускова установка", "Launcher"),
         }
     }
+    /// It goes in the second slot (with the pistols).
+    pub fn is_sidearm(self) -> bool {
+        matches!(self, WeaponClass::Pistol | WeaponClass::Launcher)
+    }
+}
+
+/// What a gun shoots besides plain bullets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shot {
+    Bullet,
+    /// A rocket: blows up where it hits (radius m, damage).
+    Rocket,
+    /// A crossbow bolt: silent, slow, falls in an arc.
+    Bolt,
 }
 
 /// Static weapon parameters. Distances in meters, angles in degrees, times in seconds.
 #[derive(Clone, Copy, Debug)]
 pub struct WeaponDef {
     pub id: WeaponId,
-    pub name: &'static str,
+    /// Its name in Ukrainian and in English.
+    pub names: [&'static str; 2],
     pub class: WeaponClass,
     pub damage_max: f32,
     pub damage_min: f32,
@@ -84,6 +118,9 @@ pub struct WeaponDef {
 }
 
 impl WeaponDef {
+    pub fn name(&self) -> &'static str {
+        t(self.names[0], self.names[1])
+    }
     pub fn fire_interval(&self) -> f32 {
         60.0 / self.rpm
     }
@@ -98,18 +135,18 @@ impl WeaponDef {
         }
     }
     pub fn is_primary(&self) -> bool {
-        self.class != WeaponClass::Pistol
+        !self.class.is_sidearm()
     }
 }
 
 macro_rules! w {
-    ($id:ident, $name:expr, $class:ident, dmg $dmax:expr => $dmin:expr, range $rn:expr => $rf:expr,
+    ($id:ident, $uk:expr, $en:expr, $class:ident, dmg $dmax:expr => $dmin:expr, range $rn:expr => $rf:expr,
      rpm $rpm:expr, auto $auto:expr, mag $mag:expr, res $res:expr, reload $rl:expr, pellets $pel:expr,
      spread $hip:expr, $ads:expr, $mv:expr, $shot:expr, ads $adst:expr, recoil $rv:expr, $rh:expr,
      speed $mm:expr, zoom $zoom:expr, head $head:expr, scoped $sc:expr, heft $heft:expr) => {
         WeaponDef {
             id: WeaponId::$id,
-            name: $name,
+            names: [$uk, $en],
             class: WeaponClass::$class,
             damage_max: $dmax,
             damage_min: $dmin,
@@ -137,58 +174,88 @@ macro_rules! w {
     };
 }
 
-pub static WEAPONS: [WeaponDef; 15] = [
-    w!(M4, "M4A1", Rifle, dmg 30.0 => 20.0, range 30.0 => 60.0, rpm 750.0, auto true, mag 30, res 120, reload 2.2, pellets 1,
+pub static WEAPONS: [WeaponDef; 22] = [
+    // ---- assault rifles: an all-rounder, a quick bullpup, a hard hitter, a heavy one
+    w!(Uar15, "UAR-15", "UAR-15", Rifle, dmg 30.0 => 22.0, range 30.0 => 60.0, rpm 780.0, auto true, mag 30, res 120, reload 2.2, pellets 1,
        spread 3.0, 0.15, 2.0, 0.35, ads 0.22, recoil 0.7, 0.35, speed 0.94, zoom 1.35, head 1.4, scoped false, heft 0.5),
-    w!(Ak47, "AK-47", Rifle, dmg 40.0 => 30.0, range 25.0 => 55.0, rpm 600.0, auto true, mag 30, res 120, reload 2.4, pellets 1,
-       spread 3.2, 0.2, 2.0, 0.45, ads 0.25, recoil 1.1, 0.5, speed 0.93, zoom 1.35, head 1.4, scoped false, heft 0.65),
-    w!(G3, "G3", Rifle, dmg 40.0 => 30.0, range 40.0 => 70.0, rpm 500.0, auto false, mag 20, res 100, reload 2.3, pellets 1,
-       spread 3.2, 0.1, 2.0, 0.6, ads 0.27, recoil 1.4, 0.4, speed 0.92, zoom 1.4, head 1.4, scoped false, heft 0.7),
-    w!(Mp5, "MP5", Smg, dmg 40.0 => 20.0, range 12.0 => 30.0, rpm 800.0, auto true, mag 30, res 120, reload 2.0, pellets 1,
-       spread 2.2, 0.35, 1.0, 0.3, ads 0.18, recoil 0.6, 0.35, speed 1.0, zoom 1.25, head 1.4, scoped false, heft 0.35),
-    w!(P90, "P90", Smg, dmg 40.0 => 20.0, range 12.0 => 30.0, rpm 900.0, auto true, mag 50, res 150, reload 2.6, pellets 1,
-       spread 2.4, 0.45, 1.0, 0.3, ads 0.18, recoil 0.55, 0.45, speed 1.0, zoom 1.25, head 1.4, scoped false, heft 0.35),
-    w!(Ak74u, "AK-74u", Smg, dmg 40.0 => 30.0, range 12.0 => 30.0, rpm 700.0, auto true, mag 30, res 120, reload 2.2, pellets 1,
-       spread 2.3, 0.35, 1.0, 0.35, ads 0.2, recoil 0.85, 0.45, speed 1.0, zoom 1.25, head 1.4, scoped false, heft 0.45),
-    w!(M249, "M249 SAW", Lmg, dmg 30.0 => 20.0, range 40.0 => 70.0, rpm 750.0, auto true, mag 100, res 200, reload 6.0, pellets 1,
-       spread 4.5, 0.3, 3.0, 0.3, ads 0.45, recoil 0.75, 0.45, speed 0.8, zoom 1.3, head 1.4, scoped false, heft 0.7),
-    w!(Rpd, "RPD", Lmg, dmg 40.0 => 30.0, range 40.0 => 70.0, rpm 600.0, auto true, mag 100, res 200, reload 6.5, pellets 1,
-       spread 4.5, 0.35, 3.0, 0.4, ads 0.45, recoil 1.0, 0.55, speed 0.8, zoom 1.3, head 1.4, scoped false, heft 0.8),
-    w!(W1200, "W1200", Shotgun, dmg 40.0 => 10.0, range 6.0 => 18.0, rpm 75.0, auto false, mag 7, res 28, reload 3.0, pellets 8,
-       spread 4.5, 3.5, 1.0, 0.0, ads 0.25, recoil 3.5, 1.0, speed 0.95, zoom 1.15, head 1.0, scoped false, heft 1.0),
-    w!(M1014, "M1014", Shotgun, dmg 30.0 => 10.0, range 6.0 => 16.0, rpm 210.0, auto false, mag 4, res 24, reload 2.7, pellets 6,
-       spread 4.5, 3.5, 1.0, 0.5, ads 0.25, recoil 2.6, 0.9, speed 0.95, zoom 1.15, head 1.0, scoped false, heft 0.95),
-    w!(M40, "M40A3", Sniper, dmg 98.0 => 98.0, range 500.0 => 600.0, rpm 50.0, auto false, mag 5, res 20, reload 3.0, pellets 1,
-       spread 7.0, 0.0, 6.0, 0.0, ads 0.4, recoil 4.0, 0.8, speed 0.9, zoom 4.0, head 1.5, scoped true, heft 0.95),
-    w!(R700, "R700", Sniper, dmg 98.0 => 98.0, range 500.0 => 600.0, rpm 48.0, auto false, mag 4, res 16, reload 3.2, pellets 1,
+    w!(Fort221, "Форт-221", "Fort-221", Rifle, dmg 30.0 => 20.0, range 22.0 => 48.0, rpm 860.0, auto true, mag 30, res 120, reload 2.6, pellets 1,
+       spread 2.6, 0.18, 1.6, 0.32, ads 0.17, recoil 0.65, 0.4, speed 0.97, zoom 1.3, head 1.4, scoped false, heft 0.45),
+    w!(Ak12, "АК-12", "AK-12", Rifle, dmg 38.0 => 28.0, range 25.0 => 55.0, rpm 650.0, auto true, mag 30, res 120, reload 2.4, pellets 1,
+       spread 3.2, 0.2, 2.0, 0.45, ads 0.25, recoil 1.0, 0.5, speed 0.93, zoom 1.35, head 1.4, scoped false, heft 0.65),
+    w!(ScarH, "SCAR-H", "SCAR-H", Rifle, dmg 45.0 => 34.0, range 35.0 => 70.0, rpm 560.0, auto true, mag 20, res 100, reload 2.5, pellets 1,
+       spread 3.3, 0.12, 2.2, 0.55, ads 0.28, recoil 1.35, 0.45, speed 0.91, zoom 1.4, head 1.4, scoped false, heft 0.75),
+    // ---- submachine guns: a buzzsaw, a precise one, a big magazine
+    w!(Vector, "Vector", "Vector", Smg, dmg 26.0 => 14.0, range 8.0 => 22.0, rpm 1100.0, auto true, mag 25, res 125, reload 2.0, pellets 1,
+       spread 2.4, 0.4, 1.0, 0.25, ads 0.17, recoil 0.45, 0.35, speed 1.02, zoom 1.25, head 1.4, scoped false, heft 0.3),
+    w!(Mp7, "MP7", "MP7", Smg, dmg 30.0 => 20.0, range 14.0 => 32.0, rpm 900.0, auto true, mag 40, res 160, reload 2.1, pellets 1,
+       spread 2.1, 0.3, 1.0, 0.25, ads 0.17, recoil 0.5, 0.3, speed 1.02, zoom 1.25, head 1.4, scoped false, heft 0.3),
+    w!(Bizon, "Бізон", "Bizon", Smg, dmg 32.0 => 22.0, range 12.0 => 28.0, rpm 680.0, auto true, mag 64, res 128, reload 2.9, pellets 1,
+       spread 2.5, 0.4, 1.0, 0.3, ads 0.2, recoil 0.55, 0.4, speed 0.99, zoom 1.25, head 1.4, scoped false, heft 0.4),
+    // ---- marksman rifles: two hits to the body
+    w!(Svd, "СВД", "SVD", Marksman, dmg 70.0 => 60.0, range 60.0 => 150.0, rpm 200.0, auto false, mag 10, res 40, reload 2.8, pellets 1,
+       spread 6.0, 0.05, 5.0, 0.8, ads 0.32, recoil 2.4, 0.6, speed 0.9, zoom 3.0, head 1.5, scoped true, heft 0.85),
+    w!(Mk14, "Mk 14 EBR", "Mk 14 EBR", Marksman, dmg 52.0 => 42.0, range 50.0 => 110.0, rpm 320.0, auto false, mag 20, res 80, reload 2.6, pellets 1,
+       spread 5.0, 0.08, 4.0, 0.6, ads 0.3, recoil 1.8, 0.5, speed 0.91, zoom 2.0, head 1.5, scoped false, heft 0.8),
+    // ---- machine guns: one spins up to a storm, one goes through thin walls
+    w!(Negev, "Negev", "Negev", Lmg, dmg 28.0 => 20.0, range 35.0 => 65.0, rpm 950.0, auto true, mag 150, res 150, reload 6.5, pellets 1,
+       spread 4.8, 0.35, 3.0, 0.3, ads 0.45, recoil 0.7, 0.5, speed 0.8, zoom 1.3, head 1.4, scoped false, heft 0.7),
+    w!(Pkm, "ПКМ", "PKM", Lmg, dmg 42.0 => 32.0, range 45.0 => 80.0, rpm 650.0, auto true, mag 100, res 200, reload 7.0, pellets 1,
+       spread 4.6, 0.3, 3.0, 0.45, ads 0.5, recoil 1.05, 0.55, speed 0.78, zoom 1.3, head 1.4, scoped false, heft 0.85),
+    // ---- shotguns: a full-auto one and a pump with two tubes
+    w!(Aa12, "AA-12", "AA-12", Shotgun, dmg 22.0 => 8.0, range 5.0 => 14.0, rpm 300.0, auto true, mag 8, res 32, reload 3.0, pellets 7,
+       spread 5.0, 4.0, 1.0, 0.6, ads 0.25, recoil 1.8, 0.8, speed 0.94, zoom 1.15, head 1.0, scoped false, heft 0.9),
+    w!(Ksg, "KSG", "KSG", Shotgun, dmg 40.0 => 10.0, range 7.0 => 20.0, rpm 75.0, auto false, mag 14, res 28, reload 3.4, pellets 8,
+       spread 4.2, 3.2, 1.0, 0.0, ads 0.25, recoil 3.2, 1.0, speed 0.95, zoom 1.15, head 1.0, scoped false, heft 1.0),
+    // ---- sniper rifles: the classic, the anti-materiel one, the monster
+    w!(Awm, "AWM", "AWM", Sniper, dmg 110.0 => 110.0, range 500.0 => 600.0, rpm 45.0, auto false, mag 5, res 20, reload 3.4, pellets 1,
        spread 7.0, 0.0, 6.0, 0.0, ads 0.4, recoil 4.2, 0.8, speed 0.9, zoom 4.0, head 1.5, scoped true, heft 0.95),
-    w!(M9, "M9", Pistol, dmg 40.0 => 20.0, range 10.0 => 25.0, rpm 400.0, auto false, mag 15, res 45, reload 1.6, pellets 1,
-       spread 2.4, 0.3, 1.0, 0.5, ads 0.14, recoil 1.0, 0.4, speed 1.05, zoom 1.2, head 1.4, scoped false, heft 0.2),
-    w!(Usp, "USP .45", Pistol, dmg 40.0 => 30.0, range 10.0 => 25.0, rpm 360.0, auto false, mag 12, res 36, reload 1.6, pellets 1,
-       spread 2.4, 0.3, 1.0, 0.55, ads 0.14, recoil 1.2, 0.45, speed 1.05, zoom 1.2, head 1.4, scoped false, heft 0.25),
-    w!(Deagle, "Desert Eagle", Pistol, dmg 55.0 => 45.0, range 12.0 => 30.0, rpm 240.0, auto false, mag 7, res 21, reload 1.8, pellets 1,
-       spread 2.8, 0.35, 1.2, 0.9, ads 0.16, recoil 2.6, 0.7, speed 1.05, zoom 1.2, head 1.4, scoped false, heft 0.55),
+    w!(Barrett, "Barrett M82", "Barrett M82", Sniper, dmg 140.0 => 140.0, range 600.0 => 800.0, rpm 120.0, auto false, mag 10, res 30, reload 3.8, pellets 1,
+       spread 8.0, 0.02, 7.0, 1.5, ads 0.55, recoil 5.5, 1.2, speed 0.82, zoom 4.5, head 1.5, scoped true, heft 1.2),
+    w!(Alligator, "«Алігатор»", "Alligator", Sniper, dmg 250.0 => 250.0, range 800.0 => 1000.0, rpm 30.0, auto false, mag 5, res 15, reload 4.5, pellets 1,
+       spread 9.0, 0.0, 8.0, 0.0, ads 0.7, recoil 7.0, 1.5, speed 0.75, zoom 5.0, head 1.5, scoped true, heft 1.4),
+    // ---- pistols: the plain one, the automatic one, the revolver
+    w!(Fort17, "Форт-17", "Fort-17", Pistol, dmg 34.0 => 22.0, range 10.0 => 25.0, rpm 400.0, auto false, mag 12, res 48, reload 1.6, pellets 1,
+       spread 2.4, 0.3, 1.0, 0.5, ads 0.14, recoil 1.0, 0.4, speed 1.05, zoom 1.2, head 1.4, scoped false, heft 0.25),
+    w!(Glock18, "Glock 18", "Glock 18", Pistol, dmg 22.0 => 14.0, range 8.0 => 20.0, rpm 1100.0, auto true, mag 19, res 76, reload 1.7, pellets 1,
+       spread 2.8, 0.5, 1.2, 0.4, ads 0.14, recoil 0.7, 0.5, speed 1.05, zoom 1.2, head 1.4, scoped false, heft 0.2),
+    w!(Revolver, "Револьвер", "Revolver", Pistol, dmg 60.0 => 45.0, range 12.0 => 30.0, rpm 160.0, auto false, mag 6, res 24, reload 2.6, pellets 1,
+       spread 2.8, 0.3, 1.2, 0.9, ads 0.16, recoil 2.8, 0.7, speed 1.04, zoom 1.2, head 2.0, scoped false, heft 0.6),
+    // ---- launchers: the damage is the direct hit's (a rocket's blast comes on top)
+    w!(Rpg7, "РПГ-7", "RPG-7", Launcher, dmg 60.0 => 60.0, range 400.0 => 500.0, rpm 30.0, auto false, mag 1, res 2, reload 3.2, pellets 1,
+       spread 1.5, 0.2, 3.0, 0.0, ads 0.35, recoil 4.0, 1.0, speed 0.9, zoom 1.4, head 1.0, scoped false, heft 1.3),
+    w!(Crossbow, "Арбалет", "Crossbow", Launcher, dmg 95.0 => 95.0, range 200.0 => 300.0, rpm 40.0, auto false, mag 1, res 12, reload 2.4, pellets 1,
+       spread 3.0, 0.05, 3.0, 0.0, ads 0.3, recoil 1.5, 0.3, speed 1.0, zoom 2.0, head 1.5, scoped false, heft 0.3),
+    // the bow: hold to draw, let go to shoot (the damage is a full draw's)
+    w!(Bow, "Лук", "Bow", Launcher, dmg 90.0 => 90.0, range 150.0 => 250.0, rpm 70.0, auto false, mag 1, res 18, reload 0.6, pellets 1,
+       spread 2.0, 0.05, 2.0, 0.0, ads 0.25, recoil 0.8, 0.2, speed 1.04, zoom 1.6, head 1.6, scoped false, heft 0.2),
 ];
 
 impl WeaponId {
-    /// Short stable key used in configs and admin commands (e.g. "m249").
+    /// Short stable key used in configs and admin commands (e.g. "pkm").
     pub fn key(self) -> &'static str {
         match self {
-            WeaponId::M4 => "m4",
-            WeaponId::Ak47 => "ak47",
-            WeaponId::G3 => "g3",
-            WeaponId::Mp5 => "mp5",
-            WeaponId::P90 => "p90",
-            WeaponId::Ak74u => "ak74u",
-            WeaponId::M249 => "m249",
-            WeaponId::Rpd => "rpd",
-            WeaponId::W1200 => "w1200",
-            WeaponId::M1014 => "m1014",
-            WeaponId::M40 => "m40",
-            WeaponId::R700 => "r700",
-            WeaponId::M9 => "m9",
-            WeaponId::Usp => "usp",
-            WeaponId::Deagle => "deagle",
+            WeaponId::Uar15 => "uar15",
+            WeaponId::Fort221 => "fort221",
+            WeaponId::Ak12 => "ak12",
+            WeaponId::ScarH => "scarh",
+            WeaponId::Vector => "vector",
+            WeaponId::Mp7 => "mp7",
+            WeaponId::Bizon => "bizon",
+            WeaponId::Svd => "svd",
+            WeaponId::Mk14 => "mk14",
+            WeaponId::Negev => "negev",
+            WeaponId::Pkm => "pkm",
+            WeaponId::Aa12 => "aa12",
+            WeaponId::Ksg => "ksg",
+            WeaponId::Awm => "awm",
+            WeaponId::Barrett => "barrett",
+            WeaponId::Alligator => "alligator",
+            WeaponId::Fort17 => "fort17",
+            WeaponId::Glock18 => "glock18",
+            WeaponId::Revolver => "revolver",
+            WeaponId::Rpg7 => "rpg7",
+            WeaponId::Crossbow => "crossbow",
+            WeaponId::Bow => "bow",
         }
     }
     pub fn from_key(k: &str) -> Option<WeaponId> {
@@ -207,98 +274,69 @@ impl WeaponId {
     pub fn secondaries() -> impl Iterator<Item = WeaponId> {
         WEAPONS.iter().filter(|w| !w.is_primary()).map(|w| w.id)
     }
-}
-
-/// Perk tier 1 — equipment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Perk1 {
-    /// Three frag grenades instead of one.
-    Frag3,
-    /// Extra magazines.
-    Bandolier,
-}
-
-/// Perk tier 2.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Perk2 {
-    StoppingPower,
-    Juggernaut,
-    SleightOfHand,
-    UavJammer,
-}
-
-/// Perk tier 3.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Perk3 {
-    SteadyAim,
-    ExtremeConditioning,
-    Martyrdom,
-    DeadSilence,
-}
-
-impl Perk1 {
-    pub const ALL: [Perk1; 2] = [Perk1::Frag3, Perk1::Bandolier];
-    pub fn name(self) -> &'static str {
+    /// What it shoots.
+    pub fn shot(self) -> Shot {
         match self {
-            Perk1::Frag3 => t("Фраг ×3", "Frag ×3"),
-            Perk1::Bandolier => t("Бандольєр", "Bandolier"),
+            WeaponId::Rpg7 => Shot::Rocket,
+            WeaponId::Crossbow | WeaponId::Bow => Shot::Bolt,
+            _ => Shot::Bullet,
         }
     }
-    pub fn desc(self) -> &'static str {
+    /// How thick a brick or concrete wall its round still goes through (m); 0 for most.
+    pub fn pierce(self) -> f32 {
         match self {
-            Perk1::Frag3 => t("Три осколкові гранати", "Three frag grenades"),
-            Perk1::Bandolier => t("Більше запасних набоїв", "More spare ammo"),
+            WeaponId::ScarH => 0.12,
+            WeaponId::Pkm => 0.35,
+            WeaponId::Barrett => 0.5,
+            WeaponId::Alligator => 0.8,
+            _ => 0.0,
         }
     }
-}
-
-impl Perk2 {
-    pub const ALL: [Perk2; 4] = [
-        Perk2::StoppingPower,
-        Perk2::Juggernaut,
-        Perk2::SleightOfHand,
-        Perk2::UavJammer,
-    ];
-    pub fn name(self) -> &'static str {
+    /// It knocks a chunk out of the wall it hits (the power of that small blast; 0: no).
+    pub fn chips(self) -> f32 {
         match self {
-            Perk2::StoppingPower => t("Зупиняюча сила", "Stopping Power"),
-            Perk2::Juggernaut => t("Джаггернаут", "Juggernaut"),
-            Perk2::SleightOfHand => t("Спритність рук", "Sleight of Hand"),
-            Perk2::UavJammer => t("Глушилка БПЛА", "UAV Jammer"),
+            WeaponId::Barrett => 0.4,
+            WeaponId::Alligator => 0.55,
+            _ => 0.0,
         }
     }
-    pub fn desc(self) -> &'static str {
+    /// Seconds of holding the trigger to reach its full rate of fire (0: at once).
+    pub fn spin_up(self) -> f32 {
         match self {
-            Perk2::StoppingPower => t("+40% урону від куль", "+40% bullet damage"),
-            Perk2::Juggernaut => t("Отримуєш на 25% менше урону", "Take 25% less damage"),
-            Perk2::SleightOfHand => t("Перезарядка вдвічі швидша", "Reload twice as fast"),
-            Perk2::UavJammer => t("Невидимий для ворожого БПЛА", "Invisible to enemy UAV"),
+            WeaponId::Negev => 0.8,
+            _ => 0.0,
         }
     }
-}
-
-impl Perk3 {
-    pub const ALL: [Perk3; 4] = [
-        Perk3::SteadyAim,
-        Perk3::ExtremeConditioning,
-        Perk3::Martyrdom,
-        Perk3::DeadSilence,
-    ];
-    pub fn name(self) -> &'static str {
-        match self {
-            Perk3::SteadyAim => t("Стійкий приціл", "Steady Aim"),
-            Perk3::ExtremeConditioning => t("Екстремальна підготовка", "Extreme Conditioning"),
-            Perk3::Martyrdom => t("Мученик", "Martyrdom"),
-            Perk3::DeadSilence => t("Мертва тиша", "Dead Silence"),
+    /// Its share of the full rate of fire after the trigger has been held `held` seconds.
+    pub fn spin(self, held: f32) -> f32 {
+        let s = self.spin_up();
+        if s <= 0.0 {
+            1.0
+        } else {
+            0.5 + 0.5 * (held / s).clamp(0.0, 1.0)
         }
     }
-    pub fn desc(self) -> &'static str {
-        match self {
-            Perk3::SteadyAim => t("Точніша стрільба від стегна", "Tighter hip fire"),
-            Perk3::ExtremeConditioning => t("Спринт удвічі довший", "Sprint twice as long"),
-            Perk3::Martyrdom => t("Після смерті падає граната", "Drop a grenade when you die"),
-            Perk3::DeadSilence => t("Беззвучні кроки", "Silent footsteps"),
+    /// Makes no sound anybody far off hears (and shows nobody on a radar).
+    pub fn silent(self) -> bool {
+        matches!(self, WeaponId::Crossbow | WeaponId::Bow)
+    }
+    /// Seconds to draw it fully: it shoots when the trigger is let go, harder and further
+    /// the longer it was held (0: an ordinary trigger).
+    pub fn draw_time(self) -> f32 {
+        if self == WeaponId::Bow {
+            0.75
+        } else {
+            0.0
         }
+    }
+    /// Share of the speed and of the damage of a shot drawn `draw` (0..1) of the way.
+    pub fn draw_power(draw: f32) -> (f32, f32) {
+        let d = draw.clamp(0.0, 1.0);
+        (0.35 + 0.65 * d, 0.3 + 0.7 * d)
+    }
+    /// A rocket's blast: radius (m) and damage at its middle.
+    pub fn blast(self) -> Option<(f32, f32)> {
+        (self == WeaponId::Rpg7).then_some((5.5, 125.0))
     }
 }
 
@@ -306,9 +344,6 @@ impl Perk3 {
 pub struct Loadout {
     pub primary: WeaponId,
     pub secondary: WeaponId,
-    pub perk1: Perk1,
-    pub perk2: Perk2,
-    pub perk3: Perk3,
 }
 
 impl Loadout {
@@ -320,20 +355,12 @@ impl Loadout {
             DEFAULT_CLASSES[0].1
         }
     }
+    /// Frag grenades to start a life with.
     pub fn grenades(&self) -> u8 {
-        if self.perk1 == Perk1::Frag3 {
-            3
-        } else {
-            1
-        }
+        2
     }
     pub fn reserve_for(&self, w: WeaponId, t: &crate::tuning::Tuning) -> u16 {
-        let base = t.weapon(w).reserve;
-        if self.perk1 == Perk1::Bandolier {
-            base + base / 2
-        } else {
-            base
-        }
+        t.weapon(w).reserve
     }
 }
 
@@ -341,51 +368,36 @@ pub const DEFAULT_CLASSES: [(&str, Loadout); 5] = [
     (
         "Штурмовик",
         Loadout {
-            primary: WeaponId::M4,
-            secondary: WeaponId::M9,
-            perk1: Perk1::Frag3,
-            perk2: Perk2::StoppingPower,
-            perk3: Perk3::SteadyAim,
+            primary: WeaponId::Uar15,
+            secondary: WeaponId::Fort17,
         },
     ),
     (
         "Спецназ",
         Loadout {
-            primary: WeaponId::Mp5,
-            secondary: WeaponId::Usp,
-            perk1: Perk1::Frag3,
-            perk2: Perk2::UavJammer,
-            perk3: Perk3::ExtremeConditioning,
+            primary: WeaponId::Mp7,
+            secondary: WeaponId::Glock18,
         },
     ),
     (
         "Кулеметник",
         Loadout {
-            primary: WeaponId::M249,
-            secondary: WeaponId::M9,
-            perk1: Perk1::Bandolier,
-            perk2: Perk2::Juggernaut,
-            perk3: Perk3::DeadSilence,
+            primary: WeaponId::Pkm,
+            secondary: WeaponId::Fort17,
         },
     ),
     (
         "Підривник",
         Loadout {
-            primary: WeaponId::W1200,
-            secondary: WeaponId::Usp,
-            perk1: Perk1::Frag3,
-            perk2: Perk2::SleightOfHand,
-            perk3: Perk3::Martyrdom,
+            primary: WeaponId::Ksg,
+            secondary: WeaponId::Glock18,
         },
     ),
     (
         "Снайпер",
         Loadout {
-            primary: WeaponId::M40,
-            secondary: WeaponId::Deagle,
-            perk1: Perk1::Bandolier,
-            perk2: Perk2::StoppingPower,
-            perk3: Perk3::SteadyAim,
+            primary: WeaponId::Awm,
+            secondary: WeaponId::Revolver,
         },
     ),
 ];
@@ -522,7 +534,7 @@ pub enum Cause {
 impl Cause {
     pub fn name(self) -> &'static str {
         match self {
-            Cause::Weapon(w) => w.def().name,
+            Cause::Weapon(w) => w.def().name(),
             Cause::Grenade => t("Граната", "Grenade"),
             Cause::Knife => t("Ніж", "Knife"),
             Cause::Airstrike => t("Авіаудар", "Airstrike"),
@@ -548,16 +560,16 @@ mod tests {
     #[test]
     fn table_order_matches_ids() {
         for (i, w) in WEAPONS.iter().enumerate() {
-            assert_eq!(w.id as usize, i, "{}", w.name);
+            assert_eq!(w.id as usize, i, "{}", w.name());
         }
     }
 
     #[test]
     fn falloff() {
-        let m4 = WeaponId::M4.def();
+        let m4 = WeaponId::Uar15.def();
         assert_eq!(m4.damage_at(5.0), 30.0);
-        assert_eq!(m4.damage_at(100.0), 20.0);
-        assert!((m4.damage_at(45.0) - 25.0).abs() < 0.01);
+        assert_eq!(m4.damage_at(100.0), 22.0);
+        assert!((m4.damage_at(45.0) - 26.0).abs() < 0.01);
     }
 
     #[test]

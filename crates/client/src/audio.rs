@@ -178,8 +178,29 @@ impl Sfx {
     }
 }
 
+/// The recordings each gun uses (several guns share one family's sounds; a stem with no
+/// recordings is synthesized).
 fn weapon_stem(w: WeaponId) -> String {
-    format!("{w:?}").to_lowercase()
+    use WeaponId::*;
+    match w {
+        Uar15 | Fort221 => "m4",
+        Ak12 | ScarH => "ak47",
+        Vector | Mp7 => "p90",
+        Bizon => "mp5",
+        Svd | Mk14 | Barrett | Alligator => "m40",
+        Negev => "m249",
+        Pkm => "rpd",
+        Awm => "r700",
+        Fort17 => "m9",
+        Glock18 => "usp",
+        Revolver => "deagle",
+        Aa12 => "aa12",
+        Ksg => "ksg",
+        Rpg7 => "rpg7",
+        Crossbow => "crossbow",
+        Bow => "bow",
+    }
+    .into()
 }
 
 /// Reload sound cues: (fraction of the reload, sound). Play them with `Sfx::of` so each
@@ -684,21 +705,28 @@ fn gun_params(w: WeaponId) -> Gun {
     };
     use WeaponId::*;
     match w {
-        M4 => g(0.8, 320.0, 7500.0, 0.006, 0.045, 70.0, 0.7, 0.25, 1.0),
-        Ak47 => g(0.8, 240.0, 6000.0, 0.007, 0.060, 58.0, 0.9, 0.3, 1.0),
-        G3 => g(0.9, 210.0, 6500.0, 0.008, 0.070, 52.0, 1.0, 0.3, 1.1),
-        Mp5 => g(0.25, 420.0, 7000.0, 0.005, 0.035, 85.0, 0.5, 0.3, 0.8),
-        P90 => g(0.6, 520.0, 9000.0, 0.004, 0.030, 95.0, 0.45, 0.25, 0.8),
-        Ak74u => g(0.7, 360.0, 8500.0, 0.006, 0.050, 75.0, 0.7, 0.3, 1.0),
-        M249 => g(0.8, 290.0, 7000.0, 0.007, 0.055, 62.0, 0.85, 0.35, 1.1),
-        Rpd => g(0.85, 230.0, 6000.0, 0.008, 0.065, 55.0, 0.95, 0.35, 1.1),
-        W1200 => g(0.0, 170.0, 4800.0, 0.010, 0.100, 45.0, 1.3, 0.0, 1.2),
-        M1014 => g(0.0, 185.0, 5200.0, 0.009, 0.090, 48.0, 1.2, 0.2, 1.2),
-        M40 => g(1.0, 190.0, 6500.0, 0.010, 0.110, 46.0, 1.3, 0.0, 1.4),
-        R700 => g(1.0, 175.0, 6000.0, 0.011, 0.120, 44.0, 1.35, 0.0, 1.4),
-        M9 => g(0.15, 600.0, 8000.0, 0.004, 0.025, 110.0, 0.45, 0.3, 0.7),
-        Usp => g(0.0, 460.0, 7000.0, 0.004, 0.030, 95.0, 0.55, 0.3, 0.7),
-        Deagle => g(0.6, 280.0, 7000.0, 0.008, 0.070, 60.0, 1.1, 0.35, 1.0),
+        Uar15 => g(0.8, 320.0, 7500.0, 0.006, 0.045, 70.0, 0.7, 0.25, 1.0),
+        Fort221 => g(0.8, 300.0, 7800.0, 0.006, 0.048, 68.0, 0.75, 0.25, 1.0),
+        Ak12 => g(0.8, 250.0, 6200.0, 0.007, 0.058, 60.0, 0.9, 0.3, 1.0),
+        ScarH => g(0.9, 210.0, 6500.0, 0.008, 0.070, 52.0, 1.0, 0.3, 1.1),
+        Vector => g(0.15, 480.0, 7200.0, 0.004, 0.030, 95.0, 0.5, 0.35, 0.8),
+        Mp7 => g(0.6, 520.0, 9000.0, 0.004, 0.030, 95.0, 0.45, 0.25, 0.8),
+        Bizon => g(0.25, 420.0, 7000.0, 0.005, 0.035, 85.0, 0.5, 0.3, 0.8),
+        Svd => g(0.95, 200.0, 6500.0, 0.009, 0.085, 50.0, 1.15, 0.25, 1.2),
+        Mk14 => g(0.9, 215.0, 6800.0, 0.008, 0.075, 52.0, 1.05, 0.3, 1.15),
+        Negev => g(0.8, 290.0, 7000.0, 0.007, 0.055, 62.0, 0.85, 0.35, 1.1),
+        Pkm => g(0.85, 220.0, 6000.0, 0.008, 0.068, 54.0, 1.0, 0.35, 1.15),
+        Aa12 => g(0.0, 185.0, 5200.0, 0.009, 0.090, 48.0, 1.2, 0.25, 1.2),
+        Ksg => g(0.0, 170.0, 4800.0, 0.010, 0.100, 45.0, 1.3, 0.0, 1.2),
+        Awm => g(1.0, 180.0, 6200.0, 0.011, 0.120, 44.0, 1.35, 0.0, 1.4),
+        Barrett => g(1.0, 130.0, 5200.0, 0.013, 0.160, 36.0, 1.6, 0.2, 1.6),
+        Alligator => g(1.0, 110.0, 4800.0, 0.015, 0.190, 32.0, 1.8, 0.0, 1.7),
+        Fort17 => g(0.15, 600.0, 8000.0, 0.004, 0.025, 110.0, 0.45, 0.3, 0.7),
+        Glock18 => g(0.15, 620.0, 8200.0, 0.004, 0.024, 112.0, 0.42, 0.3, 0.7),
+        Revolver => g(0.6, 280.0, 7000.0, 0.008, 0.070, 60.0, 1.1, 0.0, 1.0),
+        // made by their own synthesis (`launch`, `twang`); these only feed far-away echoes
+        Rpg7 => g(0.0, 120.0, 3000.0, 0.02, 0.2, 40.0, 1.4, 0.0, 1.5),
+        Crossbow | Bow => g(0.0, 900.0, 4000.0, 0.003, 0.02, 120.0, 0.1, 0.0, 0.3),
     }
 }
 
@@ -863,9 +891,66 @@ impl Synth {
         out
     }
 
+    /// A rocket leaving the tube: a hollow thump, then the motor's roar fading away.
+    fn launch(&mut self) -> Vec<[f32; 2]> {
+        let mut b = self.burst(0.25, &[(Kind::Low, 260.0, 0.8)], 0.002, 0.07);
+        Synth::norm(&mut b, 1.0);
+        let len = 1.3;
+        let mut roar = Self::buf(len);
+        let mut bp = Biquad::default();
+        for i in 0..roar.len() {
+            let t = Self::t(i);
+            if i % 64 == 0 {
+                bp.set(Kind::Band, 1400.0 - 700.0 * (t / len), 0.6);
+            }
+            let env = (t / 0.03).min(1.0) * (1.0 - t / len).powf(2.0);
+            roar[i] = bp.run(self.noise()) * env;
+        }
+        Synth::norm(&mut roar, 0.7);
+        Synth::mix(&mut b, &roar, 0.02, 1.0);
+        Synth::saturate(&mut b, 1.4);
+        let sp = Space {
+            wet: TOWN.wet * 1.3,
+            ..TOWN
+        };
+        let mut out = spatialize(&b, sp, 1.2, &mut self.rng);
+        fade_out(&mut out, 0.2);
+        normalize(&mut out, 0.95);
+        out
+    }
+
+    /// A bowstring let go: a low thrum that dies fast, a whip of air. `tone` 1 is the bow,
+    /// lower is the crossbow's shorter, sharper string.
+    fn twang(&mut self, tone: f32) -> Vec<[f32; 2]> {
+        let len = 0.35;
+        let mut b = Self::buf(len);
+        let f = 95.0 / tone.max(0.3) * self.rng.range(0.95, 1.05);
+        for (i, v) in b.iter_mut().enumerate() {
+            let t = Self::t(i);
+            let env = (-t * (14.0 / tone)).exp();
+            let wob = 1.0 + 0.04 * (-t * 30.0).exp();
+            *v = ((t * f * wob * 2.0 * PI).sin() + 0.35 * (t * f * 3.0 * 2.0 * PI).sin()) * env;
+        }
+        let mut whip = self.burst(
+            0.12,
+            &[(Kind::Band, 2600.0 / tone.max(0.5), 0.8)],
+            0.001,
+            0.03,
+        );
+        Synth::norm(&mut whip, 0.5);
+        Synth::mix(&mut b, &whip, 0.0, 1.0);
+        let mut clack = self.clack(&[1800.0, 3100.0], 6.0, 0.05, 0.4 * (1.0 - tone).max(0.1));
+        Synth::norm(&mut clack, 0.3);
+        Synth::mix(&mut b, &clack, 0.0, 1.0);
+        Synth::norm(&mut b, 0.9);
+        let mut out = spatialize(&b, NEAR, 0.2, &mut self.rng);
+        fade_out(&mut out, 0.08);
+        out
+    }
+
     /// Gunfire heard from far away: no crack, the highs lost on the way, mostly echo.
     fn far(&mut self) -> Vec<[f32; 2]> {
-        let mut dry = self.shot_dry(gun_params(WeaponId::Ak47));
+        let mut dry = self.shot_dry(gun_params(WeaponId::Ak12));
         filter(
             &mut dry,
             &[(Kind::Low, 900.0, 0.7), (Kind::Low, 1400.0, 0.7)],
@@ -1230,6 +1315,9 @@ impl Synth {
             Sfx::Door | Sfx::DoorShut => self.make(Sfx::Click, variant),
             Sfx::MagInOf(_) => self.make(Sfx::MagIn, variant),
             Sfx::BoltOf(_) => self.make(Sfx::Bolt, variant),
+            Sfx::Gun(WeaponId::Rpg7) => self.launch(),
+            Sfx::Gun(WeaponId::Crossbow) => self.twang(0.7),
+            Sfx::Gun(WeaponId::Bow) => self.twang(1.0),
             Sfx::Gun(w) => self.shot(gun_params(w)),
             Sfx::HeliGun => self.shot(Gun {
                 body: 200.0,
@@ -1237,7 +1325,7 @@ impl Synth {
                 punch_gain: 1.2,
                 mech: 0.0,
                 wet: 1.3,
-                ..gun_params(WeaponId::M249)
+                ..gun_params(WeaponId::Negev)
             }),
             Sfx::Far => self.far(),
             Sfx::Explosion => self.explosion(),
@@ -2468,12 +2556,12 @@ mod tests {
 
     #[test]
     fn file_names() {
-        assert_eq!(Sfx::Gun(WeaponId::Ak47).file_name(), "gun_ak47");
+        assert_eq!(Sfx::Gun(WeaponId::Ak12).file_name(), "gun_ak47");
         assert_eq!(Sfx::MagIn.file_name(), "mag_in");
         assert_eq!(Sfx::Explosion.file_name(), "explosion");
-        assert_eq!(Sfx::MagIn.of(WeaponId::Mp5).file_name(), "mag_in_mp5");
-        assert_eq!(Sfx::Bolt.of(WeaponId::Usp).file_name(), "bolt_usp");
-        assert_eq!(Sfx::Pump.of(WeaponId::W1200), Sfx::Pump);
+        assert_eq!(Sfx::MagIn.of(WeaponId::Bizon).file_name(), "mag_in_mp5");
+        assert_eq!(Sfx::Bolt.of(WeaponId::Glock18).file_name(), "bolt_usp");
+        assert_eq!(Sfx::Pump.of(WeaponId::Ksg), Sfx::Pump);
     }
 
     #[test]
@@ -2503,7 +2591,7 @@ mod tests {
         ] {
             assert!(BUNDLED.iter().any(|(n, _)| *n == stem), "{stem}");
         }
-        assert_eq!(recordings(Sfx::Gun(WeaponId::Ak47)).len(), 3);
+        assert_eq!(recordings(Sfx::Gun(WeaponId::Ak12)).len(), 3);
     }
 }
 

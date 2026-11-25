@@ -237,6 +237,24 @@ impl GameClient {
                 draw_line(a.x, a.y, b.x, b.y, 2.0, c);
             }
         }
+        // the bow being drawn: an arc under the crosshair fills up, gold when full
+        if self.alive && self.draw_from.is_some() {
+            let d = self.draw_now();
+            let (bw, by) = (64.0, cy + 30.0);
+            crate::ui::soft_rect(
+                cx - bw / 2.0 - 2.0,
+                by - 2.0,
+                bw + 4.0,
+                8.0,
+                Color::new(0.0, 0.0, 0.0, 0.55),
+            );
+            let c = if d >= 1.0 {
+                ACCENT
+            } else {
+                Color::new(1.0, 1.0, 1.0, 0.85)
+            };
+            draw_rectangle(cx - bw / 2.0, by, bw * d, 4.0, c);
+        }
         // hitmarker
         draw_hitmarker(
             cx,
@@ -562,7 +580,7 @@ impl GameClient {
             } else if self.has_class {
                 tr!("{} — відродитися", "{} — respawn", key(Action::Fire))
             } else {
-                t("Обери клас (Esc)", "Choose a class (Esc)").to_string()
+                t("Обери спорядження (Esc)", "Pick a loadout (Esc)").to_string()
             };
             ui.centered(&text, cx, h * 0.62 + 34.0, 20, ACCENT);
             ui.centered(
@@ -2528,7 +2546,7 @@ impl GameClient {
                     MUTED,
                 );
             } else {
-                let title = format!("{}. {}", k + 1, wid.def().name);
+                let title = format!("{}. {}", k + 1, wid.def().name());
                 ui.bold(
                     &title,
                     lx + 12.0,
@@ -2890,7 +2908,7 @@ impl GameClient {
                 let name = if empty & (1 << k) != 0 {
                     t("порожньо", "empty").to_string()
                 } else {
-                    self.weapons[k as usize].0.def().name.to_string()
+                    self.weapons[k as usize].0.def().name().to_string()
                 };
                 let label = format!("{}. {name}", k + 1);
                 let bx = x + 24.0 + k as f32 * (half + 10.0);
@@ -2934,7 +2952,7 @@ impl GameClient {
             ry += 38.0;
         }
         for (k, (gun, mag)) in v.guns.iter().enumerate() {
-            let label = format!("{} · {mag}", gun.def().name);
+            let label = format!("{} · {mag}", gun.def().name());
             if ui.button2(&label, x + 24.0, ry, row_w, 32.0) {
                 act = Some(BoxCmd::Take(v.id, (v.items.len() + k) as u8));
             }
@@ -3556,7 +3574,7 @@ impl GameClient {
             ui.shadowed(&format!("{mag}"), x, y + 42.0, 46, mag_c);
             let mw = ui.width(&format!("{mag}"), 46, true);
             ui.shadowed(&format!("/ {res}"), x + mw + 8.0, y + 42.0, 24, MUTED);
-            ui.shadowed(def.name, x, y + 70.0, 18, TEXT);
+            ui.shadowed(def.name(), x, y + 70.0, 18, TEXT);
         }
         // grenades
         for i in 0..self.grenades {
@@ -4756,7 +4774,7 @@ fn draw_bomb_icon(x: f32, y: f32, scale: f32, pulse: f32) {
 /// What a pick-up prompt calls a thing on the ground.
 fn pick_label(p: Pick) -> String {
     match p {
-        Pick::Weapon(w) => w.def().name.into(),
+        Pick::Weapon(w) => w.def().name().into(),
         Pick::Car(k) => k.name().into(),
         Pick::DeathBox => t("ящик", "box").into(),
         Pick::Door(_) => t("двері", "door").into(),

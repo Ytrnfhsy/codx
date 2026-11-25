@@ -22,26 +22,36 @@ pub struct Ballistics {
     pub max_range: f32,
     /// Distance at which bots open fire with it.
     pub engage: f32,
+    /// How well it goes through solid walls (0 = not at all; see `WeaponId::pierce`).
+    pub pierce: f32,
 }
 
 impl Ballistics {
     pub fn of(w: WeaponId) -> Ballistics {
         let (velocity, max_range) = match w {
-            WeaponId::M4 => (880.0, 600.0),
-            WeaponId::Ak47 => (715.0, 550.0),
-            WeaponId::G3 => (800.0, 650.0),
-            WeaponId::Mp5 => (400.0, 200.0),
-            WeaponId::P90 => (715.0, 250.0),
-            WeaponId::Ak74u => (735.0, 350.0),
-            WeaponId::M249 => (915.0, 700.0),
-            WeaponId::Rpd => (735.0, 650.0),
-            WeaponId::W1200 => (400.0, 70.0),
-            WeaponId::M1014 => (400.0, 80.0),
-            WeaponId::M40 => (850.0, 1200.0),
-            WeaponId::R700 => (860.0, 1200.0),
-            WeaponId::M9 => (380.0, 150.0),
-            WeaponId::Usp => (260.0, 120.0),
-            WeaponId::Deagle => (470.0, 180.0),
+            WeaponId::Uar15 => (900.0, 600.0),
+            WeaponId::Fort221 => (880.0, 550.0),
+            WeaponId::Ak12 => (715.0, 550.0),
+            WeaponId::ScarH => (800.0, 700.0),
+            WeaponId::Vector => (300.0, 180.0),
+            WeaponId::Mp7 => (720.0, 220.0),
+            WeaponId::Bizon => (330.0, 200.0),
+            WeaponId::Svd => (830.0, 900.0),
+            WeaponId::Mk14 => (850.0, 800.0),
+            WeaponId::Negev => (900.0, 700.0),
+            WeaponId::Pkm => (825.0, 800.0),
+            WeaponId::Aa12 => (350.0, 60.0),
+            WeaponId::Ksg => (400.0, 75.0),
+            WeaponId::Awm => (900.0, 1300.0),
+            WeaponId::Barrett => (850.0, 1500.0),
+            WeaponId::Alligator => (1000.0, 1800.0),
+            WeaponId::Fort17 => (330.0, 140.0),
+            WeaponId::Glock18 => (360.0, 120.0),
+            WeaponId::Revolver => (440.0, 170.0),
+            // (slow enough to watch fly, and to fall: aim a little up far away)
+            WeaponId::Rpg7 => (115.0, 500.0),
+            WeaponId::Crossbow => (85.0, 300.0),
+            WeaponId::Bow => (70.0, 250.0),
         };
         let engage = match w.def().class {
             WeaponClass::Pistol => 45.0,
@@ -49,12 +59,15 @@ impl Ballistics {
             WeaponClass::Shotgun => 22.0,
             WeaponClass::Rifle => 170.0,
             WeaponClass::Lmg => 200.0,
+            WeaponClass::Marksman => 300.0,
             WeaponClass::Sniper => 420.0,
+            WeaponClass::Launcher => 90.0,
         };
         Ballistics {
             velocity,
             max_range,
             engage,
+            pierce: w.pierce(),
         }
     }
 
@@ -157,6 +170,20 @@ pub fn trace_path(world: &World, o: Vec3, dir: Vec3, b: &Ballistics) -> Path {
             }
         }
         if t < max - 1e-4 {
+            // a heavy round goes on through a thin enough wall (never the ground)
+            if let Some((thick, left)) = through_wall(world, pos + d * t, d, b.pierce) {
+                path.pierced.push((total + t, left));
+                let skip = t + thick + 0.02;
+                total += skip;
+                pos += d * skip;
+                vel = d * vel.length();
+                path.points.push(pos);
+                path.dist.push(total);
+                if total >= b.max_range - 1e-3 {
+                    break;
+                }
+                continue;
+            }
             path.points.push(pos + d * t);
             path.dist.push(total + t);
             path.hit_world = true;
@@ -172,6 +199,28 @@ pub fn trace_path(world: &World, o: Vec3, dir: Vec3, b: &Ballistics) -> Path {
         }
     }
     path
+}
+
+/// How thick the wall struck at `at` is along `d`, if a round with `pierce` goes through
+/// it, and the share of its force it keeps.
+fn through_wall(world: &World, at: Vec3, d: Vec3, pierce: f32) -> Option<(f32, f32)> {
+    if pierce <= 0.0 {
+        return None;
+    }
+    if let Some(t) = &world.terrain {
+        if t.height(at.x, at.z) >= at.y - 0.08 {
+            return None;
+        }
+    }
+    let max = pierce * 1.2;
+    // look back from beyond the wall: the first face met is where it comes out
+    let far = at + d * (max + 0.02);
+    let (tb, _, _) = world.bullet_trace(far, -d, max + 0.02);
+    let thick = max + 0.02 - tb;
+    if tb <= 0.01 || thick >= max {
+        return None;
+    }
+    Some((thick, pierce * (1.0 - 0.5 * thick / max)))
 }
 
 /// Where to aim to hit something at `target` moving at `vel` with a bullet of speed
@@ -219,7 +268,7 @@ mod tests {
     #[test]
     fn bullets_drop_and_take_time() {
         let world = empty();
-        let b = Ballistics::of(WeaponId::M4);
+        let b = Ballistics::of(WeaponId::Uar15);
         let p = trace_path(&world, vec3(0.0, 100.0, 0.0), Vec3::X, &b);
         assert!(!p.hit_world);
         assert!((p.length() - b.max_range).abs() < 1.0, "{}", p.length());
@@ -231,7 +280,12 @@ mod tests {
         // and needs about half a second to get there
         assert!((i as f32 * STEP - 400.0 / 880.0).abs() < 0.03);
         // a pistol bullet runs out much sooner
-        let pistol = trace_path(&world, Vec3::ZERO, Vec3::X, &Ballistics::of(WeaponId::M9));
+        let pistol = trace_path(
+            &world,
+            Vec3::ZERO,
+            Vec3::X,
+            &Ballistics::of(WeaponId::Fort17),
+        );
         assert!(pistol.length() < 160.0);
     }
 
@@ -249,10 +303,44 @@ mod tests {
             velocity: 800.0,
             max_range: 1000.0,
             engage: 0.0,
+            pierce: 0.0,
         };
         let p = trace_path(&empty(), from, (at - from).normalize(), &b);
         let hit = p.pos_at(t);
         let runner = target + vel * t;
         assert!(hit.distance(runner) < 0.15, "{hit} vs {runner}");
+    }
+
+    /// A world with one wall `thick` metres thick across the line of fire at x = 20.
+    fn walled(thick: f32) -> World {
+        let mut w = empty();
+        w.add_map_box(&crate::map::MapBox {
+            min: vec3(20.0, -5.0, -5.0),
+            max: vec3(20.0 + thick, 5.0, 5.0),
+            color: [0; 3],
+            solid: true,
+            visible: true,
+            mat: crate::map::Mat::Solid,
+            shade: 0,
+        });
+        w
+    }
+
+    #[test]
+    fn heavy_rounds_go_through_thin_walls() {
+        let o = vec3(0.0, 1.0, 0.0);
+        let thin = walled(0.25);
+        let rifle = trace_path(&thin, o, Vec3::X, &Ballistics::of(WeaponId::Uar15));
+        assert!(rifle.hit_world && rifle.end().x < 20.1, "{}", rifle.end());
+        let big = trace_path(&thin, o, Vec3::X, &Ballistics::of(WeaponId::Barrett));
+        assert!(big.length() > 100.0, "the .50 goes on: {}", big.end());
+        let left = big.left_at(50.0);
+        assert!(left > 0.2 && left < 0.5, "but weaker: {left}");
+        // a thick wall stops even it; the 14.5 mm gun still goes through
+        let thick = walled(0.7);
+        let big = trace_path(&thick, o, Vec3::X, &Ballistics::of(WeaponId::Barrett));
+        assert!(big.end().x < 20.1);
+        let huge = trace_path(&thick, o, Vec3::X, &Ballistics::of(WeaponId::Alligator));
+        assert!(huge.length() > 100.0);
     }
 }

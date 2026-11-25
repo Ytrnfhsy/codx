@@ -156,7 +156,7 @@ impl Game {
         p.switch_end = time + swap as f64;
         p.shot_budget = p.shot_budget.min(1.0);
         let pos = p.body.pos;
-        let name = pk.w.id.def().name;
+        let name = pk.w.id.def().name();
         self.pickups.remove(i);
         self.drop_weapon(old, pos);
         if let Some(l) = loose {

@@ -127,32 +127,32 @@ fn admin_commands() {
 fn admin_tuning_applies_live_and_reaches_clients() {
     let (mut g, _) = setup(MapId::Depot, Mode::Tdm);
     g.outbox.clear();
-    let out = toon_server::admin::exec(&mut g, "tune m249.rpm 900");
-    assert_eq!(out, "weapons.m249.rpm = 900", "{out}");
+    let out = toon_server::admin::exec(&mut g, "tune negev.rpm 900");
+    assert_eq!(out, "weapons.negev.rpm = 900", "{out}");
     assert_eq!(
-        g.tuning.weapon(toon_shared::weapons::WeaponId::M249).rpm,
+        g.tuning.weapon(toon_shared::weapons::WeaponId::Negev).rpm,
         900.0
     );
     assert!(g
         .outbox
         .iter()
-        .any(|(_, m, _)| matches!(m, S2C::Tuning(t) if t.weapons["m249"].rpm == 900.0)));
+        .any(|(_, m, _)| matches!(m, S2C::Tuning(t) if t.weapons["negev"].rpm == 900.0)));
     let out = toon_server::admin::exec(&mut g, "tune movement.sprint_speed 999");
     assert!(out.contains("обмежено"), "{out}");
     assert_eq!(g.tuning.movement.sprint_speed, 25.0);
     let out = toon_server::admin::exec(&mut g, "tune sprint_speed 8.5");
     assert_eq!(out, "movement.sprint_speed = 8.5");
-    let out = toon_server::admin::exec(&mut g, "tune w1200.auto true");
+    let out = toon_server::admin::exec(&mut g, "tune ksg.auto true");
     assert!(out.ends_with("true"), "{out}");
-    assert!(toon_server::admin::exec(&mut g, "tune m249").contains("Вага"));
-    assert!(toon_server::admin::exec(&mut g, "tune m249.nope 1").contains("Невідомий"));
+    assert!(toon_server::admin::exec(&mut g, "tune negev").contains("Вага"));
+    assert!(toon_server::admin::exec(&mut g, "tune negev.nope 1").contains("Невідомий"));
     toon_server::admin::exec(&mut g, "tune reset all");
     assert_eq!(
-        g.tuning.weapon(toon_shared::weapons::WeaponId::M249).rpm,
-        750.0
+        g.tuning.weapon(toon_shared::weapons::WeaponId::Negev).rpm,
+        950.0
     );
     // persisted into the config section that `save` writes
-    assert_eq!(g.cfg.tuning["weapons"]["m249"]["rpm"], 750.0);
+    assert_eq!(g.cfg.tuning["weapons"]["negev"]["rpm"], 950.0);
 }
 
 /// Throws one grenade straight ahead (with the client's arc) and returns where it came to rest.
@@ -227,16 +227,16 @@ fn dropped_weapons_can_be_picked_up_and_scavenged() {
         p.body.pos = spot + glam::vec3(x, 0.0, 0.0);
     }
     // the other player carries an LMG and dies: it lands on the floor
-    g.pm(other).unwrap().weapons[0].id = WeaponId::M249;
+    g.pm(other).unwrap().weapons[0].id = WeaponId::Negev;
     g.pm(other).unwrap().slot = 0;
-    g.kill(other, Some(me), Cause::Weapon(WeaponId::M4), false);
+    g.kill(other, Some(me), Cause::Weapon(WeaponId::Uar15), false);
     assert_eq!(g.pickups.len(), 1);
     let pk = g.pickups[0];
-    assert_eq!(pk.w.id, WeaponId::M249);
+    assert_eq!(pk.w.id, WeaponId::Negev);
     assert!(g.lying_near(me).iter().any(|e| matches!(
         e,
         toon_shared::protocol::EntSnap::Weapon {
-            weapon: WeaponId::M249,
+            weapon: WeaponId::Negev,
             ..
         }
     )));
@@ -249,15 +249,15 @@ fn dropped_weapons_can_be_picked_up_and_scavenged() {
     // next to it: swap, and our old gun is dropped in its place
     g.pm(me).unwrap().body.pos = pk.pos + glam::vec3(0.8, 0.0, 0.0);
     g.handle(me, C2S::PickUp(pk.id));
-    assert_eq!(g.p(me).unwrap().weapon().id, WeaponId::M249);
-    assert_eq!(g.snapshot_for(me).me.weapons[0], WeaponId::M249);
+    assert_eq!(g.p(me).unwrap().weapon().id, WeaponId::Negev);
+    assert_eq!(g.snapshot_for(me).me.weapons[0], WeaponId::Negev);
     assert_eq!(g.pickups.len(), 1);
     assert_eq!(g.pickups[0].w.id, mine);
 
     // walking over a gun we already carry takes its ammo
     g.pm(me).unwrap().weapons[0].reserve = 0;
     let ammo = g.pickups[0].w.mag + g.pickups[0].w.reserve;
-    g.pickups[0].w.id = WeaponId::M249;
+    g.pickups[0].w.id = WeaponId::Negev;
     g.pm(me).unwrap().body.pos = g.pickups[0].pos;
     g.tick(TICK_DT);
     assert_eq!(g.p(me).unwrap().weapons[0].reserve, ammo);

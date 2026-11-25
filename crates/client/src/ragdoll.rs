@@ -357,7 +357,7 @@ mod tests {
         let world = World::from_map(&flat);
         let mut rng = Rng::new(7);
         let blow = DeathBlow {
-            cause: Cause::Weapon(toon_shared::weapons::WeaponId::M4),
+            cause: Cause::Weapon(toon_shared::weapons::WeaponId::Uar15),
             headshot: false,
             from: Some(vec3(-4.5, 1.0, -8.0)),
         };
