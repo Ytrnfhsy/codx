@@ -1084,7 +1084,7 @@ async fn amain(args: Args) {
                 };
                 g.skin_preview = None;
                 // (--no-hud: clean pictures of the world once the game is on)
-                let action = if args.no_hud && g.alive {
+                let action = if args.no_hud && (g.alive || args.spec_at.is_some()) {
                     None
                 } else {
                     g.draw_hud(&mut ui, &view, &tags, &mut settings, fps)
