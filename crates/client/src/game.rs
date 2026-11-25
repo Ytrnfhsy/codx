@@ -130,8 +130,8 @@ pub struct KillLine {
 pub enum Overlay {
     None,
     Team,
+    /// The loadout screen (team modes).
     Class,
-    Edit(usize),
     Pause,
     /// Picking a point on the map (airstrike, artillery).
     Airstrike,
@@ -361,7 +361,10 @@ pub struct GameClient {
     pub now: f64,
     pub prev_state: MatchState,
     pub mouse_delta: Vec2,
-    pub class_choice: usize,
+    /// The loadout being put together on the loadout screen, and the column picked by its
+    /// number key (the next number picks a gun in it).
+    pub pick: Option<toon_shared::weapons::Loadout>,
+    pub pick_col: Option<usize>,
     pub streak_hint: Option<Killstreak>,
     pub bomb_beep: f64,
     pub muzzle_flash: f64,
@@ -520,7 +523,7 @@ pub fn build_sun(weather: Weather) -> MeshBuilder {
 }
 
 impl GameClient {
-    pub fn new(net: NetClient, w: Welcome, settings: &Settings, pending: Vec<S2C>) -> GameClient {
+    pub fn new(net: NetClient, w: Welcome, _settings: &Settings, pending: Vec<S2C>) -> GameClient {
         let map = maps::build(w.map);
         let world = World::from_map(&map);
         let level = crate::level::Level::build(&map);
@@ -665,7 +668,8 @@ impl GameClient {
             now: get_time(),
             prev_state: MatchState::Warmup,
             mouse_delta: Vec2::ZERO,
-            class_choice: settings.last_class,
+            pick: None,
+            pick_col: None,
             streak_hint: None,
             bomb_beep: 0.0,
             muzzle_flash: -10.0,
@@ -3575,8 +3579,8 @@ impl GameClient {
         if self.alive {
             self.center_msg(
                 toon_shared::lang::t(
-                    "Клас зміниться після відродження",
-                    "Your class changes when you respawn",
+                    "Нове спорядження — після відродження",
+                    "Your new loadout comes when you respawn",
                 ),
                 2.0,
                 crate::ui::MUTED,

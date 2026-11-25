@@ -452,8 +452,8 @@ clipboard, and a held `Backspace` keeps deleting.
 | Use a killstreak | `5` (or `4`) |
 | Scoreboard | `Tab` |
 | Chat: all / team (the squad in the battle royale) | `T` / `Y` |
-| Change class | `M` |
-| Menu (class, team, settings, leave) | `Esc` |
+| Loadout (guns and perks) | `M` |
+| Menu (loadout, team, settings, leave) | `Esc` |
 
 **Pings.** The middle mouse button points out what the crosshair rests on, and your side (the
 team, in the battle royale the squad) sees it: an **enemy**, a red diamond over them for a few
@@ -482,8 +482,12 @@ when the bullet arrives (with lag compensation, as before). Bots see and attack 
 their gun (a sniper up to ~400 m, a pistol ~45 m), lead and allow for the drop, "hold their
 breath" before a long shot and switch to the gun that reaches the target.
 
-**Default classes**: Rifleman, Spec Ops, Gunner, Demolitions, Sniper + **3 classes of your own**
-(an editor in the class menu, kept on your computer).
+**Loadout** (`M`, and every time you pick a team): every gun at once over the whole screen, on
+a grid by kind: assault rifles, SMGs, LMGs, shotguns, sniper rifles, pistols. Each card shows the
+gun's silhouette, damage, rate of fire and range (from the server's settings). A click on a gun
+makes it your primary, on a pistol your secondary; the three rows of perks are below. From the
+keyboard: a column's number (1–6), then the gun's number in it; Enter to fight. The loadout is
+remembered for next time.
 
 **Perks**
 

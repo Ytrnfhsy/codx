@@ -106,7 +106,7 @@ impl Action {
             Action::Scoreboard => t("Рахунок", "Scoreboard"),
             Action::ChatAll => t("Чат: всім", "Chat: all"),
             Action::ChatTeam => t("Чат: команді", "Chat: team"),
-            Action::Class => t("Змінити клас", "Change class"),
+            Action::Class => t("Спорядження", "Loadout"),
             Action::Leave => t("Вийти з техніки", "Leave vehicle"),
             Action::Heal => t("Аптечка", "Medkit"),
             Action::Inventory => t("Інвентар", "Inventory"),

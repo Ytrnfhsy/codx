@@ -117,6 +117,9 @@ pub struct Settings {
     pub grass: u8,
     /// Language of the game (the system's one at first start).
     pub lang: toon_shared::lang::Lang,
+    /// The loadout for the team modes (the guns and the perks picked last time).
+    pub loadout: Option<Loadout>,
+    /// (Classes of older versions: the loadout starts from the one used last.)
     pub custom: Vec<CustomClass>,
     pub last_class: usize,
     pub recent: Vec<String>,
@@ -183,6 +186,7 @@ impl Settings {
                 })
                 .collect(),
             last_class: 0,
+            loadout: None,
             recent: Vec::new(),
             favorites: Vec::new(),
             master: toon_shared::consts::MASTER_DEFAULT.into(),
@@ -226,6 +230,10 @@ impl Settings {
         s.custom.truncate(3);
         for c in &mut s.custom {
             c.loadout = c.loadout.sanitized();
+        }
+        if s.loadout.is_none() {
+            let classes = s.classes();
+            s.loadout = Some(classes[s.last_class.min(classes.len() - 1)].1);
         }
         if s.player_key == 0 {
             use std::hash::{BuildHasher, Hasher};
@@ -287,7 +295,12 @@ impl Settings {
         self.recent.truncate(8);
     }
 
-    /// All selectable classes: 5 defaults + custom ones.
+    /// The loadout for the team modes.
+    pub fn loadout(&self) -> Loadout {
+        self.loadout.unwrap_or(DEFAULT_CLASSES[0].1).sanitized()
+    }
+
+    /// All the classes of older versions: 5 defaults + custom ones.
     pub fn classes(&self) -> Vec<(String, Loadout)> {
         let mut v: Vec<(String, Loadout)> = DEFAULT_CLASSES
             .iter()

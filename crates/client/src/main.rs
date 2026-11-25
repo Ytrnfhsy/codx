@@ -9,6 +9,7 @@ mod game;
 mod hud;
 mod killcam;
 mod level;
+mod loadout_menu;
 mod lobby;
 mod menu;
 mod mesh;
@@ -742,8 +743,9 @@ async fn amain(args: Args) {
                     chars_for_ui = chars.clone();
                     // (while the Controls page waits for a key, Esc only cancels that)
                     if is_key_pressed(KeyCode::Escape) && !binds::capturing() {
+                        g.pick = None;
+                        g.pick_col = None;
                         g.overlay = match g.overlay {
-                            Overlay::Edit(_) => Overlay::Class,
                             Overlay::Settings | Overlay::Leaders | Overlay::Achievements => {
                                 g.menu_back()
                             }
