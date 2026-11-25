@@ -24,6 +24,7 @@ const LEAD_FINAL: f64 = 4.0;
 const TAIL: f64 = 1.0;
 const TAIL_FINAL: f64 = 1.6;
 
+#[derive(Clone)]
 pub struct Frame {
     pub t: f64,
     pub players: Vec<PlayerSnap>,
@@ -80,6 +81,29 @@ impl Recorder {
         self.events.clear();
     }
 
+    /// A copy of what was recorded between `t0` and `t1` (to replay later).
+    pub fn slice(&self, t0: f64, t1: f64) -> Recorder {
+        Recorder {
+            frames: self
+                .frames
+                .iter()
+                .filter(|f| f.t >= t0 && f.t <= t1)
+                .cloned()
+                .collect(),
+            events: self
+                .events
+                .iter()
+                .filter(|e| e.0 >= t0 - 1.0 && e.0 <= t1)
+                .copied()
+                .collect(),
+        }
+    }
+
+    /// The newest frame's time.
+    pub fn newest(&self) -> Option<f64> {
+        self.frames.back().map(|f| f.t)
+    }
+
     /// Server time of the first frame where `victim` is dead after being alive.
     pub fn death_time(&self, victim: u8, after: f64) -> Option<f64> {
         let mut was_alive = false;
@@ -123,6 +147,7 @@ struct Track {
     reload_since: Option<f64>,
 }
 
+#[derive(Clone)]
 pub struct KillInfo {
     pub killer: u8,
     pub victim: u8,
@@ -179,6 +204,18 @@ impl Killcam {
     pub fn new(rec: &Recorder, info: KillInfo, t_kill: f64, final_cam: bool) -> Option<Killcam> {
         let t0 = t_kill - if final_cam { LEAD_FINAL } else { LEAD };
         let t1 = t_kill + if final_cam { TAIL_FINAL } else { TAIL };
+        Self::span(rec, info, t0, t_kill, t1, final_cam)
+    }
+
+    /// A replay through `info.killer`'s eyes from `t0` to `t1` (server clock).
+    pub fn span(
+        rec: &Recorder,
+        info: KillInfo,
+        t0: f64,
+        t_kill: f64,
+        t1: f64,
+        final_cam: bool,
+    ) -> Option<Killcam> {
         let first = rec.frames.front()?.t;
         let t0 = t0.max(first);
         if t_kill - t0 < 1.0 {
@@ -253,6 +290,12 @@ impl Killcam {
         kc.sample(None, None, 0.0, true);
         kc.switch_at = -10.0;
         Some(kc)
+    }
+
+    /// How far it has played (0..1).
+    pub fn progress(&self) -> f32 {
+        let t0 = self.frames.first().map_or(self.pt, |f| f.t);
+        ((self.pt - t0) / (self.t1 - t0).max(0.1)).clamp(0.0, 1.0) as f32
     }
 
     /// Playback speed: the final killcam slows down around the killing shot.

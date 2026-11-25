@@ -907,6 +907,7 @@ impl Game {
             _ => Default::default(),
         };
         self.record_fight(victim, attacker, cause, headshot, dist as f32);
+        self.note_for_awards(victim, attacker, cause, headshot, dist as f32);
         self.broadcast(S2C::Kill {
             killer: attacker,
             victim,
@@ -933,6 +934,50 @@ impl Game {
         }
         if self.mode == Mode::Br {
             self.br_on_death(victim);
+        }
+    }
+
+    /// What the awards at the match's end count (bots too).
+    fn note_for_awards(
+        &mut self,
+        victim: u8,
+        attacker: Option<u8>,
+        cause: Cause,
+        headshot: bool,
+        dist: f32,
+    ) {
+        let Some(a) = attacker.filter(|a| *a != victim) else {
+            return;
+        };
+        if self.allied_ids(a, victim) {
+            return;
+        }
+        let Some(p) = self.pm(a) else { return };
+        let m = &mut p.ms;
+        m.headshots += headshot as u16;
+        m.best_streak = m.best_streak.max(p.streak);
+        if let Cause::Weapon(w) = cause {
+            if dist > m.longest {
+                m.longest = dist;
+                m.longest_with = Some(w);
+            }
+            if matches!(w, WeaponId::Bow | WeaponId::Crossbow) {
+                m.arrow_kills += 1;
+            }
+            if w == WeaponId::Rpg7 {
+                m.blast_kills += 1;
+            }
+        }
+        match cause {
+            Cause::Knife => m.knife_kills += 1,
+            Cause::Grenade
+            | Cause::Fire
+            | Cause::Airstrike
+            | Cause::Artillery
+            | Cause::Fpv
+            | Cause::Drop
+            | Cause::Nrk => m.blast_kills += 1,
+            _ => {}
         }
     }
 

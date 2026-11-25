@@ -387,6 +387,18 @@ pub struct GameClient {
     // replays and bodies
     pub recorder: Recorder,
     pub killcam: Option<Killcam>,
+    /// The match's best moments so far.
+    pub highlights: crate::highlights::Highlights,
+    /// The results of the match just over (the screen between matches), and when.
+    pub summary: Option<(toon_shared::protocol::MatchSummary, f64)>,
+    /// Where the results screen shows its best player (side, gun).
+    pub mvp_preview: Option<(Rect, Team, WeaponId)>,
+    /// The results screen's replay window, as drawn this frame.
+    pub reel_texture: Option<Texture2D>,
+    /// Which moment the results screen plays (index into the highlights).
+    pub reel: usize,
+    /// When the match began (for the moments' clock).
+    match_t0: f64,
     /// A killcam waiting to start: (real time to start, info, final killcam).
     pub pending_killcam: Option<(f64, KillInfo, bool)>,
     /// When the inventory screen was opened (its key closes it again only after that).
@@ -698,6 +710,12 @@ impl GameClient {
             muzzle_flash: -10.0,
             recorder: Recorder::default(),
             killcam: None,
+            highlights: Default::default(),
+            summary: None,
+            reel: 0,
+            reel_texture: None,
+            mvp_preview: None,
+            match_t0: 0.0,
             pending_killcam: None,
             inventory_opened: 0.0,
             ragdolls: Vec::new(),
@@ -1030,6 +1048,24 @@ impl GameClient {
                         gear,
                     },
                 );
+                if let Some(k) = killer {
+                    if self.state == MatchState::Playing {
+                        self.highlights.on_kill(
+                            st,
+                            KillInfo {
+                                killer: k,
+                                victim,
+                                killer_name: killer_name.clone(),
+                                victim_name: victim_name.clone(),
+                                killer_team,
+                                cause,
+                                headshot,
+                                gear,
+                            },
+                            dist,
+                        );
+                    }
+                }
                 let blow = DeathBlow {
                     cause,
                     headshot,
@@ -1270,6 +1306,10 @@ impl GameClient {
                     a.play(Sfx::Jet, 0.9);
                 }
             }
+            S2C::MatchSummary(sum) => {
+                self.summary = Some((sum, now));
+                self.reel = 0;
+            }
             S2C::MatchEnd { winner, text } => {
                 self.match_end = Some((text, winner, now));
                 self.queue_final_killcam(now);
@@ -1347,6 +1387,17 @@ impl GameClient {
             shots: s.shots.clone(),
             bomb: s.bomb.clone(),
         });
+        if self.state != s.state {
+            // a new match: the last one's moments and results go
+            if matches!(self.state, MatchState::PostMatch | MatchState::Warmup)
+                && matches!(s.state, MatchState::PreRound | MatchState::Playing)
+            {
+                self.highlights.clear();
+                self.summary = None;
+                self.reel = 0;
+                self.match_t0 = self.now;
+            }
+        }
         self.state = s.state;
         self.time_left = s.time_left;
         self.scores = s.scores;
@@ -2620,7 +2671,33 @@ impl GameClient {
             k.update(dt, &self.world, &self.tuning, audio);
             if k.done {
                 self.killcam = None;
+                if self.summary_active() {
+                    self.reel += 1;
+                }
             }
+        }
+        // the moments: cut while the match is on, played one after another on the results
+        if self.state == MatchState::Playing {
+            let clock = (now - self.match_t0) as f32;
+            self.highlights.update(&self.recorder, clock);
+        }
+        if self.summary_active() && self.killcam.is_none() && !self.highlights.clips.is_empty() {
+            if is_key_pressed(KeyCode::Space) {
+                self.reel += 1;
+            }
+            let n = self.highlights.clips.len();
+            for _ in 0..n {
+                let i = self.reel % n;
+                self.killcam = self.highlights.clips[i].replay();
+                if self.killcam.is_some() {
+                    break;
+                }
+                self.reel += 1;
+            }
+        } else if self.summary_active() && is_key_pressed(KeyCode::Space) {
+            // next moment now
+            self.killcam = None;
+            self.reel += 1;
         }
         for (_, r) in &mut self.ragdolls {
             r.update(&self.world, dt);
@@ -3836,6 +3913,14 @@ impl GameClient {
     /// Knocked down (battle royale squads): crawling, no shooting.
     pub fn downed(&self) -> bool {
         self.alive && self.me.downed
+    }
+
+    /// The results screen is up: the match is over and its final kill has been shown.
+    pub fn summary_active(&self) -> bool {
+        self.state == MatchState::PostMatch
+            && self.summary.is_some()
+            && !self.final_killcam_waiting()
+            && !self.killcam.as_ref().is_some_and(|k| k.final_cam)
     }
 
     /// The final killcam (end of a round or match) is about to play.

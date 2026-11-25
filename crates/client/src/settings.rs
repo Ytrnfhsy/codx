@@ -31,6 +31,13 @@ pub struct HostSettings {
     /// Battle royale weather: "random" or a weather's name.
     #[serde(default = "random_weather")]
     pub br_weather: String,
+    /// Seconds between matches (the results and the best moments).
+    #[serde(default = "twenty")]
+    pub postmatch: f32,
+}
+
+fn twenty() -> f32 {
+    20.0
 }
 
 fn random_weather() -> String {
@@ -53,6 +60,7 @@ impl Default for HostSettings {
             br_bots: 50,
             br_squad: 1,
             br_weather: random_weather(),
+            postmatch: twenty(),
         }
     }
 }

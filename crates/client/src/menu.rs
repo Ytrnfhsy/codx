@@ -736,8 +736,23 @@ pub fn draw_menu(
                 .round() as usize;
             let skill = toon_server::bots::skill_name(hs.bot_skill);
             let skill_label = tr!("Складність ботів ({skill})", "Bot difficulty ({skill})");
-            // the battle royale: the squads take the other half of the row
-            let sw = if br { (pw - 60.0) / 2.0 } else { pw - 48.0 };
+            // the other half of the row: the squads (battle royale) or the pause between
+            // matches
+            let sw = (pw - 60.0) / 2.0;
+            if !br {
+                hs.postmatch = ui
+                    .slider(
+                        t("Між матчами (підсумки), с", "Between matches (results), s"),
+                        hs.postmatch,
+                        10.0,
+                        60.0,
+                        x + 36.0 + sw,
+                        y + 330.0,
+                        sw,
+                        "{}",
+                    )
+                    .round();
+            }
             hs.bot_skill = ui.slider(
                 &skill_label,
                 hs.bot_skill,

@@ -37,6 +37,24 @@ pub struct HistEntry {
     pub stance: Stance,
 }
 
+/// A player's match, for the awards at its end.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MatchStats {
+    pub headshots: u16,
+    /// The longest kill (metres) and the gun.
+    pub longest: f32,
+    pub longest_with: Option<WeaponId>,
+    pub best_streak: u32,
+    pub blast_kills: u16,
+    pub arrow_kills: u16,
+    pub knife_kills: u16,
+    pub plants: u16,
+    pub defuses: u16,
+    /// Shots fired and hits when the match began (the totals run on across matches).
+    pub fired_at_start: u32,
+    pub hit_at_start: u32,
+}
+
 pub struct Player {
     pub id: u8,
     pub name: String,
@@ -164,6 +182,8 @@ pub struct Player {
     /// Kills in a quick run (each within `MULTI_KILL_WINDOW` of the last) and when the
     /// last one was.
     pub multi: u8,
+    /// What this match counts for the awards at its end.
+    pub ms: MatchStats,
     pub multi_at: f64,
 }
 
@@ -345,6 +365,7 @@ impl Player {
             scope_zoom: [0.0; 2],
             multi: 0,
             multi_at: f64::MIN,
+            ms: MatchStats::default(),
             skin: 0,
         }
     }
@@ -2057,6 +2078,11 @@ impl Game {
         self.match_started = true;
         for p in self.players.iter_mut().flatten() {
             p.br_longest = 0.0;
+            p.ms = MatchStats {
+                fired_at_start: p.shots_fired,
+                hit_at_start: p.shots_hit,
+                ..Default::default()
+            };
             p.kills = 0;
             p.deaths = 0;
             p.assists = 0;
@@ -2126,7 +2152,7 @@ impl Game {
             return;
         }
         self.state = MatchState::PostMatch;
-        self.state_end = self.time + POSTMATCH_TIME;
+        self.state_end = self.time + self.cfg.postmatch_time as f64;
         self.logf(format!("Матч завершено: {}", text()));
         self.say(Dest::All, || S2C::MatchEnd {
             winner: None,
@@ -2139,7 +2165,7 @@ impl Game {
             return;
         }
         self.state = MatchState::PostMatch;
-        self.state_end = self.time + POSTMATCH_TIME;
+        self.state_end = self.time + self.cfg.postmatch_time as f64;
         let text = || match winner {
             Some(t) => tr!("{} перемагають! {}", "{} win! {}", t.name(), pick(reason)),
             None => tr!("Нічия! {}", "Draw! {}", pick(reason)),
@@ -2183,6 +2209,7 @@ impl Game {
                 self.announce(news);
             }
         }
+        self.send_summary();
     }
 
     /// Leaderboard news in everybody's chat.
@@ -2285,6 +2312,11 @@ impl Game {
             p.in_plane = false;
             p.alive = false;
             p.respawn_at = 0.0;
+            p.ms = MatchStats {
+                fired_at_start: p.shots_fired,
+                hit_at_start: p.shots_hit,
+                ..Default::default()
+            };
             p.kills = 0;
             p.deaths = 0;
             p.assists = 0;
@@ -2312,6 +2344,97 @@ impl Game {
                 self.spawn_player(id, true);
             }
         }
+    }
+
+    /// The match's best players to everybody, for the screen between matches.
+    pub fn send_summary(&mut self) {
+        use toon_shared::protocol::{Award, AwardKind, MatchSummary, MvpLine};
+        let players: Vec<&Player> = self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| p.team.is_playing())
+            .collect();
+        let mvp = players
+            .iter()
+            .filter(|p| p.score > 0 || p.kills > 0)
+            .max_by_key(|p| (p.score, p.kills, std::cmp::Reverse(p.deaths)))
+            .map(|p| MvpLine {
+                id: p.id,
+                name: p.name.clone(),
+                team: p.team,
+                kills: p.kills,
+                deaths: p.deaths,
+                score: p.score,
+                weapon: p.loadout.primary,
+            });
+        // the best at each thing (above a bar worth showing); nobody gets more than two
+        // while somebody else also earned it, so more players are named
+        let mut given: Vec<u8> = Vec::new();
+        let mut best = |kind: AwardKind, min: f32, f: &dyn Fn(&Player) -> f32| -> Option<Award> {
+            let mut ranked: Vec<&&Player> = players.iter().filter(|p| f(p) >= min).collect();
+            ranked.sort_by(|a, b| f(b).total_cmp(&f(a)).then(a.deaths.cmp(&b.deaths)));
+            let p = ranked
+                .iter()
+                .find(|p| given.iter().filter(|g| **g == p.id).count() < 2)
+                .or(ranked.first())?;
+            given.push(p.id);
+            Some(Award {
+                kind,
+                id: p.id,
+                name: p.name.clone(),
+                team: p.team,
+                value: f(p),
+                weapon: (kind == AwardKind::Longest)
+                    .then_some(p.ms.longest_with)
+                    .flatten(),
+            })
+        };
+        let accuracy = |p: &Player| {
+            let fired = p.shots_fired.saturating_sub(p.ms.fired_at_start);
+            let hit = p.shots_hit.saturating_sub(p.ms.hit_at_start);
+            if fired >= 25 {
+                (hit as f32 / fired as f32 * 100.0).round()
+            } else {
+                0.0
+            }
+        };
+        let awards: Vec<Award> = [
+            best(AwardKind::Kills, 1.0, &|p| p.kills as f32),
+            best(AwardKind::Longest, 20.0, &|p| p.ms.longest.round()),
+            best(AwardKind::Streak, 3.0, &|p| p.ms.best_streak as f32),
+            best(AwardKind::Accuracy, 1.0, &accuracy),
+            best(AwardKind::Headshots, 1.0, &|p| p.ms.headshots as f32),
+            best(AwardKind::Blasts, 1.0, &|p| p.ms.blast_kills as f32),
+            best(AwardKind::Assists, 1.0, &|p| p.assists as f32),
+            best(AwardKind::Arrows, 1.0, &|p| p.ms.arrow_kills as f32),
+            best(AwardKind::Knife, 1.0, &|p| p.ms.knife_kills as f32),
+            best(AwardKind::Plants, 1.0, &|p| p.ms.plants as f32),
+            best(AwardKind::Defuses, 1.0, &|p| p.ms.defuses as f32),
+        ]
+        .into_iter()
+        .flatten()
+        .take(9)
+        .collect();
+        let (next_map, next_mode) = self.peek_next();
+        let summary = MatchSummary {
+            mvp,
+            awards,
+            next_map,
+            next_mode,
+            secs: self.cfg.postmatch_time,
+        };
+        self.broadcast(S2C::MatchSummary(summary));
+    }
+
+    /// The map and mode that come after this match.
+    pub fn peek_next(&self) -> (MapId, Mode) {
+        let i = (self.rotation_idx + 1) % self.cfg.rotation.len().max(1);
+        self.cfg
+            .rotation
+            .get(i)
+            .map(|r| r.resolve())
+            .unwrap_or((self.map.id, self.mode))
     }
 
     pub fn next_map(&mut self) {

@@ -876,6 +876,8 @@ pub enum S2C {
         winner: Option<Team>,
         text: String,
     },
+    /// The match's best players, for the screen between matches.
+    MatchSummary(MatchSummary),
     RoundEnd {
         winner: Option<Team>,
         text: String,
@@ -900,4 +902,73 @@ pub fn rcon_proof(password: &str, nonce: u64, seq: u32, cmd: &str) -> String {
     h.update(password.as_bytes());
     h.update(cmd.as_bytes());
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// What a player is best at in a match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AwardKind {
+    Kills,
+    Longest,
+    Streak,
+    Accuracy,
+    Headshots,
+    Blasts,
+    Assists,
+    Arrows,
+    Knife,
+    Plants,
+    Defuses,
+}
+
+impl AwardKind {
+    pub fn title(self) -> &'static str {
+        use crate::lang::t;
+        match self {
+            AwardKind::Kills => t("Найбільше вбивств", "Most kills"),
+            AwardKind::Longest => t("Найдовший постріл", "Longest shot"),
+            AwardKind::Streak => t("Найдовша серія", "Longest streak"),
+            AwardKind::Accuracy => t("Найточніший", "Most accurate"),
+            AwardKind::Headshots => t("Хедшоти", "Headshots"),
+            AwardKind::Blasts => t("Вбивств вибухами", "Blast kills"),
+            AwardKind::Assists => t("Допоміг команді", "Team player"),
+            AwardKind::Arrows => t("Лучник матчу", "Archer of the match"),
+            AwardKind::Knife => t("Ніж", "Knife kills"),
+            AwardKind::Plants => t("Підривник", "Bomb planter"),
+            AwardKind::Defuses => t("Сапер", "Bomb defuser"),
+        }
+    }
+}
+
+/// One award: who, and how much (metres, kills, per cent…).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Award {
+    pub kind: AwardKind,
+    pub id: u8,
+    pub name: String,
+    pub team: Team,
+    pub value: f32,
+    /// The gun it was done with (the longest shot).
+    pub weapon: Option<WeaponId>,
+}
+
+/// The match's best player.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MvpLine {
+    pub id: u8,
+    pub name: String,
+    pub team: Team,
+    pub kills: u16,
+    pub deaths: u16,
+    pub score: i32,
+    pub weapon: WeaponId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MatchSummary {
+    pub mvp: Option<MvpLine>,
+    pub awards: Vec<Award>,
+    pub next_map: MapId,
+    pub next_mode: Mode,
+    /// Seconds until the next match.
+    pub secs: f32,
 }

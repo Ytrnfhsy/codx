@@ -6,6 +6,7 @@ mod binds;
 mod character;
 mod effects;
 mod game;
+mod highlights;
 mod hud;
 mod killcam;
 mod level;
@@ -22,6 +23,7 @@ mod render;
 mod ruins;
 mod settings;
 mod soldier;
+mod summary;
 mod textures;
 mod ui;
 mod updater;
@@ -351,6 +353,7 @@ async fn amain(args: Args) {
     let mut auto_switch = false;
     let mut exec_once = args.exec.clone();
     let mut low_res: Option<(RenderTarget, i32)> = None;
+    let mut reel_rt: Option<RenderTarget> = None;
     let mut frame_start = std::time::Instant::now();
     let mut fps_window = (std::time::Instant::now(), 0u32);
     let mut worst_frame = 0.0f32;
@@ -368,6 +371,7 @@ async fn amain(args: Args) {
         cfg.br.squad = hs.br_squad.clamp(1, 4);
         cfg.br.weather = args.weather.clone().unwrap_or(hs.br_weather.clone());
         cfg.bot_skill = hs.bot_skill;
+        cfg.postmatch_time = hs.postmatch.clamp(5.0, 90.0);
         cfg.rcon_password = args.rcon.clone().unwrap_or(hs.rcon.clone());
         cfg.password = hs.password.clone();
         cfg.max_players = hs.max_players;
@@ -914,53 +918,100 @@ async fn amain(args: Args) {
                     });
                     low_res = Some((rt, samples));
                 }
-                let target = low_res.as_ref().map(|l| l.0.clone());
-                let view = render::make_view(g, &settings, target.clone());
-                let tags = render::render_world(g, &mats, &settings, &view);
-                render::render_viewmodel(g, &mats, &settings, target.clone());
-                set_default_camera();
-                if let Some(rt) = &target {
-                    clear_background(BLACK);
-                    if settings.color_grade || settings.fxaa || settings.bloom {
-                        // evenings are warmer, rain and fog flatter
-                        use toon_shared::weather::Weather;
-                        let grade = if !settings.color_grade {
-                            vec4(0.0, 1.0, 0.0, 0.0)
-                        } else {
-                            match g.weather {
-                                Weather::Clear => vec4(0.3, 1.14, 0.5, 0.03),
-                                Weather::Evening => vec4(0.35, 1.18, 0.6, 0.05),
-                                Weather::Overcast => vec4(0.22, 1.04, 0.5, 0.01),
-                                Weather::Rain => vec4(0.25, 0.96, 0.7, -0.01),
-                                Weather::Fog => vec4(0.15, 0.94, 0.45, 0.0),
-                                Weather::Night => vec4(0.3, 0.9, 0.9, -0.03),
-                            }
-                        };
-                        mats.post.set_uniform("Grade", grade);
-                        mats.post.set_uniform(
-                            "Fx",
-                            vec4(
-                                1.0 / rt.texture.width(),
-                                1.0 / rt.texture.height(),
-                                settings.fxaa as u8 as f32,
-                                if settings.bloom { 1.0 } else { 0.0 },
-                            ),
+                // between matches the world is seen only in the results screen's window,
+                // through the eyes of whoever made the moment
+                let summary = g.summary_active();
+                let (view, tags) = if summary {
+                    let (rw, rh) = summary::reel_size();
+                    if reel_rt.as_ref().is_none_or(|t: &RenderTarget| {
+                        (t.texture.width() as u32, t.texture.height() as u32) != (rw, rh)
+                    }) {
+                        let rt = render_target_ex(
+                            rw,
+                            rh,
+                            RenderTargetParams {
+                                sample_count: 1,
+                                depth: true,
+                            },
                         );
-                        gl_use_material(&mats.post);
+                        rt.texture.set_filter(FilterMode::Linear);
+                        reel_rt = Some(rt);
                     }
-                    draw_texture_ex(
-                        &rt.texture,
-                        0.0,
-                        0.0,
-                        WHITE,
-                        DrawTextureParams {
-                            dest_size: Some(vec2(screen_width(), screen_height())),
-                            flip_y: true,
-                            ..Default::default()
-                        },
-                    );
-                    gl_use_default_material();
-                }
+                    let rt = reel_rt.clone();
+                    let view = render::make_view(g, &settings, rt.clone());
+                    let tags = if g.killcam.is_some() {
+                        let tags = render::render_world(g, &mats, &settings, &view);
+                        render::render_viewmodel(g, &mats, &settings, rt.clone());
+                        tags
+                    } else {
+                        Vec::new()
+                    };
+                    set_default_camera();
+                    clear_background(Color::new(0.06, 0.07, 0.11, 1.0));
+                    g.reel_texture = rt.as_ref().map(|t| t.texture.clone());
+                    // a still of each moment, at its moment, for the small windows
+                    if let (Some(k), Some(t)) = (&g.killcam, &rt) {
+                        let n = g.highlights.clips.len();
+                        if n > 0 && k.pt >= k.t_kill {
+                            let clip = &mut g.highlights.clips[g.reel % n];
+                            if clip.thumb.is_none() {
+                                clip.thumb =
+                                    Some(Texture2D::from_image(&t.texture.get_texture_data()));
+                            }
+                        }
+                    }
+                    (view, tags)
+                } else {
+                    g.reel_texture = None;
+                    let target = low_res.as_ref().map(|l| l.0.clone());
+                    let view = render::make_view(g, &settings, target.clone());
+                    let tags = render::render_world(g, &mats, &settings, &view);
+                    render::render_viewmodel(g, &mats, &settings, target.clone());
+                    set_default_camera();
+                    if let Some(rt) = &target {
+                        clear_background(BLACK);
+                        if settings.color_grade || settings.fxaa || settings.bloom {
+                            // evenings are warmer, rain and fog flatter
+                            use toon_shared::weather::Weather;
+                            let grade = if !settings.color_grade {
+                                vec4(0.0, 1.0, 0.0, 0.0)
+                            } else {
+                                match g.weather {
+                                    Weather::Clear => vec4(0.3, 1.14, 0.5, 0.03),
+                                    Weather::Evening => vec4(0.35, 1.18, 0.6, 0.05),
+                                    Weather::Overcast => vec4(0.22, 1.04, 0.5, 0.01),
+                                    Weather::Rain => vec4(0.25, 0.96, 0.7, -0.01),
+                                    Weather::Fog => vec4(0.15, 0.94, 0.45, 0.0),
+                                    Weather::Night => vec4(0.3, 0.9, 0.9, -0.03),
+                                }
+                            };
+                            mats.post.set_uniform("Grade", grade);
+                            mats.post.set_uniform(
+                                "Fx",
+                                vec4(
+                                    1.0 / rt.texture.width(),
+                                    1.0 / rt.texture.height(),
+                                    settings.fxaa as u8 as f32,
+                                    if settings.bloom { 1.0 } else { 0.0 },
+                                ),
+                            );
+                            gl_use_material(&mats.post);
+                        }
+                        draw_texture_ex(
+                            &rt.texture,
+                            0.0,
+                            0.0,
+                            WHITE,
+                            DrawTextureParams {
+                                dest_size: Some(vec2(screen_width(), screen_height())),
+                                flip_y: true,
+                                ..Default::default()
+                            },
+                        );
+                        gl_use_default_material();
+                    }
+                    (view, tags)
+                };
                 // the battle royale lobby: the players on their podiums over the island
                 if g.in_br_lobby() {
                     render::draw_lobby_scene(
@@ -991,6 +1042,9 @@ async fn amain(args: Args) {
                 };
                 if let Some(rect) = g.skin_preview {
                     render::draw_skin_preview(&mats, settings.skin, rect, get_time() as f32);
+                }
+                if let Some((rect, team, weapon)) = g.mvp_preview.filter(|_| g.summary_active()) {
+                    render::draw_soldier_preview(&mats, 0, team, weapon, rect, get_time() as f32);
                 }
                 if let Some(hud::HudAction::Leave) = action {
                     g.disconnect();

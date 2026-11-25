@@ -40,7 +40,14 @@ impl GameClient {
         let (cx, cy) = (w / 2.0, h / 2.0);
         let now = self.now;
 
-        if self.killcam.is_some() {
+        // between matches: the results, the best moments (Tab shows the table)
+        let tab = crate::binds::down(crate::binds::Action::Scoreboard) && self.chat_input.is_none();
+        if self.summary_active() && !tab {
+            self.draw_summary(ui);
+            self.draw_chat(ui);
+            return self.draw_overlay(ui, settings);
+        }
+        if self.killcam.is_some() && !self.summary_active() {
             self.draw_killcam(ui);
             self.draw_killfeed(ui);
             self.draw_chat(ui);

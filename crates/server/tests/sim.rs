@@ -537,3 +537,44 @@ fn the_loadout_picks_what_g_and_q_throw() {
     );
     assert!(g.grenades.iter().all(|n| !n.smoke));
 }
+
+#[test]
+fn a_match_ends_with_its_best_players() {
+    let (mut g, _) = setup(MapId::Depot, Mode::Tdm);
+    g.cfg.tdm.score_limit = 4;
+    g.cfg.postmatch_time = 25.0;
+    let mut summary = None;
+    for _ in 0..(240.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        let _ = g.snapshot_for(0);
+        g.shots.clear();
+        for (_, m, _) in g.outbox.drain(..) {
+            if let S2C::MatchSummary(s) = m {
+                summary = Some(s);
+            }
+        }
+        if summary.is_some() {
+            break;
+        }
+    }
+    let s = summary.expect("the match ended with a summary");
+    assert_eq!(g.state, MatchState::PostMatch);
+    assert!((g.time_left() - 25.0).abs() < 0.2, "{}", g.time_left());
+    assert_eq!(s.secs, 25.0);
+    let mvp = s.mvp.expect("somebody played best");
+    assert!(mvp.kills > 0 || mvp.score > 0);
+    assert!(!s.awards.is_empty() && s.awards.len() <= 9);
+    let kills = s
+        .awards
+        .iter()
+        .find(|a| a.kind == toon_shared::protocol::AwardKind::Kills)
+        .expect("most kills");
+    assert!(kills.value >= 1.0);
+    // nobody holds more than two while others earned something
+    let mut per: std::collections::HashMap<u8, usize> = Default::default();
+    for a in &s.awards {
+        *per.entry(a.id).or_default() += 1;
+    }
+    assert!(per.len() > 1 || s.awards.len() <= 2, "{:?}", per);
+    assert_eq!((s.next_map, s.next_mode), g.peek_next());
+}

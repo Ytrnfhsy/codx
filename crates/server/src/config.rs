@@ -161,6 +161,9 @@ pub struct ServerConfig {
     /// The admin's player list shows each address's country, asked of ip-api.com (the
     /// players' addresses go to that service; false keeps them here).
     pub geoip: bool,
+    /// Seconds between matches: the final kill's replay, then the best players and the
+    /// match's best moments (5..90).
+    pub postmatch_time: f32,
     /// Fine tuning of movement and every weapon (see `tune` admin command).
     /// Missing fields fall back to factory defaults.
     pub tuning: serde_json::Value,
@@ -212,6 +215,7 @@ impl Default for ServerConfig {
             br: BrConfig::default(),
             friendly_fire: false,
             auto_balance: true,
+            postmatch_time: 20.0,
             bots: 6,
             bot_skill: 0.4,
             spawn_protection: 3.0,
@@ -277,6 +281,11 @@ impl ServerConfig {
             .clamp(1.0, toon_shared::consts::MAX_HEALTH);
         self.bot_skill = self.bot_skill.clamp(0.0, 1.0);
         self.spawn_protection = self.spawn_protection.clamp(0.0, 30.0);
+        self.postmatch_time = if self.postmatch_time.is_finite() {
+            self.postmatch_time.clamp(5.0, 90.0)
+        } else {
+            20.0
+        };
         self.min_players = self.min_players.max(1);
         if self.rotation.is_empty() {
             self.rotation.push(RotationEntry::default());

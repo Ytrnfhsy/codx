@@ -139,7 +139,12 @@ fn fog_color(g: &GameClient) -> Color {
 
 pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarget>) -> View {
     let (pos, yaw, pitch) = g.camera();
-    let aspect = screen_width() / screen_height().max(1.0);
+    // (the shape of what it is drawn into: the screen, or a smaller window)
+    let aspect = target
+        .as_ref()
+        .map_or(screen_width() / screen_height().max(1.0), |t| {
+            t.texture.width() / t.texture.height().max(1.0)
+        });
     let pilot_fov = g
         .pilot_camera()
         .and_then(|c| c.3)
@@ -198,7 +203,7 @@ pub fn make_view(g: &GameClient, settings: &Settings, target: Option<RenderTarge
         target: pos + dir,
         up: Quat::from_axis_angle(dir, roll) * Vec3::Y,
         fovy,
-        aspect: None,
+        aspect: Some(aspect),
         projection: Projection::Perspective,
         render_target: target,
         viewport: None,
@@ -891,12 +896,17 @@ pub fn render_viewmodel(
         }
         None => return,
     };
+    let aspect = target
+        .as_ref()
+        .map_or(screen_width() / screen_height().max(1.0), |t| {
+            t.texture.width() / t.texture.height().max(1.0)
+        });
     let cam = ViewmodelCamera(Camera3D {
         position: Vec3::ZERO,
         target: vec3(0.0, 0.0, -1.0),
         up: Vec3::Y,
         fovy: 62f32.to_radians(),
-        aspect: None,
+        aspect: Some(aspect),
         projection: Projection::Perspective,
         render_target: target,
         viewport: None,
@@ -1379,6 +1389,18 @@ pub fn draw_model_gallery(mats: &Materials) {
 
 /// A character turning slowly inside `rect` (screen pixels): the chooser's preview.
 pub fn draw_skin_preview(mats: &Materials, skin: u8, rect: Rect, t: f32) {
+    draw_soldier_preview(mats, skin, Team::Allies, WeaponId::Uar15, rect, t);
+}
+
+/// A soldier turning slowly in `rect`: a character (0 = the side's uniform), with a gun.
+pub fn draw_soldier_preview(
+    mats: &Materials,
+    skin: u8,
+    team: Team,
+    weapon: WeaponId,
+    rect: Rect,
+    t: f32,
+) {
     let dpi = screen_dpi_scale();
     let vp = (
         (rect.x * dpi) as i32,
@@ -1416,8 +1438,8 @@ pub fn draw_skin_preview(mats: &Materials, skin: u8, rect: Rect, t: f32) {
             yaw: std::f32::consts::PI + t * 0.7,
             pitch: 0.0,
             stance: Stance::Stand,
-            team: Team::Allies,
-            weapon: WeaponId::Uar15,
+            team,
+            weapon,
             look: PREVIEW,
             time: t,
             phase: 0.0,

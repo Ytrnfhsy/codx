@@ -120,6 +120,7 @@ impl Game {
                         let name = self.p(d).map(|p| p.name.clone()).unwrap_or_default();
                         if let Some(p) = self.pm(d) {
                             p.score += SCORE_DEFUSE;
+                            p.ms.defuses += 1;
                         }
                         self.say(Dest::One(d), || S2C::ScorePopup {
                             points: SCORE_DEFUSE,
@@ -223,6 +224,7 @@ impl Game {
                         self.sab.explode_at = time + cfg.bomb_timer as f64;
                         if let Some(p) = self.pm(c) {
                             p.score += SCORE_PLANT;
+                            p.ms.plants += 1;
                         }
                         self.say(Dest::One(c), || S2C::ScorePopup {
                             points: SCORE_PLANT,

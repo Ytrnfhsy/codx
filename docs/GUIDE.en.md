@@ -359,6 +359,20 @@ And a few **easter eggs** are hidden on the Island. We will not say where: go an
 * **Final killcam**: at the end of a match (and of a Sabotage round) first ~3 s of the result,
   then everybody watches the last kill, slowing down at the moment of the shot; the results
   table comes after it.
+* **Between matches** (20 s by default; `postmatch_time` in the config, `set postmatch 30` in
+  the admin console or "Between matches" on the "Host a server" page, 5–90 s): after the final
+  killcam comes the results screen. At the top the winner, the score, the next map and a
+  countdown ring. On the left the **match MVP** (most points; the character in their side's
+  uniform with their gun, kills, deaths, K/D, points) and up to 9 **awards**: most kills, the
+  longest shot (with the gun), the longest streak, the most accurate (from 25 shots),
+  headshots, blast kills, team player (assists), archer, knife, and the Sabotage planter and
+  defuser. Nobody gets more than two while others also earned one; yours are marked "YOU".
+  On the right the **best moments**: during the match the game picks out kills worth seeing
+  again (several within 6 s, a long shot, headshots, a bow, a knife) and keeps them as ~8 s
+  replays through the shooter's eyes; the best three take turns in the big window, the others
+  wait in the small ones (with a still of the moment once it has been shown). `Space` skips
+  to the next moment, `Tab` shows the scoreboard. Each player records the moments on their
+  own computer: somebody who joined mid-match sees only what happened while they were there.
 * **Ready check**: a match does not start until every player has pressed "Ready" (`F1` or the
   button in the pause menu next to "Continue"; `F1` again or the same button for "Not ready
   (break)"). It is turned off in the server's config: `"ready_check": false`.
@@ -708,6 +722,7 @@ An example: [`server.example.json`](../server.example.json). The main fields:
 | `friendly_fire`, `auto_balance` | friendly fire, team auto-balance |
 | `bots`, `bot_skill` | fill with bots up to N players; difficulty 0..1 (0.1 easy, 0.4 normal, 0.7 hard, 1 veteran) |
 | `spawn_protection` | seconds of invulnerability after respawning (0 = off) |
+| `postmatch_time` | seconds between matches: the final killcam, the results and the best moments (5–90, 20 by default) |
 | `min_players` | how many players a match needs to start (until then, warm-up) |
 | `ready_check`, `ready_timeout` | wait for everybody's "Ready", but not for ever: once somebody is ready the rest get `ready_timeout` seconds (30), and with nobody ready twice as long (0: wait for everyone); the battle royale lobby has no countdown and waits until everybody is ready |
 | `http_enabled` | turns on the web page and the admin panel |
@@ -862,7 +877,7 @@ Three ways, all with the same commands:
 | `givestreak <id\|name> <radar\|airstrike\|artillery\|heli\|fpv\|bomber\|nrk>` | give a killstreak |
 | `givebomb <id\|name>` | give the bomb to a living player (Sabotage) |
 | `boom <x> <y> <z> [radius]` or `boom <player> [distance] [radius]` | an explosion at a point or in front of a player, to try how things break |
-| `set <key> <value>` | `scorelimit`, `timelimit`, `sabtime`, `rounds`, `bombtimer`, `planttime`, `defusetime`, `ff`, `autobalance`, `maxplayers`, `brmaxplayers`, `password`, `name`, `motd`, `botskill`, `spawnprotect`, `bleedtime`, `revivetime`, `revivehp` |
+| `set <key> <value>` | `scorelimit`, `timelimit`, `sabtime`, `rounds`, `bombtimer`, `planttime`, `defusetime`, `ff`, `autobalance`, `maxplayers`, `brmaxplayers`, `password`, `name`, `motd`, `botskill`, `spawnprotect`, `postmatch`, `bleedtime`, `revivetime`, `revivehp` |
 | `save` | save the current settings into the config |
 
 > ⚠️ The web panel works over plain HTTP. To manage it over the internet, put an HTTPS proxy
