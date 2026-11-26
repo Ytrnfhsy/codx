@@ -578,3 +578,45 @@ fn a_match_ends_with_its_best_players() {
     assert!(per.len() > 1 || s.awards.len() <= 2, "{:?}", per);
     assert_eq!((s.next_map, s.next_mode), g.peek_next());
 }
+
+#[test]
+fn joining_between_matches_plays_the_next_one() {
+    let (mut g, _) = setup(MapId::Depot, Mode::Tdm);
+    g.cfg.tdm.score_limit = 3;
+    for _ in 0..(240.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+        if g.state == MatchState::PostMatch {
+            break;
+        }
+    }
+    assert_eq!(g.state, MatchState::PostMatch);
+    // somebody comes in now, picks a side and a loadout
+    let id = g
+        .connect(
+            "127.0.0.1:5077".parse().unwrap(),
+            "Пізній",
+            "",
+            toon_shared::consts::PROTOCOL_VERSION,
+        )
+        .unwrap();
+    g.handle(id, C2S::JoinTeam(Some(Team::Axis)));
+    g.handle(id, C2S::SetLoadout(DEFAULT_CLASSES[0].1));
+    let mut alive_at = None;
+    for _ in 0..(60.0 / TICK_DT) as usize {
+        g.tick(TICK_DT);
+        g.outbox.clear();
+        g.shots.clear();
+        if g.p(id).is_some_and(|p| p.alive) {
+            alive_at = Some(g.state);
+            break;
+        }
+    }
+    assert!(
+        alive_at.is_some(),
+        "still watching, state {:?}, team {:?}",
+        g.state,
+        g.p(id).map(|p| p.team)
+    );
+}
