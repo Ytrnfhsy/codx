@@ -76,7 +76,6 @@ fn land_after(uptime: f64) {
         assert!(p.alive, "jumped but not alive");
         bodies.push(p.body);
     }
-    g.outbox.clear();
     let mut seq = 0u32;
     let mut landed = [None::<f64>; 2];
     for step in 0..(150.0 / TICK_DT) as usize {

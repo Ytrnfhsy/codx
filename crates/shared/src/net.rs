@@ -2,7 +2,8 @@
 //!
 //! Every datagram carries:
 //! * `ack` — the next reliable id the sender expects (everything below was received);
-//! * a batch of reliable messages that are resent until acknowledged;
+//! * a batch of reliable messages that are resent until acknowledged (a big one in pieces
+//!   of its own, each with its own id, put back together in order);
 //! * a batch of unreliable messages (snapshots, inputs).
 
 use serde::de::DeserializeOwned;
@@ -11,6 +12,14 @@ use std::collections::{BTreeMap, VecDeque};
 
 /// Keep datagrams comfortably below a typical MTU.
 pub const RELIABLE_BUDGET: usize = 900;
+/// A reliable message bigger than this goes as several reliable pieces: a datagram over
+/// the MTU is cut up by IP, and many home routers, mobile networks and firewalls drop such
+/// fragments, so one big message (the server's tuning on joining) would be resent for
+/// ever and hold up every reliable message after it.
+pub const RELIABLE_PIECE: usize = 800;
+/// The first byte of a reliable piece: more pieces of this message follow, or it ends.
+const PIECE_MORE: u8 = 1;
+const PIECE_LAST: u8 = 0;
 const RESEND_AFTER: f64 = 0.12;
 /// Unreliable payload per datagram: more than this spills into further datagrams, and a
 /// single message bigger than it is cut into fragments (so that the network never has
@@ -60,6 +69,8 @@ pub struct Channel {
     unrel_out: Vec<Vec<u8>>,
     expected: u32,
     held: BTreeMap<u32, Vec<u8>>,
+    /// The pieces of a big reliable message received so far.
+    rel_in: Vec<u8>,
     pub bytes_sent: u64,
     pub bytes_recv: u64,
     /// Datagrams after the first one of the last `build_packet` (send them too).
@@ -77,12 +88,20 @@ impl Channel {
 
     pub fn send_reliable<T: Serialize>(&mut self, msg: &T) {
         let data = encode(msg);
-        self.out.push_back(Pending {
-            id: self.next_id,
-            data,
-            last_sent: f64::NEG_INFINITY,
-        });
-        self.next_id = self.next_id.wrapping_add(1);
+        let n = data.len().div_ceil(RELIABLE_PIECE).max(1);
+        for k in 0..n {
+            let part = &data
+                [(k * RELIABLE_PIECE).min(data.len())..((k + 1) * RELIABLE_PIECE).min(data.len())];
+            let mut piece = Vec::with_capacity(part.len() + 1);
+            piece.push(if k + 1 < n { PIECE_MORE } else { PIECE_LAST });
+            piece.extend_from_slice(part);
+            self.out.push_back(Pending {
+                id: self.next_id,
+                data: piece,
+                last_sent: f64::NEG_INFINITY,
+            });
+            self.next_id = self.next_id.wrapping_add(1);
+        }
     }
 
     pub fn send_unreliable<T: Serialize>(&mut self, msg: &T) {
@@ -188,10 +207,23 @@ impl Channel {
         }
         let mut msgs = Vec::new();
         while let Some(d) = self.held.remove(&self.expected) {
-            if let Some(m) = decode::<T>(&d) {
+            self.expected = self.expected.wrapping_add(1);
+            let Some((&head, body)) = d.split_first() else {
+                continue;
+            };
+            if self.rel_in.len() + body.len() > DECODE_LIMIT as usize {
+                // (bigger than any message may be: a broken peer)
+                self.rel_in.clear();
+                continue;
+            }
+            self.rel_in.extend_from_slice(body);
+            if head == PIECE_MORE {
+                continue;
+            }
+            let whole = std::mem::take(&mut self.rel_in);
+            if let Some(m) = decode::<T>(&whole) {
                 msgs.push(m);
             }
-            self.expected = self.expected.wrapping_add(1);
         }
         for d in p.unrel {
             if let Some(m) = decode::<T>(&d) {
@@ -296,6 +328,34 @@ mod tests {
             got.extend(b.receive::<Vec<u8>>(&p).unwrap());
         }
         assert_eq!(got, vec![big]);
+    }
+
+    /// A big reliable message goes in datagrams under the MTU, survives losses and comes
+    /// out whole, in order with the small ones around it.
+    #[test]
+    fn big_reliable_messages_go_in_pieces() {
+        let mut a = Channel::new();
+        let mut b = Channel::new();
+        let big: Vec<u8> = (0..7000u32).map(|i| (i * 13) as u8).collect();
+        a.send_reliable(&vec![1u8]);
+        a.send_reliable(&big);
+        a.send_reliable(&vec![2u8]);
+        let mut got: Vec<Vec<u8>> = Vec::new();
+        let mut t = 0.0;
+        for round in 0..400 {
+            t += 0.05;
+            let pkt = a.build_packet(t);
+            assert!(pkt.len() < 1200, "a datagram of {} bytes", pkt.len());
+            if round % 5 != 0 && round % 7 != 3 {
+                got.extend(b.receive::<Vec<u8>>(&pkt).unwrap());
+            }
+            let back = b.build_packet(t);
+            if round % 4 != 1 {
+                a.receive::<Vec<u8>>(&back).unwrap();
+            }
+        }
+        assert_eq!(got, vec![vec![1u8], big, vec![2u8]]);
+        assert_eq!(a.backlog(), 0);
     }
 
     #[test]
