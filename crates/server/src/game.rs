@@ -1533,7 +1533,7 @@ impl Game {
             C2S::ScopeZoom { slot, zoom } => {
                 if let Some(p) = self.pm(id) {
                     if slot < 2 {
-                        p.scope_zoom[slot as usize] = (zoom as f32 / 10.0).clamp(0.0, 8.0);
+                        p.scope_zoom[slot as usize] = (zoom as f32 / 10.0).clamp(0.0, 12.0);
                     }
                 }
             }

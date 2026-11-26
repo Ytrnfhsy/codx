@@ -105,7 +105,7 @@ Modes:
   red dot, 2×, variable 2–4× and 3–8×: the mouse wheel turns the magnification while aiming).
   They go on the gun in your hand, or on the other one if they do not fit this one: a pistol
   takes only a red dot, a shotgun a red dot or 2×, an SMG and a machine gun up to 2–4×, an
-  assault rifle any, a sniper rifle only a scope; what fits is shown in the inventory next to
+  assault rifle any, an RPG a red dot or 2×; sniper and marksman rifles and the crossbow have their own optic and take none, nor does the bow; what fits is shown in the inventory next to
   the gun's name. When you swap a gun, the sight moves to the new one if it fits. Bottom left
   is a panel with the number of medkits, the gear levels, the sight and the ammo. A sight that
   fits no gun in your hands (or is no better) goes into the backpack (2 + the backpack's level

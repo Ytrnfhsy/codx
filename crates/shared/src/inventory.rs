@@ -157,12 +157,12 @@ pub fn sight_zoom_range(level: u8) -> (f32, f32) {
 }
 
 /// How much aiming down the sights magnifies: a scope (2× and up) on the gun decides it
-/// (a variable one at `sight_zoom`, what it is turned to), even on a sniper rifle with its
-/// own 4× optic; with iron sights or a red dot the gun's own `gun_zoom` counts, or the
-/// red dot's if that is stronger.
+/// (a variable one at `sight_zoom`, what it is turned to), but never less than the gun's
+/// own `gun_zoom`; with iron sights or a red dot the gun's own counts, or the red dot's if
+/// that is stronger.
 pub fn aimed_zoom(gun_zoom: f32, sight: u8, sight_zoom: f32) -> f32 {
-    if sight >= 2 {
-        sight_zoom
+    if sight == 0 {
+        gun_zoom
     } else {
         gun_zoom.max(sight_zoom)
     }
@@ -200,32 +200,44 @@ pub fn sight_short(level: u8) -> &'static str {
     }
 }
 
+/// The gun comes with its own optic (the sniper rifles, the SVD and Mk14, the crossbow):
+/// there is no rail for another one, nor any need of it.
+pub fn has_own_optic(w: WeaponId) -> bool {
+    w.def().scoped || matches!(w, WeaponId::Mk14 | WeaponId::Crossbow)
+}
+
 /// Which sights go on which gun (0, iron sights, always does):
-/// pistols take only a red dot; shotguns up to a 2× scope; SMGs and machine guns up to
-/// the 2–4×; assault rifles anything; sniper rifles only scopes (no red dot).
+/// pistols take only a red dot; shotguns and the RPG a red dot or a 2× scope; SMGs and
+/// machine guns up to the 2–4×; assault rifles anything. Guns with their own optic and
+/// the bow take none.
 pub fn sight_fits(level: u8, w: WeaponId) -> bool {
     if level == 0 {
         return true;
     }
+    if has_own_optic(w) || w == WeaponId::Bow {
+        return false;
+    }
     match w.def().class {
         WeaponClass::Pistol => level <= 1,
-        WeaponClass::Shotgun => level <= 2,
+        WeaponClass::Shotgun | WeaponClass::Launcher => level <= 2,
         WeaponClass::Smg | WeaponClass::Lmg => level <= 3,
-        WeaponClass::Rifle | WeaponClass::Marksman => true,
-        WeaponClass::Sniper => level >= 2,
-        WeaponClass::Launcher => level <= 2,
+        WeaponClass::Rifle | WeaponClass::Marksman | WeaponClass::Sniper => true,
     }
 }
 
 /// What sights a gun takes, for the inventory screen ("red dot", "up to 2–4×"…).
 pub fn sight_rule(w: WeaponId) -> &'static str {
+    if has_own_optic(w) {
+        return t("власна оптика", "its own optic");
+    }
+    if w == WeaponId::Bow {
+        return t("не ставляться", "none");
+    }
     match w.def().class {
         WeaponClass::Pistol => t("лише коліматор", "red dot only"),
-        WeaponClass::Shotgun => t("коліматор або 2×", "red dot or 2×"),
+        WeaponClass::Shotgun | WeaponClass::Launcher => t("коліматор або 2×", "red dot or 2×"),
         WeaponClass::Smg | WeaponClass::Lmg => t("до 2–4×", "up to 2–4×"),
-        WeaponClass::Rifle | WeaponClass::Marksman => t("будь-який", "any"),
-        WeaponClass::Sniper => t("лише оптика", "scopes only"),
-        WeaponClass::Launcher => t("коліматор або 2×", "red dot or 2×"),
+        _ => t("будь-який", "any"),
     }
 }
 
@@ -434,25 +446,29 @@ impl Inventory {
 mod tests {
     use super::*;
 
-    /// A variable scope zooms as it is turned, also on a sniper rifle (whose own optic is
-    /// 4×); a red dot never zooms less than the gun's iron sights.
+    /// A variable scope zooms as it is turned; no sight ever zooms less than the gun's own.
     #[test]
     fn scopes_set_the_zoom() {
-        let sniper = 4.0;
+        let rifle = 1.35;
         for level in [3u8, 4] {
             let (lo, hi) = sight_zoom_range(level);
             assert_eq!(
-                aimed_zoom(sniper, level, lo),
+                aimed_zoom(rifle, level, lo),
                 lo,
                 "level {level} at its weakest"
             );
             assert_eq!(
-                aimed_zoom(sniper, level, hi),
+                aimed_zoom(rifle, level, hi),
                 hi,
                 "level {level} at its strongest"
             );
-            assert!(aimed_zoom(sniper, level, lo) < aimed_zoom(sniper, level, hi));
+            assert!(aimed_zoom(rifle, level, lo) < aimed_zoom(rifle, level, hi));
         }
+        assert_eq!(
+            aimed_zoom(8.0, 3, 2.0),
+            8.0,
+            "never below the gun's own optic"
+        );
         assert_eq!(aimed_zoom(1.35, 0, 1.0), 1.35, "iron sights: the gun's own");
         assert_eq!(aimed_zoom(1.2, 1, 1.5), 1.5, "a red dot");
         assert_eq!(aimed_zoom(1.6, 1, 1.5), 1.6);
@@ -503,14 +519,27 @@ mod tests {
 
     #[test]
     fn sights_fit_their_guns() {
-        assert!(sight_fits(4, WeaponId::Awm) && sight_fits(3, WeaponId::Uar15));
+        assert!(sight_fits(3, WeaponId::Uar15) && sight_fits(4, WeaponId::Ak12));
         assert!(sight_fits(1, WeaponId::Fort17) && !sight_fits(2, WeaponId::Fort17));
         assert!(sight_fits(2, WeaponId::Ksg) && !sight_fits(3, WeaponId::Ksg));
         assert!(sight_fits(3, WeaponId::Mp7) && !sight_fits(4, WeaponId::Mp7));
         assert!(sight_fits(3, WeaponId::Negev) && !sight_fits(4, WeaponId::Pkm));
-        assert!(sight_fits(4, WeaponId::Ak12) && sight_fits(1, WeaponId::Uar15));
-        assert!(!sight_fits(1, WeaponId::Awm) && sight_fits(2, WeaponId::Awm));
+        assert!(sight_fits(1, WeaponId::Uar15) && sight_fits(2, WeaponId::Rpg7));
         assert!(!sight_fits(2, WeaponId::Revolver) && !sight_fits(4, WeaponId::Glock18));
+        // a gun with its own optic, and the bow, take no sight at all
+        for w in WeaponId::all() {
+            if has_own_optic(w) || w == WeaponId::Bow {
+                assert!((1..=MAX_SIGHT).all(|l| !sight_fits(l, w)), "{w:?}");
+            }
+        }
+        for w in [
+            WeaponId::Awm,
+            WeaponId::Barrett,
+            WeaponId::Alligator,
+            WeaponId::Svd,
+        ] {
+            assert!(has_own_optic(w), "{w:?}");
+        }
         assert!((0..=MAX_SIGHT).all(|l| sight_fits(0, WeaponId::all().nth(l as usize).unwrap())));
         assert!(sight_zoom(4) > sight_zoom(3) && !sight_magnifies(1));
         assert!(sight_variable(4) && sight_variable(3) && !sight_variable(2));
