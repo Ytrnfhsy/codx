@@ -11,6 +11,18 @@ use toon_shared::Mode;
 
 #[test]
 fn a_squad_from_the_lobby_lands_and_plays() {
+    land_after(0.0);
+}
+
+/// A dedicated server runs for weeks: its clock is far from zero.
+#[test]
+fn a_squad_lands_on_a_server_up_for_weeks() {
+    for days in [1.0, 7.0, 40.0] {
+        land_after(days * 86400.0);
+    }
+}
+
+fn land_after(uptime: f64) {
     let mut cfg = ServerConfig {
         data_dir: std::env::temp_dir()
             .join("tw-squadland")
@@ -22,6 +34,7 @@ fn a_squad_from_the_lobby_lands_and_plays() {
     cfg.br.bots = 6;
     let mut g = Game::new(cfg);
     g.change_map(MapId::Island, Mode::Br);
+    g.time += uptime;
     let v = toon_shared::consts::PROTOCOL_VERSION;
     let mut ids = Vec::new();
     for k in 0..2u16 {
