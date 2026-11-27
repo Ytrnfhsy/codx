@@ -1445,7 +1445,9 @@ impl Game {
                 let c = o.chest();
                 let to = c - eye;
                 let d = to.length();
-                if d > MELEE_RANGE + 0.5
+                // (a body with a broken position is nobody to stab)
+                if !d.is_finite()
+                    || d > MELEE_RANGE + 0.5
                     || to.normalize().dot(fwd) < 0.55
                     || !self.world.line_of_sight(eye, c)
                 {
@@ -1453,7 +1455,7 @@ impl Game {
                 }
                 Some((o.id, d))
             })
-            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            .min_by(|a, b| a.1.total_cmp(&b.1));
         self.outbox.push((Dest::All, S2C::Melee { id }, false));
         if let Some((v, _)) = target {
             self.damage(v, Some(id), MELEE_DAMAGE, Cause::Knife, false, eye);
@@ -1627,8 +1629,7 @@ impl Game {
                         a.body
                             .pos
                             .distance(h.pos)
-                            .partial_cmp(&b.body.pos.distance(h.pos))
-                            .unwrap()
+                            .total_cmp(&b.body.pos.distance(h.pos))
                     })
                     .map(|p| p.id);
             }

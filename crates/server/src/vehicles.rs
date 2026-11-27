@@ -414,12 +414,7 @@ impl Game {
                     self.world.line_of_sight(gun, p.chest())
                         && !smoke_blocks(gun, p.chest(), &clouds)
                 })
-                .min_by(|a, b| {
-                    a.chest()
-                        .distance(gun)
-                        .partial_cmp(&b.chest().distance(gun))
-                        .unwrap()
-                })
+                .min_by(|a, b| a.chest().distance(gun).total_cmp(&b.chest().distance(gun)))
                 .map(|p| p.id);
             self.vehicles[i].target = target;
             // somewhere to go: the nearest enemy we know of, or anywhere on the map
@@ -435,8 +430,7 @@ impl Game {
                         a.body
                             .pos
                             .distance(pos)
-                            .partial_cmp(&b.body.pos.distance(pos))
-                            .unwrap()
+                            .total_cmp(&b.body.pos.distance(pos))
                     })
                     .map(|p| p.body.pos)
                     .filter(|_| !stuck)
