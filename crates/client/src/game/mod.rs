@@ -715,7 +715,12 @@ impl GameClient {
             frame_mesh: ToonMesh::new(),
             fx_mesh: MeshBuilder::new(),
             leave: None,
-            rng: Rng::from_time(),
+            // (screenshots on the fixed clock: the same bullet holes every run)
+            rng: if crate::clock::is_fixed() {
+                Rng::new(1)
+            } else {
+                Rng::from_time()
+            },
             now: crate::clock::now(),
             prev_state: MatchState::Warmup,
             mouse_delta: Vec2::ZERO,

@@ -15,6 +15,11 @@ pub fn fix() {
     FIXED.store(true, Ordering::Relaxed);
 }
 
+/// The fixed clock is on (screenshots): randomness should be fixed too.
+pub fn is_fixed() -> bool {
+    FIXED.load(Ordering::Relaxed)
+}
+
 /// Called once a frame, after it is shown.
 pub fn frame_done() {
     FRAMES.fetch_add(1, Ordering::Relaxed);

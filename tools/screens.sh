@@ -34,6 +34,7 @@ JSON
 shot menu 3
 shot tdm_hud 8 --host --map depot --mode tdm --bots 0 --seed 7 --auto --gun uar15
 shot sniper_scope 9 --host --map depot --mode tdm --bots 0 --seed 7 --auto --gun awm --ads
+shot tdm_fire 9 --host --map depot --mode tdm --bots 0 --seed 7 --auto --gun uar15 --hold-fire --pitch 0.2
 shot esc_menu 8 --host --map depot --mode tdm --bots 0 --seed 7 --auto --open-menu
 shot br_inventory 8 --host --map island --mode br --bots 0 --seed 7 --auto --open-inventory
 [ -n "${XPID:-}" ] && kill "$XPID"
