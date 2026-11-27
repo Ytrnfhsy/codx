@@ -137,7 +137,7 @@ impl Human {
             forward: 1.0,
             yaw,
             sprint: g.tick % 200 < 120,
-            jump: g.tick % 97 == 0,
+            jump: g.tick.is_multiple_of(97),
             want_stance: Stance::Stand,
             ..Default::default()
         };
