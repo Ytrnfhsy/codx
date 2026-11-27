@@ -2199,7 +2199,7 @@ impl Audio {
         if vol <= 0.01 || self.volume.get() <= 0.0 {
             return;
         }
-        let now = get_time();
+        let now = crate::clock::now();
         {
             let mut last = self.last.borrow_mut();
             let l = last.entry(s).or_insert(-1.0);
@@ -2221,7 +2221,7 @@ impl Audio {
         if vol <= 0.01 || self.volume.get() <= 0.0 {
             return;
         }
-        let now = get_time();
+        let now = crate::clock::now();
         {
             let mut last = self.last.borrow_mut();
             let l = last.entry(s).or_insert(-1.0);
@@ -2254,12 +2254,12 @@ impl Audio {
     pub fn play_later(&self, s: Sfx, delay: f32, vol: f32) {
         self.pending
             .borrow_mut()
-            .push((get_time() + delay as f64, s, vol));
+            .push((crate::clock::now() + delay as f64, s, vol));
     }
 
     /// Fires delayed sounds that are due. Call once per frame.
     pub fn tick(&self) {
-        let now = get_time();
+        let now = crate::clock::now();
         let due: Vec<(Sfx, f32)> = {
             let mut p = self.pending.borrow_mut();
             let due = p

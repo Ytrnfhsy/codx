@@ -1054,7 +1054,7 @@ impl Materials {
             ),
         };
         // (time wraps so that it stays precise in the shaders)
-        let time = (get_time() % 3600.0) as f32;
+        let time = (crate::clock::now() % 3600.0) as f32;
         for m in [&self.world, &self.outline, &self.fx, &self.water] {
             m.set_texture("ShadowMap", tex.clone());
             m.set_uniform("SunMatrix", matrix);

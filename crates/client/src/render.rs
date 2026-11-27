@@ -474,7 +474,7 @@ pub fn render_world(
     // sky (follows the camera, no fog)
     // (the clouds drift slowly round; the sun stays where the light comes from)
     let at = Mat4::from_translation(vec3(view.pos.x, 0.0, view.pos.z));
-    let drift = Mat4::from_rotation_y((get_time() * 0.0018) as f32);
+    let drift = Mat4::from_rotation_y((crate::clock::now() * 0.0018) as f32);
     {
         let gl = crate::mesh::quad_gl();
         gl.push_model_matrix(at * drift);
@@ -559,7 +559,7 @@ pub fn render_world(
     g.level.draw(mats, view.pos, &view.matrix, grow, fog_far);
     g.level.draw_grass(mats, &g.world, view.pos, settings.grass);
     if g.ruins.busy() {
-        mats.draw_toon(&g.ruins.build(&g.map, get_time()));
+        mats.draw_toon(&g.ruins.build(&g.map, crate::clock::now()));
     }
     // arrows flying and stuck
     {

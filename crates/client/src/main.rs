@@ -4,6 +4,7 @@
 mod audio;
 mod binds;
 mod character;
+mod clock;
 mod effects;
 mod game;
 mod highlights;
@@ -62,6 +63,14 @@ struct Args {
     open_loadout: bool,
     /// (smoke tests) the Controls page open
     open_controls: bool,
+    /// (screenshots) the battle royale inventory open
+    open_inventory: bool,
+    /// (screenshots) the Esc menu open
+    open_menu: bool,
+    /// (screenshots) every frame lasts exactly 1/30 s, so that runs come out the same
+    fixed_clock: bool,
+    /// (screenshots, tests) the hosted server's dice seed
+    seed: Option<u64>,
     /// (smoke tests) hold the trigger down once alive
     hold_fire: bool,
     /// (smoke tests) hold the trigger for a second, then let go (a bow's shot)
@@ -149,6 +158,13 @@ fn parse_args() -> Args {
             }
             "--open-loadout" => a.open_loadout = true,
             "--open-controls" => a.open_controls = true,
+            "--open-inventory" => a.open_inventory = true,
+            "--open-menu" => a.open_menu = true,
+            "--fixed-clock" => a.fixed_clock = true,
+            "--seed" => {
+                a.seed = next.and_then(|s| s.parse().ok());
+                i += 1;
+            }
             "--hold-fire" => a.hold_fire = true,
             "--tap-fire" => a.tap_fire = true,
             "--ads" => a.ads = true,
@@ -284,6 +300,9 @@ fn window_conf(a: &Args, vsync: bool, fullscreen: bool) -> macroquad::conf::Conf
 
 fn main() {
     let args = parse_args();
+    if args.fixed_clock {
+        clock::fix();
+    }
     let loaded = Settings::load();
     let vsync = loaded.vsync && !args.no_vsync;
     VSYNC_AT_START.store(vsync, std::sync::atomic::Ordering::Relaxed);
@@ -298,7 +317,7 @@ struct Backdrop {
 }
 
 fn draw_backdrop(b: &Backdrop, mats: &mesh::Materials) {
-    let t = get_time() as f32 * 0.05;
+    let t = clock::now() as f32 * 0.05;
     let c = b.map.center();
     let r = b.map.size().max_element() * 0.55;
     let pos = vec3(c.x + t.cos() * r, 16.0, c.y + t.sin() * r);
@@ -372,7 +391,7 @@ async fn amain(args: Args) {
     let mut fps = 60.0f32;
     // a held Backspace keeps deleting (after a short pause, like any text box)
     let mut backspace_next = 0.0f64;
-    let start = get_time();
+    let start = clock::now();
     let mut auto_done = false;
     let mut auto_switch = false;
     let mut alive_at: Option<f64> = None;
@@ -401,6 +420,7 @@ async fn amain(args: Args) {
         cfg.password = hs.password.clone();
         cfg.max_players = hs.max_players;
         cfg.min_players = 1;
+        cfg.seed = args.seed;
         if let Some(n) = args.score_limit {
             cfg.tdm.score_limit = n.max(1);
         }
@@ -484,7 +504,7 @@ async fn amain(args: Args) {
         }
         // the chosen language for everything this frame draws and says
         toon_shared::lang::set(settings.lang);
-        let dt = get_frame_time().min(0.1);
+        let dt = clock::frame_time().min(0.1);
         fps = fps * 0.95 + (1.0 / dt.max(1e-4)) * 0.05;
         // typed text, and Ctrl+V (Cmd+V, Shift+Insert) pastes the clipboard. With Ctrl
         // held, the letters are shortcuts, not text (but AltGr, which is Ctrl+Alt on
@@ -516,7 +536,7 @@ async fn amain(args: Args) {
                 );
             }
         }
-        let now_t = get_time();
+        let now_t = clock::now();
         let backspace = if is_key_pressed(KeyCode::Backspace) {
             backspace_next = now_t + 0.45;
             true
@@ -561,7 +581,7 @@ async fn amain(args: Args) {
                     render::draw_lobby_scene(
                         &mats,
                         &lobby::cast(&menu, &settings),
-                        get_time() as f32,
+                        clock::now() as f32,
                         menu.turn,
                         menu.zoom,
                     );
@@ -684,7 +704,7 @@ async fn amain(args: Args) {
                     enter: false,
                     hot: false,
                 };
-                let dots = ".".repeat(((get_time() * 3.0) as usize) % 4);
+                let dots = ".".repeat(((clock::now() * 3.0) as usize) % 4);
                 ui.centered(
                     &tr!(
                         "Під'єднання до {address}{dots}",
@@ -856,7 +876,7 @@ async fn amain(args: Args) {
                 prev_mouse = pixel;
 
                 // ---- test automation (screenshots / smoke tests)
-                if args.auto && !auto_done && get_time() - start > 1.0 {
+                if args.auto && !auto_done && clock::now() - start > 1.0 {
                     let team = match args.team.as_deref() {
                         Some("axis") => Some(Team::Axis),
                         Some("allies") => Some(Team::Allies),
@@ -888,20 +908,20 @@ async fn amain(args: Args) {
                 }
 
                 // (a sidearm asked for by --gun: take it in hand once alive)
-                if auto_switch && g.alive && get_time() - start > 4.0 {
+                if auto_switch && g.alive && clock::now() - start > 4.0 {
                     g.switch_to(1);
                     auto_switch = false;
                 }
-                let held = get_time() - start;
+                let held = clock::now() - start;
                 if g.alive
                     && !g.is_protected()
                     && g.state == toon_shared::protocol::MatchState::Playing
                     && alive_at.is_none()
                 {
-                    alive_at = Some(get_time());
+                    alive_at = Some(clock::now());
                 }
                 // (a tap: drawn for a second, from a while after spawning)
-                let since_alive = alive_at.map_or(0.0, |a| get_time() - a);
+                let since_alive = alive_at.map_or(0.0, |a| clock::now() - a);
                 g.hold_ads = args.ads && g.alive && held > 5.0;
                 g.hold_fire = g.alive
                     && (args.hold_fire && held > 5.0
@@ -919,7 +939,7 @@ async fn amain(args: Args) {
                     g.yaw = toon_shared::yaw_of(d);
                     g.pitch = d.y.clamp(-1.0, 1.0).asin();
                 }
-                if (g.alive || args.spec_at.is_some()) && get_time() - start > 6.0 {
+                if (g.alive || args.spec_at.is_some()) && clock::now() - start > 6.0 {
                     if let Some(cmd) = exec_once.take() {
                         g.rcon_pass = args.rcon.clone().unwrap_or_default();
                         for c in cmd.split(';').map(str::trim).filter(|c| !c.is_empty()) {
@@ -927,11 +947,22 @@ async fn amain(args: Args) {
                         }
                     }
                 }
-                if args.open_loadout && g.alive && get_time() - start > 5.0 {
+                if args.open_loadout && g.alive && clock::now() - start > 5.0 {
                     g.overlay = Overlay::Class;
                 }
-                if args.open_controls && g.alive && get_time() - start > 5.0 {
+                if args.open_controls && g.alive && clock::now() - start > 5.0 {
                     g.overlay = Overlay::Controls;
+                }
+                if args.open_inventory && clock::now() - start > 4.0 {
+                    // (out of the plane first: the inventory is for the living)
+                    if !g.alive {
+                        g.net.send(C2S::BrJump);
+                    } else if g.br.is_some() {
+                        g.overlay = Overlay::Inventory;
+                    }
+                }
+                if args.open_menu && clock::now() - start > 5.0 {
+                    g.overlay = Overlay::Pause;
                 }
                 g.update(dt, &settings, Some(&audio));
                 // the 3D world goes into its own target: a 32-bit depth buffer whatever the
@@ -1066,7 +1097,7 @@ async fn amain(args: Args) {
                     render::draw_lobby_scene(
                         &mats,
                         &g.lobby_cast(settings.skin),
-                        get_time() as f32,
+                        clock::now() as f32,
                         g.lobby_turn,
                         g.lobby_zoom,
                     );
@@ -1090,10 +1121,10 @@ async fn amain(args: Args) {
                     g.draw_hud(&mut ui, &view, &tags, &mut settings, fps)
                 };
                 if let Some(rect) = g.skin_preview {
-                    render::draw_skin_preview(&mats, settings.skin, rect, get_time() as f32);
+                    render::draw_skin_preview(&mats, settings.skin, rect, clock::now() as f32);
                 }
                 if let Some((rect, team, weapon)) = g.mvp_preview.filter(|_| g.summary_active()) {
-                    render::draw_soldier_preview(&mats, 0, team, weapon, rect, get_time() as f32);
+                    render::draw_soldier_preview(&mats, 0, team, weapon, rect, clock::now() as f32);
                 }
                 if let Some(hud::HudAction::Leave) = action {
                     g.disconnect();
@@ -1114,7 +1145,7 @@ async fn amain(args: Args) {
                 (Screen::Game(g), Some(t)) => g.killcam.as_ref().is_some_and(|k| k.age >= t),
                 _ => false,
             };
-            if in_killcam || get_time() - start > args.shot_after as f64 {
+            if in_killcam || clock::now() - start > args.shot_after as f64 {
                 get_screen_data().export_png(path);
                 println!("screenshot saved: {path}");
                 if let Screen::Game(g) = &mut screen {
@@ -1145,9 +1176,10 @@ async fn amain(args: Args) {
         }
         frame_start = Instant::now();
         next_frame().await;
+        clock::frame_done();
         if args.log_fps {
             fps_window.1 += 1;
-            worst_frame = worst_frame.max(get_frame_time());
+            worst_frame = worst_frame.max(clock::frame_time());
             if fps_window.0.elapsed().as_secs_f32() >= 1.0 {
                 // the worst frame shows hitches an average hides
                 println!(

@@ -706,7 +706,7 @@ impl GameClient {
             fx_mesh: MeshBuilder::new(),
             leave: None,
             rng: Rng::from_time(),
-            now: get_time(),
+            now: crate::clock::now(),
             prev_state: MatchState::Warmup,
             mouse_delta: Vec2::ZERO,
             pick: None,
@@ -809,7 +809,7 @@ impl GameClient {
         self.chat.push(Line {
             text,
             color,
-            time: get_time(),
+            time: crate::clock::now(),
         });
         if self.chat.len() > 60 {
             self.chat.remove(0);
@@ -914,7 +914,7 @@ impl GameClient {
     // ------------------------------------------------------------------ messages
 
     pub fn handle_msg(&mut self, m: S2C, audio: &mut Option<&Audio>) {
-        let now = get_time();
+        let now = crate::clock::now();
         match m {
             S2C::Welcome { .. } => {}
             S2C::Reject(reason) => self.leave = Some(reason),
@@ -1179,7 +1179,7 @@ impl GameClient {
                 }
             }
             S2C::Blast(b) => {
-                let now = get_time();
+                let now = crate::clock::now();
                 let ear = self.camera().0;
                 self.ruins.blast(
                     b,
@@ -2681,7 +2681,7 @@ impl GameClient {
             self.sent_lang = settings.lang;
             self.net.send(C2S::Lang(settings.lang));
         }
-        self.now = get_time();
+        self.now = crate::clock::now();
         let now = self.now;
         // while a replay plays, the live game is silent
         self.hud_hp = if self.me.hp < self.hud_hp {
@@ -3056,7 +3056,7 @@ impl GameClient {
                     t -= h;
                 }
                 if self.body.wall_jumps > kicks {
-                    self.kicked_until = get_time() + 0.15;
+                    self.kicked_until = crate::clock::now() + 0.15;
                 }
             }
             if !self.body.on_ground {
@@ -3575,8 +3575,12 @@ impl GameClient {
                 self.bullet_hit(at, d);
             }
         }
-        self.ruins
-            .update(&self.map, &mut self.level, &mut self.fx, get_time());
+        self.ruins.update(
+            &self.map,
+            &mut self.level,
+            &mut self.fx,
+            crate::clock::now(),
+        );
         // grenade smoke trails
         for e in &self.ents {
             if let EntSnap::Grenade { pos, .. } = e {

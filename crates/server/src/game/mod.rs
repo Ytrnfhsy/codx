@@ -247,6 +247,7 @@ impl Game {
     }
 
     pub fn new(cfg: ServerConfig) -> Game {
+        let seed = cfg.seed;
         let (map_id, mode) = cfg.rotation[0].resolve();
         let map = maps::build(map_id);
         let mut world = World::from_map(&map);
@@ -288,7 +289,7 @@ impl Game {
             round: 0,
             time: 0.0,
             tick: 0,
-            rng: Rng::from_time(),
+            rng: seed.map_or_else(Rng::from_time, Rng::new),
             grenades: Vec::new(),
             vehicles: Vec::new(),
             fires: Vec::new(),
