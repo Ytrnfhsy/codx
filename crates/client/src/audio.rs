@@ -2409,6 +2409,42 @@ impl Audio {
 mod tests {
     use super::*;
 
+    /// Every sound comes out of the synthesizer the same as when the numbers in
+    /// `golden/synth.txt` were taken (a refactor must not change a sample). When a sound
+    /// is meant to change, run `GOLDEN_UPDATE=1 cargo test --release -p toon_client
+    /// synthesis_is_unchanged` and commit the file.
+    #[test]
+    fn synthesis_is_unchanged() {
+        // FNV-1a over the samples' bits: the same on every machine
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut s = Synth { rng: Rng::new(11) };
+        for k in all() {
+            for i in 0..variants(k) {
+                for frame in s.make(k, i) {
+                    for x in frame {
+                        for b in x.to_bits().to_le_bytes() {
+                            h ^= b as u64;
+                            h = h.wrapping_mul(0x0100_0000_01b3);
+                        }
+                    }
+                }
+            }
+        }
+        let got = format!("{h:016x}");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("golden/synth.txt");
+        if std::env::var_os("GOLDEN_UPDATE").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, format!("{got}\n")).unwrap();
+            return;
+        }
+        let want = std::fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(
+            want.trim(),
+            got,
+            "a synthesized sound changed (see the comment above)"
+        );
+    }
+
     #[test]
     fn every_sound_synthesizes_cleanly() {
         let t0 = std::time::Instant::now();
