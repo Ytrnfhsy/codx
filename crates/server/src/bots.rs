@@ -1049,7 +1049,7 @@ impl Game {
     fn bot_goal(
         &mut self,
         id: u8,
-        bot: &mut crate::bots::Bot,
+        bot: &mut Bot,
         team: Team,
         pos: Vec3,
     ) -> (Option<Vec3>, bool, bool) {
@@ -1189,7 +1189,7 @@ impl Game {
     /// The spot an anchor or a sniper holds (a new one every half minute or so): a long
     /// view towards the enemy side, something low in front to duck behind, and for a
     /// sniper, height. Holders spread out over different spots.
-    fn bot_hold(&mut self, bot: &mut crate::bots::Bot, team: Team, _pos: Vec3) -> Option<Vec3> {
+    fn bot_hold(&mut self, bot: &mut Bot, team: Team, _pos: Vec3) -> Option<Vec3> {
         let time = self.time;
         if bot.hold.is_none_or(|h| time > h.until) {
             let home = self.map.spawns[team.index()].first()?.pos;
@@ -1247,7 +1247,7 @@ impl Game {
         bot.hold.map(|h| h.spot)
     }
 
-    fn guard_point(&mut self, bot: &mut crate::bots::Bot, around: Vec3, r: f32) -> Vec3 {
+    fn guard_point(&mut self, bot: &mut Bot, around: Vec3, r: f32) -> Vec3 {
         let time = self.time;
         let ok = bot
             .roam_goal

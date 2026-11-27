@@ -41,7 +41,7 @@ impl GameClient {
         let now = self.now;
 
         // between matches: the results, the best moments (Tab shows the table)
-        let tab = crate::binds::down(crate::binds::Action::Scoreboard) && self.chat_input.is_none();
+        let tab = crate::binds::down(Action::Scoreboard) && self.chat_input.is_none();
         if self.summary_active() && !tab {
             self.draw_summary(ui);
             self.draw_chat(ui);
@@ -251,7 +251,7 @@ impl GameClient {
         if self.alive && self.draw_from.is_some() {
             let d = self.draw_now();
             let (bw, by) = (64.0, cy + 30.0);
-            crate::ui::soft_rect(
+            soft_rect(
                 cx - bw / 2.0 - 2.0,
                 by - 2.0,
                 bw + 4.0,
@@ -312,7 +312,7 @@ impl GameClient {
             let kmh = c.state.speed.abs() * 3.6;
             let x = w / 2.0 - 110.0;
             let y = h - 92.0;
-            crate::ui::soft_rect(x, y, 220.0, 64.0, Color::new(0.0, 0.0, 0.0, 0.5));
+            soft_rect(x, y, 220.0, 64.0, Color::new(0.0, 0.0, 0.0, 0.5));
             ui.bold(
                 &format!("{kmh:.0} {}", t("км/год", "km/h")),
                 x + 12.0,
@@ -322,7 +322,7 @@ impl GameClient {
             );
             ui.text(c.kind.name(), x + 140.0, y + 26.0, 15, MUTED);
             let f = c.hp as f32 / 100.0;
-            crate::ui::soft_rect(
+            soft_rect(
                 x + 12.0,
                 y + 40.0,
                 196.0,
@@ -718,7 +718,7 @@ impl GameClient {
             let (fw, pw) = (ui.width(&fps_s, 20, true), ui.width(&ping_s, 16, true));
             let bw = fw + pw + 20.0;
             let bx = (w - bw) / 2.0;
-            crate::ui::soft_rect(bx, 6.0, bw, 30.0, Color::new(0.0, 0.0, 0.0, 0.55));
+            soft_rect(bx, 6.0, bw, 30.0, Color::new(0.0, 0.0, 0.0, 0.55));
             draw_rectangle_lines(
                 bx,
                 6.0,
@@ -739,7 +739,7 @@ impl GameClient {
         }
 
         // match end / scoreboard
-        let tab = crate::binds::down(crate::binds::Action::Scoreboard) && self.chat_input.is_none();
+        let tab = crate::binds::down(Action::Scoreboard) && self.chat_input.is_none();
         if let Some((text, winner, _)) = self.match_end.clone() {
             let c = match winner {
                 Some(t) if t == self.team => GOOD,
@@ -898,7 +898,7 @@ impl GameClient {
             None => {
                 // off screen: along the top edge, left or right by where it lies
                 let to = vec3(mk.x - eye.x, 0.0, mk.y - eye.z);
-                let side = toon_shared::wrap_angle(toon_shared::yaw_of(to) - yaw);
+                let side = wrap_angle(yaw_of(to) - yaw);
                 let x = w / 2.0 - (side / std::f32::consts::PI) * (w / 2.0 - 30.0);
                 vec2(x.clamp(30.0, w - 30.0), 70.0)
             }
@@ -932,7 +932,7 @@ impl GameClient {
                 Some(p) => p,
                 None => {
                     let to = vec3(at.x - eye.x, 0.0, at.z - eye.z);
-                    let side = toon_shared::wrap_angle(toon_shared::yaw_of(to) - yaw);
+                    let side = wrap_angle(yaw_of(to) - yaw);
                     let x = w / 2.0 - (side / std::f32::consts::PI) * (w / 2.0 - 30.0);
                     // (below the banners at the top)
                     vec2(x.clamp(30.0, w - 30.0), h * 0.36)
@@ -1098,7 +1098,7 @@ impl GameClient {
                 )
                 .into(),
             };
-            crate::ui::soft_rect(0.0, h - 40.0, w, 40.0, Color::new(0.0, 0.0, 0.0, 0.45));
+            soft_rect(0.0, h - 40.0, w, 40.0, Color::new(0.0, 0.0, 0.0, 0.45));
             ui.centered(&line, w / 2.0, h - 14.0, 16, TEXT);
         }
         // the round in numbers (once out, or when it is over)
@@ -1127,7 +1127,7 @@ impl GameClient {
                 }
             });
         let extra = if killer.is_some() { 28.0 } else { 0.0 };
-        crate::ui::soft_rect(x, y0, pw, 100.0 + extra, Color::new(0.0, 0.0, 0.0, 0.55));
+        soft_rect(x, y0, pw, 100.0 + extra, Color::new(0.0, 0.0, 0.0, 0.55));
         if let Some(k) = &killer {
             ui.centered(k, w / 2.0, y0 + 26.0, 17, MUTED);
         }
@@ -1244,7 +1244,7 @@ impl GameClient {
             let ready = lobby.ready.contains(id);
             let size_t = if k == 0 { 20 } else { 16 };
             let tw = ui.width(&name, size_t, true);
-            crate::ui::soft_rect(
+            soft_rect(
                 p.x - tw / 2.0 - 10.0,
                 p.y,
                 tw + 20.0,
@@ -1391,7 +1391,7 @@ impl GameClient {
     fn draw_achievements(&mut self, ui: &mut Ui) {
         use toon_shared::protocol::BoardKind as B;
         let (w, h) = (screen_width(), screen_height());
-        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+        soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
         let pw = (w - 40.0).min(980.0);
         let ph = (h - 40.0).min(600.0);
         let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
@@ -1438,7 +1438,7 @@ impl GameClient {
             }
             let v = mine(*kind);
             let done = v >= *goal;
-            crate::ui::soft_rect(
+            soft_rect(
                 cx,
                 cy,
                 cw,
@@ -1465,7 +1465,7 @@ impl GameClient {
             if done {
                 draw_circle(mx, my, 7.0, Color::new(1.0, 0.95, 0.6, 1.0));
             }
-            let name = toon_shared::lang::t(uk, en);
+            let name = t(uk, en);
             ui.bold(
                 name,
                 cx + 50.0,
@@ -1473,13 +1473,7 @@ impl GameClient {
                 15,
                 if done { ACCENT } else { TEXT },
             );
-            ui.text(
-                toon_shared::lang::t(what_uk, what_en),
-                cx + 50.0,
-                cy + 44.0,
-                12,
-                MUTED,
-            );
+            ui.text(t(what_uk, what_en), cx + 50.0, cy + 44.0, 12, MUTED);
             // progress
             let k = (v / goal).clamp(0.0, 1.0);
             draw_rectangle(
@@ -1507,7 +1501,7 @@ impl GameClient {
     fn draw_squad_lobby(&mut self, ui: &mut Ui) {
         use toon_shared::protocol::C2S;
         let (w, h) = (screen_width(), screen_height());
-        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+        soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
         let Some(lobby) = self.lobby.clone() else {
             self.overlay = Overlay::None;
             return;
@@ -1610,7 +1604,7 @@ impl GameClient {
         );
         cy += 10.0;
         let names: Vec<String> = mine.iter().map(|&id| name(id)).collect();
-        crate::ui::soft_rect(
+        soft_rect(
             x + 24.0,
             cy,
             pw - 48.0,
@@ -1642,7 +1636,7 @@ impl GameClient {
             );
             cy += 10.0;
             for &from in lobby.asking_me.iter().take(4) {
-                crate::ui::soft_rect(
+                soft_rect(
                     x + 24.0,
                     cy,
                     pw - 48.0,
@@ -1698,7 +1692,7 @@ impl GameClient {
             if cy + 40.0 > bottom {
                 break;
             }
-            crate::ui::soft_rect(
+            soft_rect(
                 x + 24.0,
                 cy,
                 pw - 48.0,
@@ -1762,7 +1756,7 @@ impl GameClient {
         let mut y = screen_height() * 0.5 - 20.0;
         for m in &br.squad {
             let c = self.mate_color(m.id);
-            crate::ui::soft_rect(x, y, 190.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.45));
+            soft_rect(x, y, 190.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.45));
             draw_rectangle(x, y, 5.0, 30.0, c);
             let name: String = m.name.chars().take(16).collect();
             ui.text(
@@ -1779,7 +1773,7 @@ impl GameClient {
             } else {
                 (m.hp / MAX_HEALTH, GOOD)
             };
-            crate::ui::soft_rect(
+            soft_rect(
                 x + 12.0,
                 y + 20.0,
                 168.0,
@@ -1853,7 +1847,7 @@ impl GameClient {
             );
             let bw = 260.0;
             let (bx, by) = ((w - bw) / 2.0, h * 0.62 + 40.0);
-            crate::ui::soft_rect(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
+            soft_rect(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
             draw_rectangle(bx, by, bw * (self.me.hp / 100.0).clamp(0.0, 1.0), 8.0, BAD);
             if self.me.progress > 0.0 {
                 draw_rectangle(
@@ -1889,7 +1883,7 @@ impl GameClient {
                 if self.me.progress > 0.0 {
                     let bw = 220.0;
                     let (bx, by) = ((w - bw) / 2.0, h * 0.62 + 12.0);
-                    crate::ui::soft_rect(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
+                    soft_rect(bx, by, bw, 8.0, Color::new(0.0, 0.0, 0.0, 0.6));
                     draw_rectangle(bx, by, bw * self.me.progress.clamp(0.0, 1.0), 8.0, GOOD);
                 }
             }
@@ -1978,7 +1972,7 @@ impl GameClient {
         let (w, h) = (screen_width(), screen_height());
         if self.me.progress > 0.0 {
             let bw = 300.0;
-            crate::ui::soft_rect(
+            soft_rect(
                 w / 2.0 - bw / 2.0 - 3.0,
                 h * 0.7 - 3.0,
                 bw + 6.0,
@@ -2048,7 +2042,7 @@ impl GameClient {
         // pixels per metre: big maps show a wider area
         let scale = size / if self.level.terrain { 200.0 } else { 55.0 };
         let c = vec2(x0 + size / 2.0, y0 + size / 2.0);
-        crate::ui::soft_rect(
+        soft_rect(
             x0 - 4.0,
             y0 - 4.0,
             size + 8.0,
@@ -2077,7 +2071,7 @@ impl GameClient {
             let sy = rx * yaw.sin() + rz * yaw.cos();
             c + vec2(sx, sy) * scale
         };
-        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let gl = crate::mesh::quad_gl();
         let dpi = screen_dpi_scale();
         gl.scissor(Some((
             (x0 * dpi) as i32,
@@ -2337,7 +2331,7 @@ impl GameClient {
         for e in &self.ents {
             if let EntSnap::Smoke { pos, age, .. } = e {
                 let p = to_map(Vec3::from_array(*pos));
-                let r = toon_shared::consts::smoke_radius(*age) * scale;
+                let r = smoke_radius(*age) * scale;
                 draw_circle(p.x, p.y, r, Color::new(0.85, 0.86, 0.88, 0.75));
             }
         }
@@ -2390,7 +2384,7 @@ impl GameClient {
         let (x, y) = (16.0, 16.0 + size + 12.0);
         let w = size;
         let panel_h = if self.alive { 112.0 } else { 60.0 };
-        crate::ui::soft_rect(
+        soft_rect(
             x - 4.0,
             y - 4.0,
             w + 8.0,
@@ -2431,7 +2425,7 @@ impl GameClient {
         // health and armour
         if self.alive {
             let bar = |yy: f32, k: f32, c: Color| {
-                crate::ui::round_rect(
+                round_rect(
                     x + 4.0,
                     yy,
                     w - 8.0,
@@ -2441,13 +2435,13 @@ impl GameClient {
                 );
                 let fill = (w - 8.0) * k.clamp(0.0, 1.0);
                 if fill > 1.0 {
-                    crate::ui::round_rect(x + 4.0, yy, fill, 10.0, 5.0, c);
+                    round_rect(x + 4.0, yy, fill, 10.0, 5.0, c);
                 }
             };
             ui.shadowed(t("Здоров'я", "Health"), x + 4.0, y + 66.0, 12, MUTED);
             // (health just lost lingers in white for a moment, then drains away)
-            let hp = self.me.hp / toon_shared::consts::MAX_HEALTH;
-            let was = self.hud_hp / toon_shared::consts::MAX_HEALTH;
+            let hp = self.me.hp / MAX_HEALTH;
+            let was = self.hud_hp / MAX_HEALTH;
             if was > hp + 0.005 {
                 bar(y + 70.0, was, Color::new(1.0, 1.0, 1.0, 0.75));
             }
@@ -2492,7 +2486,7 @@ impl GameClient {
         let tile = |k: usize, icon: Icon, level: u8, value: &str, fill: f32, c: Color| {
             let x = x0 + k as f32 * (s + 6.0);
             let on = level > 0 || !value.is_empty();
-            crate::ui::soft_rect(
+            soft_rect(
                 x,
                 y0,
                 s,
@@ -2611,7 +2605,7 @@ impl GameClient {
             // the energy drink's boost: a thin yellow bar along the panel
             if inv.boost > 0.0 {
                 let bw = 4.0 * s + 18.0;
-                crate::ui::soft_rect(x0, y0 - 8.0, bw, 4.0, Color::new(0.0, 0.0, 0.0, 0.5));
+                soft_rect(x0, y0 - 8.0, bw, 4.0, Color::new(0.0, 0.0, 0.0, 0.5));
                 draw_rectangle(
                     x0,
                     y0 - 8.0,
@@ -2631,7 +2625,7 @@ impl GameClient {
             };
             let k = 1.0 - inv.healing / total;
             let bw = 220.0;
-            crate::ui::soft_rect(
+            soft_rect(
                 (w - bw) / 2.0,
                 hh * 0.66,
                 bw,
@@ -2671,7 +2665,7 @@ impl GameClient {
         }
         let inv = br.inv;
         let (w, h) = (screen_width(), screen_height());
-        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         let pw = 820.0f32.min(w - 20.0);
         let ph = 560.0f32.min(h - 20.0);
         let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
@@ -2703,7 +2697,7 @@ impl GameClient {
         for k in 0..2usize {
             let (wid, mag, res) = self.weapons[k];
             let empty = br.empty & (1 << k) != 0;
-            crate::ui::soft_rect(lx, ly, cw, 84.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            soft_rect(lx, ly, cw, 84.0, Color::new(0.0, 0.0, 0.0, 0.3));
             if empty {
                 ui.text(
                     t("— порожньо —", "— empty —"),
@@ -2807,7 +2801,7 @@ impl GameClient {
                 continue;
             }
             any = true;
-            crate::ui::soft_rect(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            soft_rect(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
             let label = if n > 1 {
                 format!("{} ×{n}", sight_name(level))
             } else {
@@ -2839,7 +2833,7 @@ impl GameClient {
                 continue;
             }
             any = true;
-            crate::ui::soft_rect(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            soft_rect(lx, ly, cw, 36.0, Color::new(0.0, 0.0, 0.0, 0.3));
             let name = toon_shared::inventory::mod_name(kind);
             let label = if n > 1 {
                 format!("{name} ×{n}")
@@ -2876,7 +2870,7 @@ impl GameClient {
         ui.bold(t("Спорядження", "Gear"), rx, ry, 18, TEXT);
         ry += 12.0;
         let row = |ui: &mut Ui, label: &str, on: bool, ry: f32| {
-            crate::ui::soft_rect(rx, ry, cw, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            soft_rect(rx, ry, cw, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
             ui.text(
                 label,
                 rx + 12.0,
@@ -3018,7 +3012,7 @@ impl GameClient {
             return;
         };
         let (w, h) = (screen_width(), screen_height());
-        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+        soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
         let rows = v.items.len() + v.guns.len();
         // with guns in the box: which hand a gun taken replaces (the one in hand, unless
         // the other is empty), switched here or with the usual keys
@@ -3270,7 +3264,7 @@ impl GameClient {
         };
         let (w, h) = (screen_width(), screen_height());
         let (x0, y0, side) = big_map_rect();
-        crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         draw_texture_ex(
             &img.tex,
             x0,
@@ -3283,7 +3277,7 @@ impl GameClient {
         );
         let k = side / img.size;
         // circles and the plane's course stay inside the map
-        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let gl = crate::mesh::quad_gl();
         let dpi = screen_dpi_scale();
         gl.scissor(Some((
             (x0 * dpi) as i32,
@@ -3369,7 +3363,7 @@ impl GameClient {
                 );
             }
         }
-        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let gl = crate::mesh::quad_gl();
         gl.scissor(None);
         draw_rectangle_lines(x0, y0, side, side, 3.0, BLACK);
         ui.centered(
@@ -3414,7 +3408,7 @@ impl GameClient {
             Mode::Sab => self.gs.rounds_to_win as i32,
         };
         let bw = size;
-        crate::ui::soft_rect(
+        soft_rect(
             x - 4.0,
             y - 4.0,
             bw + 8.0,
@@ -3473,7 +3467,7 @@ impl GameClient {
             let dw = dist.as_ref().map_or(0.0, |d| ui.width(d, 13, false) + gap);
             let total = kw + vw + icon_w + dw + gap * if suicide { 1.0 } else { 2.0 };
             let mut x = w - 20.0 - total;
-            crate::ui::soft_rect(
+            soft_rect(
                 x - 6.0,
                 y - 17.0,
                 total + 12.0,
@@ -3621,7 +3615,7 @@ impl GameClient {
                 (10.0 - (self.now - l.time) as f32).clamp(0.0, 1.0)
             };
             let w = ui.width(&l.text, 16, true);
-            crate::ui::soft_rect(
+            soft_rect(
                 10.0,
                 y - 16.0,
                 w + 12.0,
@@ -3640,7 +3634,7 @@ impl GameClient {
             } else {
                 t("Всім: ", "All: ")
             };
-            crate::ui::soft_rect(10.0, h - 176.0, 560.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.6));
+            soft_rect(10.0, h - 176.0, 560.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.6));
             let cursor = if (self.now * 2.0).fract() < 0.5 {
                 "_"
             } else {
@@ -3663,7 +3657,7 @@ impl GameClient {
         let (w, h) = (screen_width(), screen_height());
         let (s, x, y) = (84.0, w - 310.0 - 84.0 - 12.0, h - 130.0);
         let pulse = 0.5 + 0.5 * (self.now * 4.0).sin() as f32;
-        crate::ui::soft_rect(x, y, s, s + 22.0, Color::new(0.0, 0.0, 0.0, 0.45));
+        soft_rect(x, y, s, s + 22.0, Color::new(0.0, 0.0, 0.0, 0.45));
         draw_rectangle_lines(
             x,
             y,
@@ -3713,7 +3707,7 @@ impl GameClient {
         let def = wid.def();
         let x = w - 300.0;
         let y = h - 120.0;
-        crate::ui::soft_rect(
+        soft_rect(
             x - 10.0,
             y - 10.0,
             300.0,
@@ -3813,7 +3807,7 @@ impl GameClient {
         if let Some(r) = self.me.rewards.last() {
             let t = format!("[{}] {}", key(Action::Killstreak), r.name());
             let tw = ui.width(&t, 18, true);
-            crate::ui::soft_rect(
+            soft_rect(
                 w - tw - 30.0,
                 y - 48.0,
                 tw + 16.0,
@@ -4056,7 +4050,7 @@ impl GameClient {
             Overlay::None => None,
             // the battle royale has no teams: you play (alone or in a squad) or you watch
             Overlay::Team if self.mode == Mode::Br => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 520.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.2);
                 ui.panel(x, y, pw, 300.0);
@@ -4118,7 +4112,7 @@ impl GameClient {
                 None
             }
             Overlay::Team => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 520.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.2);
                 ui.panel(x, y, pw, 360.0);
@@ -4194,7 +4188,7 @@ impl GameClient {
             }
             Overlay::Class => self.draw_loadout(ui, settings),
             Overlay::Pause => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 420.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.22);
                 ui.panel(x, y, pw, 384.0);
@@ -4330,7 +4324,7 @@ impl GameClient {
                 None
             }
             Overlay::Leaders => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
                 let pw = (w - 40.0).min(1040.0);
                 let ph = (h - 40.0).min(640.0);
                 let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
@@ -4369,7 +4363,7 @@ impl GameClient {
                         for (i, b) in boards.iter().enumerate() {
                             let bx = x + 24.0 + (i % cols) as f32 * (cw + 16.0);
                             let by = y + 86.0 + (i / cols) as f32 * (ch + 14.0);
-                            crate::ui::soft_rect(bx, by, cw, ch, Color::new(0.0, 0.0, 0.0, 0.3));
+                            soft_rect(bx, by, cw, ch, Color::new(0.0, 0.0, 0.0, 0.3));
                             ui.bold(b.kind.name(), bx + 12.0, by + 22.0, 16, ACCENT);
                             if b.rows.is_empty() {
                                 ui.text(
@@ -4409,7 +4403,7 @@ impl GameClient {
                 None
             }
             Overlay::RobotMode => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 460.0;
                 let (x, y) = ((w - pw) / 2.0, h * 0.28);
                 ui.panel(x, y, pw, 250.0);
@@ -4459,7 +4453,7 @@ impl GameClient {
                 None
             }
             Overlay::Settings => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 560.0f32.min(w - 20.0);
                 let ph = crate::menu::SETTINGS_H + 110.0;
                 let (x, y) = ((w - pw) / 2.0, ((h - ph) / 2.0).max(0.0));
@@ -4486,7 +4480,7 @@ impl GameClient {
                 None
             }
             Overlay::Video => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 600.0f32.min(w - 20.0);
                 let (x, y) = ((w - pw) / 2.0, (h - crate::menu::VIDEO_H).max(0.0) / 2.0);
                 if crate::menu::video_page(ui, settings, x, y, pw) {
@@ -4503,7 +4497,7 @@ impl GameClient {
                 None
             }
             Overlay::Skin => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
                 let pw = 440.0f32.min(w - 20.0);
                 let ph = 520.0f32.min(h - 20.0);
                 let (x, y) = ((w - pw) / 2.0, (h - ph) / 2.0);
@@ -4560,7 +4554,7 @@ impl GameClient {
                 None
             }
             Overlay::Controls => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
                 let pw = 900.0f32.min(w - 20.0);
                 let (x, y) = (
                     (w - pw) / 2.0,
@@ -4572,7 +4566,7 @@ impl GameClient {
                 None
             }
             Overlay::Airstrike => {
-                crate::ui::soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+                soft_rect(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
                 let size = (h - 160.0).min(w - 80.0);
                 let (x0, y0) = ((w - size) / 2.0, 90.0);
                 let what = match self.me.rewards.last() {
@@ -4913,7 +4907,7 @@ fn draw_headshot_icon(cx: f32, cy: f32, h: f32, a: f32) {
 fn draw_bomb_icon(x: f32, y: f32, scale: f32, pulse: f32) {
     let (w, h) = (30.0 * scale, 22.0 * scale);
     let (x0, y0) = (x - w / 2.0, y - h / 2.0);
-    crate::ui::soft_rect(
+    soft_rect(
         x0 - 4.0,
         y0 - 4.0,
         w + 8.0,
@@ -5028,7 +5022,7 @@ fn draw_icon(icon: Icon, cx: f32, cy: f32, sz: f32, c: Color) {
     let dark = Color::new(0.05, 0.05, 0.08, 0.9);
     match icon {
         Icon::Medkit => {
-            crate::ui::round_rect(cx - 11.0 * u, cy - 8.0 * u, 22.0 * u, 17.0 * u, 3.0 * u, c);
+            round_rect(cx - 11.0 * u, cy - 8.0 * u, 22.0 * u, 17.0 * u, 3.0 * u, c);
             draw_rectangle_lines(cx - 4.0 * u, cy - 11.0 * u, 8.0 * u, 4.0 * u, 2.0 * u, c);
             draw_rectangle(cx - 1.8 * u, cy - 5.5 * u, 3.6 * u, 12.0 * u, WHITE);
             draw_rectangle(cx - 6.0 * u, cy - 1.3 * u, 12.0 * u, 3.6 * u, WHITE);
@@ -5079,9 +5073,9 @@ fn draw_icon(icon: Icon, cx: f32, cy: f32, sz: f32, c: Color) {
         }
         Icon::Backpack => {
             draw_circle_lines(cx, cy - 9.0 * u, 3.5 * u, 2.0 * u, c);
-            crate::ui::round_rect(cx - 8.0 * u, cy - 7.0 * u, 16.0 * u, 18.0 * u, 4.0 * u, c);
+            round_rect(cx - 8.0 * u, cy - 7.0 * u, 16.0 * u, 18.0 * u, 4.0 * u, c);
             draw_rectangle(cx - 8.0 * u, cy - 1.5 * u, 16.0 * u, 1.5 * u, dark);
-            crate::ui::round_rect(cx - 5.0 * u, cy + 2.0 * u, 10.0 * u, 6.0 * u, 1.5 * u, dark);
+            round_rect(cx - 5.0 * u, cy + 2.0 * u, 10.0 * u, 6.0 * u, 1.5 * u, dark);
         }
         Icon::Scope => {
             // a tube with its two bells, on a mount
@@ -5166,7 +5160,7 @@ fn ping_thing(what: toon_shared::protocol::PingWhat, p: Vec2, r: f32, ring: Colo
             LootKind::Bandages => draw_icon(Icon::Medkit, p.x, p.y, sz * 0.8, WHITE),
             LootKind::Drink => {
                 // a can
-                crate::ui::round_rect(p.x - r * 0.3, p.y - r * 0.5, r * 0.6, r, r * 0.12, ACCENT);
+                round_rect(p.x - r * 0.3, p.y - r * 0.5, r * 0.6, r, r * 0.12, ACCENT);
                 draw_rectangle(p.x - r * 0.3, p.y - r * 0.1, r * 0.6, r * 0.2, BLACK);
             }
             LootKind::Armor(_) => draw_icon(Icon::Vest, p.x, p.y, sz, blue),

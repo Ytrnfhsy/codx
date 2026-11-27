@@ -32,11 +32,26 @@ opt-level = 3
 [patch.crates-io]
 macroquad = { path = "vendor/macroquad" }
 
-# Style lints that do not fit this code: map builders take many plain numbers, and
-# index loops over several parallel arrays read better than zipped iterators.
+# `deny`, not `forbid`: the client needs one unsafe call into macroquad (`mesh::quad_gl`),
+# allowed there alone.
+[workspace.lints.rust]
+unsafe_code = "deny"
+# Full paths where an import already names the thing are noise.
+unused_qualifications = "warn"
+
 [workspace.lints.clippy]
+# Map builders and drawing helpers take many plain numbers (positions, sizes, colours);
+# bundling them into structs only to please the lint would hide what each call draws.
 too_many_arguments = "allow"
+# Loops over several parallel arrays (boxes and their materials, the doors and whether
+# they are open) read better by index than zipped.
 needless_range_loop = "allow"
+# Callback and tuple types in a few signatures (`Vec<(u8, Vec3, bool, bool)>`) are local
+# and read fine where they stand; a type alias for each would be used once.
 type_complexity = "allow"
+# Protocol enums carry one big variant (a snapshot, a map) next to small ones by design;
+# boxing them would add an allocation per message on the hot path.
 large_enum_variant = "allow"
+# Configs and tunings are built as `default()` and then a few fields set; struct-update
+# syntax there hides which fields a test or a map changes.
 field_reassign_with_default = "allow"

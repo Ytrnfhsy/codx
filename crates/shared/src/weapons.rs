@@ -371,8 +371,8 @@ impl Lethal {
     pub const ALL: [Lethal; 2] = [Lethal::Frag, Lethal::Molotov];
     pub fn name(self) -> &'static str {
         match self {
-            Lethal::Frag => crate::lang::t("Осколкова", "Frag"),
-            Lethal::Molotov => crate::lang::t("Молотов", "Molotov"),
+            Lethal::Frag => t("Осколкова", "Frag"),
+            Lethal::Molotov => t("Молотов", "Molotov"),
         }
     }
     pub fn count(self) -> u8 {
@@ -383,8 +383,8 @@ impl Lethal {
     }
     pub fn about(self) -> &'static str {
         match self {
-            Lethal::Frag => crate::lang::t("вибух, можна притримати", "a blast, can be cooked"),
-            Lethal::Molotov => crate::lang::t("вогонь на місці падіння", "fire where it lands"),
+            Lethal::Frag => t("вибух, можна притримати", "a blast, can be cooked"),
+            Lethal::Molotov => t("вогонь на місці падіння", "fire where it lands"),
         }
     }
 }
@@ -393,8 +393,8 @@ impl Tactical {
     pub const ALL: [Tactical; 2] = [Tactical::Smoke, Tactical::Flash];
     pub fn name(self) -> &'static str {
         match self {
-            Tactical::Smoke => crate::lang::t("Димова", "Smoke"),
-            Tactical::Flash => crate::lang::t("Світлошумова", "Flashbang"),
+            Tactical::Smoke => t("Димова", "Smoke"),
+            Tactical::Flash => t("Світлошумова", "Flashbang"),
         }
     }
     pub fn count(self) -> u8 {
@@ -405,10 +405,8 @@ impl Tactical {
     }
     pub fn about(self) -> &'static str {
         match self {
-            Tactical::Smoke => crate::lang::t("хмара на 18 с", "a cloud for 18 s"),
-            Tactical::Flash => {
-                crate::lang::t("засліплює тих, хто дивиться", "blinds who looks at it")
-            }
+            Tactical::Smoke => t("хмара на 18 с", "a cloud for 18 s"),
+            Tactical::Flash => t("засліплює тих, хто дивиться", "blinds who looks at it"),
         }
     }
 }

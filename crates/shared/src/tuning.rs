@@ -264,9 +264,9 @@ impl WeaponStats {
         };
         // the heavy ones are heavier still
         let weight = match d.id {
-            crate::weapons::WeaponId::Barrett => 11.0,
-            crate::weapons::WeaponId::Alligator => 14.0,
-            crate::weapons::WeaponId::Crossbow => 3.0,
+            WeaponId::Barrett => 11.0,
+            WeaponId::Alligator => 14.0,
+            WeaponId::Crossbow => 3.0,
             _ => weight,
         };
         WeaponStats {

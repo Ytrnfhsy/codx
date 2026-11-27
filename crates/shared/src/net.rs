@@ -5,6 +5,8 @@
 //! * a batch of reliable messages that are resent until acknowledged (a big one in pieces
 //!   of its own, each with its own id, put back together in order);
 //! * a batch of unreliable messages (snapshots, inputs).
+// Datagrams come from anyone: nothing here may panic on what they hold.
+#![warn(clippy::unwrap_used)]
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -245,8 +247,11 @@ impl Channel {
                     if *cur == id && parts.len() == n {
                         parts[k] = Some(bytes);
                         if parts.iter().all(|p| p.is_some()) {
-                            let whole: Vec<u8> =
-                                parts.iter_mut().flat_map(|p| p.take().unwrap()).collect();
+                            let whole: Vec<u8> = parts
+                                .iter_mut()
+                                .filter_map(Option::take)
+                                .flatten()
+                                .collect();
                             self.frag_in = None;
                             // (keep the number: late pieces of it are not a new message)
                             self.frag_done = Some(id);

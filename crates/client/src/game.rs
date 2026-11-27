@@ -204,7 +204,7 @@ pub struct GameClient {
     /// Guns, supplies and boxes on the ground near us, as the server last told us.
     pub lying: HashMap<u16, EntSnap>,
     /// The server's leaderboards, as last asked for.
-    pub leaderboards: Option<Vec<toon_shared::protocol::Board>>,
+    pub leaderboards: Option<Vec<Board>>,
     /// How far each door has swung open (0 shut .. 1 open), for drawing.
     pub door_swing: Vec<f32>,
     /// The battle royale round's weather (clear elsewhere).
@@ -327,7 +327,7 @@ pub struct GameClient {
     /// Q is held with a smoke grenade ready: it is thrown when Q comes up.
     pub smoke_held: bool,
     /// The Controls page (opened from the pause menu's settings).
-    pub binds_editor: crate::binds::Editor,
+    pub binds_editor: binds::Editor,
     pub using: bool,
     last_throw: f64,
     trigger_was_down: bool,
@@ -382,7 +382,7 @@ pub struct GameClient {
     pub mouse_delta: Vec2,
     /// The loadout being put together on the loadout screen, and the column picked by its
     /// number key (the next number picks a gun in it).
-    pub pick: Option<toon_shared::weapons::Loadout>,
+    pub pick: Option<Loadout>,
     pub pick_col: Option<usize>,
     pub streak_hint: Option<Killstreak>,
     pub bomb_beep: f64,
@@ -394,7 +394,7 @@ pub struct GameClient {
     /// The match's best moments so far.
     pub highlights: crate::highlights::Highlights,
     /// The results of the match just over (the screen between matches), and when.
-    pub summary: Option<(toon_shared::protocol::MatchSummary, f64)>,
+    pub summary: Option<(MatchSummary, f64)>,
     /// Where the results screen shows its best player (side, gun).
     pub mvp_preview: Option<(Rect, Team, WeaponId)>,
     /// The results screen's replay window, as drawn this frame.
@@ -650,7 +650,7 @@ impl GameClient {
             sprinting: false,
             grenades: 0,
             smokes: 0,
-            kit: toon_shared::weapons::DEFAULT_CLASSES[0].1,
+            kit: DEFAULT_CLASSES[0].1,
             cooking: None,
             melee_until: 0.0,
             melee_ready: 0.0,
@@ -1005,7 +1005,7 @@ impl GameClient {
                 if t.is_playing() && self.mode == Mode::Br && !self.has_class {
                     // no classes in the battle royale (you find your weapons): pick who you
                     // are instead
-                    self.choose_class(toon_shared::weapons::DEFAULT_CLASSES[0].1);
+                    self.choose_class(DEFAULT_CLASSES[0].1);
                     // (the lobby has the character chooser)
                     self.overlay = Overlay::None;
                 } else if t.is_playing() {
@@ -3041,12 +3041,11 @@ impl GameClient {
                     self.next_drive = now + 1.0 / 30.0;
                     let throttle = (key(Action::Forward) as i8 - key(Action::Back) as i8) * 100;
                     let steer = (key(Action::Left) as i8 - key(Action::Right) as i8) * 100;
-                    self.net
-                        .send(C2S::Car(toon_shared::protocol::CarCmd::Drive {
-                            throttle,
-                            steer,
-                            brake: key(Action::Jump),
-                        }));
+                    self.net.send(C2S::Car(CarCmd::Drive {
+                        throttle,
+                        steer,
+                        brake: key(Action::Jump),
+                    }));
                 }
             } else {
                 let mut t = dt.min(0.1);
@@ -3398,19 +3397,16 @@ impl GameClient {
             let seated = self.me.seat.is_some();
             self.pickup_target = if seated { None } else { self.find_pickup() };
             if seated && pressed(Action::Use) && now >= self.next_pickup {
-                self.net.send(C2S::Car(toon_shared::protocol::CarCmd::Exit));
+                self.net.send(C2S::Car(CarCmd::Exit));
                 self.next_pickup = now + 0.6;
             }
             if let Some((ent, pick)) = self.pickup_target {
                 if pressed(Action::Use) && now >= self.next_pickup && !self.near_objective() {
                     match pick {
-                        Pick::Car(_) => self
-                            .net
-                            .send(C2S::Car(toon_shared::protocol::CarCmd::Enter(ent))),
+                        Pick::Car(_) => self.net.send(C2S::Car(CarCmd::Enter(ent))),
                         Pick::Door(_) => self.net.send(C2S::Door(ent)),
                         Pick::DeathBox => {
-                            self.net
-                                .send(C2S::Box(toon_shared::protocol::BoxCmd::Open(ent)));
+                            self.net.send(C2S::Box(BoxCmd::Open(ent)));
                             self.overlay = Overlay::DeathBox;
                             self.inventory_opened = now;
                         }
@@ -3925,7 +3921,7 @@ impl GameClient {
     }
 
     /// A team's colour as we see it (see [`Self::seen_team`]).
-    pub fn tcol(&self, team: Team) -> macroquad::color::Color {
+    pub fn tcol(&self, team: Team) -> Color {
         crate::models::team_color(self.seen_team(team))
     }
 

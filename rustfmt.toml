@@ -1,0 +1,12 @@
+# The code is formatted with rustfmt's stable defaults; they are written out here so that
+# an editor or a newer rustfmt does not drift from them. No nightly-only options.
+edition = "2021"
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+use_small_heuristics = "Default"
+reorder_imports = true
+reorder_modules = true
+use_field_init_shorthand = false
+use_try_shorthand = false

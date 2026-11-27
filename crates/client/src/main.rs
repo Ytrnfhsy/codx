@@ -75,9 +75,9 @@ struct Args {
     /// (smoke tests) an admin command sent once alive (needs --rcon)
     exec: Option<String>,
     /// (smoke tests) keep looking at this point
-    look_at: Option<glam::Vec3>,
+    look_at: Option<Vec3>,
     /// (smoke tests) a spectator's camera here
-    spec_at: Option<glam::Vec3>,
+    spec_at: Option<Vec3>,
     team: Option<String>,
     map: Option<String>,
     mode: Option<String>,
@@ -164,14 +164,14 @@ fn parse_args() -> Args {
             "--spec-at" => {
                 a.spec_at = next.and_then(|s| {
                     let v: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-                    (v.len() == 3).then(|| glam::vec3(v[0], v[1], v[2]))
+                    (v.len() == 3).then(|| vec3(v[0], v[1], v[2]))
                 });
                 i += 1;
             }
             "--look-at" => {
                 a.look_at = next.and_then(|s| {
                     let v: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-                    (v.len() == 3).then(|| glam::vec3(v[0], v[1], v[2]))
+                    (v.len() == 3).then(|| vec3(v[0], v[1], v[2]))
                 });
                 i += 1;
             }
@@ -255,14 +255,14 @@ enum Screen {
 pub static VSYNC_AT_START: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 fn window_conf(a: &Args, vsync: bool, fullscreen: bool) -> macroquad::conf::Conf {
-    let mut platform = macroquad::miniquad::conf::Platform::default();
+    let mut platform = miniquad::conf::Platform::default();
     platform.swap_interval = Some(if vsync { 1 } else { 0 });
     macroquad::conf::Conf {
-        miniquad_conf: macroquad::miniquad::conf::Conf {
+        miniquad_conf: Conf {
             platform,
             window_title: "Toon Warfare".to_owned(),
             // the game's icon (assets/icon/icon.svg) in the title bar and the task bar
-            icon: Some(macroquad::miniquad::conf::Icon {
+            icon: Some(miniquad::conf::Icon {
                 small: *include_bytes!("../../../assets/icon/icon-16.rgba"),
                 medium: *include_bytes!("../../../assets/icon/icon-32.rgba"),
                 big: *include_bytes!("../../../assets/icon/icon-64.rgba"),
@@ -315,7 +315,7 @@ fn draw_backdrop(b: &Backdrop, mats: &mesh::Materials) {
     clear_background(fog);
     set_camera(&cam);
     {
-        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let gl = mesh::quad_gl();
         gl.push_model_matrix(Mat4::from_translation(vec3(pos.x, 0.0, pos.z)));
     }
     mats.set_view(Vec3::ZERO, fog, 10_000.0, 20_000.0);
@@ -323,7 +323,7 @@ fn draw_backdrop(b: &Backdrop, mats: &mesh::Materials) {
     b.sky.draw();
     gl_use_default_material();
     {
-        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let gl = mesh::quad_gl();
         gl.pop_model_matrix();
     }
     mats.set_view(pos, fog, 70.0, 260.0);
@@ -379,8 +379,8 @@ async fn amain(args: Args) {
     let mut exec_once = args.exec.clone();
     let mut low_res: Option<(RenderTarget, i32)> = None;
     let mut reel_rt: Option<RenderTarget> = None;
-    let mut frame_start = std::time::Instant::now();
-    let mut fps_window = (std::time::Instant::now(), 0u32);
+    let mut frame_start = Instant::now();
+    let mut fps_window = (Instant::now(), 0u32);
     let mut worst_frame = 0.0f32;
     let mut prev_mouse = Vec2::ZERO;
     prevent_quit();
@@ -413,7 +413,7 @@ async fn amain(args: Args) {
         let (map, mode) = (map.short().to_string(), mode.short().to_string());
         // --bots: for the mode we start with
         if let Some(n) = args.bots {
-            if toon_shared::Mode::parse(&mode) == Some(toon_shared::Mode::Br) {
+            if Mode::parse(&mode) == Some(Mode::Br) {
                 cfg.br.bots = n;
                 cfg.br.max_players = cfg.br.max_players.max(n);
             } else {
@@ -421,7 +421,7 @@ async fn amain(args: Args) {
                 cfg.max_players = cfg.max_players.max(n);
             }
         }
-        if toon_shared::Mode::parse(&mode) == Some(toon_shared::Mode::Br) {
+        if Mode::parse(&mode) == Some(Mode::Br) {
             // a battle royale server plays round after round of it
             cfg.rotation = vec![toon_server::config::RotationEntry { map, mode }];
         } else {
@@ -507,7 +507,7 @@ async fn amain(args: Args) {
         if (ctrl && !alt && is_key_pressed(KeyCode::V))
             || (shift && is_key_pressed(KeyCode::Insert))
         {
-            if let Some(clip) = macroquad::miniquad::window::clipboard_get() {
+            if let Some(clip) = miniquad::window::clipboard_get() {
                 chars.extend(
                     clip.chars()
                         .map(|c| if c.is_whitespace() { ' ' } else { c })
@@ -793,7 +793,7 @@ async fn amain(args: Args) {
                             g.overlay = Overlay::Pause;
                         }
                     } else if binds::pressed(Action::Class) && g.team.is_playing() {
-                        if g.mode == toon_shared::Mode::Br {
+                        if g.mode == Mode::Br {
                             // no classes in the battle royale: the key opens the map
                             g.big_map = !g.big_map;
                         } else {
@@ -1143,7 +1143,7 @@ async fn amain(args: Args) {
                 }
             }
         }
-        frame_start = std::time::Instant::now();
+        frame_start = Instant::now();
         next_frame().await;
         if args.log_fps {
             fps_window.1 += 1;
@@ -1155,7 +1155,7 @@ async fn amain(args: Args) {
                     fps_window.1 as f32 / fps_window.0.elapsed().as_secs_f32(),
                     worst_frame * 1000.0
                 );
-                fps_window = (std::time::Instant::now(), 0);
+                fps_window = (Instant::now(), 0);
                 worst_frame = 0.0;
             }
         }

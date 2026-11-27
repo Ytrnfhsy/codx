@@ -1,0 +1,3 @@
+# Tests state what they expect with `unwrap`; the `unwrap_used` lint (on in the modules
+# that read network data) is about the game's own code.
+allow-unwrap-in-tests = true

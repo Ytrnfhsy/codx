@@ -60,7 +60,7 @@ impl NetClient {
             name: name.to_string(),
             password: password.to_string(),
             version: PROTOCOL_VERSION,
-            game: toon_shared::consts::GAME_VERSION.to_string(),
+            game: GAME_VERSION.to_string(),
             key: PLAYER_KEY.load(std::sync::atomic::Ordering::Relaxed),
         });
         c.flush();

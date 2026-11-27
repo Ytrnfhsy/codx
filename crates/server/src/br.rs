@@ -197,7 +197,7 @@ impl Game {
                 let seed = (time * 1000.0) as u64 ^ self.rng.clone().next_u64().rotate_left(17);
                 toon_shared::weather::Weather::pick(toon_shared::rng::Rng::new(seed).f32())
             });
-        self.br = crate::br::BrState {
+        self.br = BrState {
             running: true,
             weather,
             plane_from: c3 - dir * reach + side,

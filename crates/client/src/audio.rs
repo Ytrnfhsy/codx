@@ -1615,11 +1615,11 @@ impl Synth {
                 let mut ph = 0.0f32;
                 for (i, v) in b.iter_mut().enumerate() {
                     let t = Self::t(i);
-                    let f = 620.0 + 260.0 * (t * std::f32::consts::PI * 1.8).sin().abs();
+                    let f = 620.0 + 260.0 * (t * PI * 1.8).sin().abs();
                     ph += f / SR;
                     let saw = 2.0 * (ph - ph.floor()) - 1.0;
                     let env = (t / 0.05).min(1.0) * (1.0 - (t / len).powf(3.0));
-                    *v = (saw * 0.35 + (ph * std::f32::consts::TAU).sin() * 0.65) * env;
+                    *v = (saw * 0.35 + (ph * TAU).sin() * 0.65) * env;
                 }
                 let horn = Synth::chord(&[(0.0, 165.0), (0.0, 220.0)], 1.6, 1.5);
                 Synth::mix(&mut b, &horn, 0.0, 0.6);

@@ -106,7 +106,7 @@ impl View {
 /// the depth buffer, so the gun never clips into walls and no depth clear is needed.
 struct ViewmodelCamera(Camera3D);
 
-impl macroquad::camera::Camera for ViewmodelCamera {
+impl Camera for ViewmodelCamera {
     fn matrix(&self) -> Mat4 {
         let squash = Mat4::from_cols(
             vec4(1.0, 0.0, 0.0, 0.0),
@@ -119,7 +119,7 @@ impl macroquad::camera::Camera for ViewmodelCamera {
     fn depth_enabled(&self) -> bool {
         true
     }
-    fn render_pass(&self) -> Option<macroquad::texture::RenderPass> {
+    fn render_pass(&self) -> Option<RenderPass> {
         self.0.render_pass()
     }
     fn viewport(&self) -> Option<(i32, i32, i32, i32)> {
@@ -476,21 +476,21 @@ pub fn render_world(
     let at = Mat4::from_translation(vec3(view.pos.x, 0.0, view.pos.z));
     let drift = Mat4::from_rotation_y((get_time() * 0.0018) as f32);
     {
-        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let gl = crate::mesh::quad_gl();
         gl.push_model_matrix(at * drift);
     }
     mats.set_view(vec3(0.0, 0.0, 0.0), fog, 10_000.0, 20_000.0);
     gl_use_material(&mats.world);
     g.sky_mesh.draw();
     {
-        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let gl = crate::mesh::quad_gl();
         gl.pop_model_matrix();
         gl.push_model_matrix(at);
     }
     g.sun_mesh.draw();
     gl_use_default_material();
     {
-        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let gl = crate::mesh::quad_gl();
         gl.pop_model_matrix();
     }
     mats.set_view(view.pos, fog, fog_near, fog_far);
@@ -890,7 +890,7 @@ pub fn render_world(
         let muzzle = soldier::add_soldier(&mut m, &pose);
         // knocked down: the shield they hold up in front
         if kc.is_none() && g.remotes.get(&a.id).is_some_and(|r| r.downed) {
-            let f = toon_shared::look_dir(a.yaw, 0.0);
+            let f = look_dir(a.yaw, 0.0);
             let fwd = vec3(f.x, 0.0, f.z).normalize_or_zero();
             let right = vec3(fwd.z, 0.0, -fwd.x);
             let at = a.pos + fwd * 0.85 + vec3(0.0, 0.38, 0.0);
@@ -918,7 +918,7 @@ pub fn render_world(
         blob_shadow(&mut shadows, vec3(a.pos.x, floor + 0.03, a.pos.z), 0.5);
         if a.protected && a.team == my_team && kc.is_none() {
             // spawn protection: a soft pulsing bubble in team colour
-            let c = crate::models::team_look(g.seen_team(a.team)).helmet;
+            let c = models::team_look(g.seen_team(a.team)).helmet;
             let pulse = 0.5 + 0.5 * ((now * 5.0) as f32).sin();
             let centre = a.pos + vec3(0.0, a.stance.height() * 0.5, 0.0);
             let m = Mat4::from_translation(centre) * Mat4::from_scale(vec3(1.0, 1.25, 1.0));
@@ -1638,7 +1638,7 @@ pub fn draw_soldier_preview(
     let mut m = ToonMesh::new();
     soldier::add_soldier(
         &mut m,
-        &soldier::SoldierPose {
+        &SoldierPose {
             pos: Vec3::ZERO,
             yaw: std::f32::consts::PI + t * 0.7,
             pitch: 0.0,
@@ -1736,7 +1736,7 @@ pub fn draw_lobby_scene(mats: &Materials, cast: &[(u8, u8)], t: f32, turn: f32, 
         let turn = x * 0.12 + (t * 0.4 + k as f32).sin() * 0.06 + if k == 0 { turn } else { 0.0 };
         soldier::add_soldier(
             &mut m,
-            &soldier::SoldierPose {
+            &SoldierPose {
                 pos,
                 yaw: turn,
                 pitch: 0.0,

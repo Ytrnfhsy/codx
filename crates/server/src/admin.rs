@@ -197,7 +197,7 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 if bot {
                     return "Ботів не можна банити — використай kick або bots".into();
                 }
-                g.bans.list.push(crate::admin::Ban {
+                g.bans.list.push(Ban {
                     ip: ip.clone(),
                     name: name.clone(),
                     reason: reason.clone(),
@@ -288,7 +288,7 @@ pub fn exec(g: &mut Game, line: &str) -> String {
                 .max_by_key(|e| e.last_seen)
                 .map(|e| e.name.clone())
                 .unwrap_or_default();
-            g.bans.list.push(crate::admin::Ban {
+            g.bans.list.push(Ban {
                 ip: ip.clone(),
                 name: name.clone(),
                 reason: reason.clone(),
@@ -573,7 +573,7 @@ pub fn exec(g: &mut Game, line: &str) -> String {
             let Some(who) = args.next() else {
                 return "Використання: givebomb <id|ім'я>".into();
             };
-            if g.mode != toon_shared::Mode::Sab {
+            if g.mode != Mode::Sab {
                 return "Бомба є лише в режимі Саботаж".into();
             }
             if g.sab.planted_at.is_some() {

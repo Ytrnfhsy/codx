@@ -87,7 +87,7 @@ pub struct Player {
     pub last_shot: f64,
     /// When this player could last see each other player (by id): enemies they cannot
     /// see are left out of their snapshots (see `Game::update_visibility`).
-    pub seen_at: [f64; toon_shared::consts::MAX_PLAYERS],
+    pub seen_at: [f64; MAX_PLAYERS],
     /// Last time an input had the sprint flag (weapon raise delay).
     pub last_sprint: f64,
     /// Invulnerable until this time (spawn protection).
@@ -198,7 +198,7 @@ impl Player {
     }
 
     /// Battle royale: what is on the gun in hand, for the killcam.
-    pub fn gear(&self) -> toon_shared::protocol::Gear {
+    pub fn gear(&self) -> Gear {
         use toon_shared::inventory::{sight_fits, sight_zoom_range};
         let k = self.slot as usize & 1;
         if self.is_empty(k) {
@@ -214,7 +214,7 @@ impl Player {
         } else {
             0.0
         };
-        toon_shared::protocol::Gear {
+        Gear {
             sight,
             mods: self.inv.mods[k],
             zoom,
@@ -305,7 +305,7 @@ impl Player {
             melee_ready: 0.0,
             last_damage: -100.0,
             last_shot: -100.0,
-            seen_at: [f64::NEG_INFINITY; toon_shared::consts::MAX_PLAYERS],
+            seen_at: [f64::NEG_INFINITY; MAX_PLAYERS],
             last_sprint: -100.0,
             protected_until: 0.0,
             shots_fired: 0,
@@ -507,7 +507,7 @@ pub struct PendingBlast {
     pub radius: f32,
     pub damage: f32,
     pub owner: Option<u8>,
-    pub cause: toon_shared::weapons::Cause,
+    pub cause: Cause,
 }
 
 pub struct Sab {
@@ -615,12 +615,7 @@ impl Game {
     pub fn smoke_clouds(&self) -> Vec<(Vec3, f32)> {
         self.smokes
             .iter()
-            .map(|&(_, c, born)| {
-                (
-                    c,
-                    toon_shared::consts::smoke_radius((self.time - born) as f32),
-                )
-            })
+            .map(|&(_, c, born)| (c, smoke_radius((self.time - born) as f32)))
             .collect()
     }
 
@@ -982,7 +977,7 @@ impl Game {
         // leaving a battle royale round counts as being knocked out: the things stay in
         // a box, the place is recorded, whoever knocked them down gets the kill
         if self.mode == Mode::Br && self.br.running && self.p(id).is_some_and(|p| p.alive) {
-            self.kill(id, None, toon_shared::weapons::Cause::World, false);
+            self.kill(id, None, Cause::World, false);
         }
         let Some(p) = self.players[id as usize].take() else {
             return;
@@ -1588,26 +1583,26 @@ impl Game {
                 _ => {}
             },
             C2S::Box(cmd) => match cmd {
-                toon_shared::protocol::BoxCmd::Open(b) => {
+                BoxCmd::Open(b) => {
                     if let Some(p) = self.pm(id) {
                         p.open_box = Some(b);
                     }
                 }
-                toon_shared::protocol::BoxCmd::Take(b, k) => self.box_take(id, b, k as usize),
-                toon_shared::protocol::BoxCmd::TakeAll(b) => self.box_take_all(id, b),
-                toon_shared::protocol::BoxCmd::Close => {
+                BoxCmd::Take(b, k) => self.box_take(id, b, k as usize),
+                BoxCmd::TakeAll(b) => self.box_take_all(id, b),
+                BoxCmd::Close => {
                     if let Some(p) = self.pm(id) {
                         p.open_box = None;
                     }
                 }
             },
             C2S::Car(cmd) => match cmd {
-                toon_shared::protocol::CarCmd::Enter(c) => {
+                CarCmd::Enter(c) => {
                     self.car_enter(id, c);
                     self.car_hint(id);
                 }
-                toon_shared::protocol::CarCmd::Exit => self.car_exit(id),
-                toon_shared::protocol::CarCmd::Drive {
+                CarCmd::Exit => self.car_exit(id),
+                CarCmd::Drive {
                     throttle,
                     steer,
                     brake,
@@ -1921,8 +1916,7 @@ impl Game {
                 && p.rcon_fails < 5
                 && seq > p.rcon_seq
                 && cmd.len() <= 512
-                && proof
-                    == toon_shared::protocol::rcon_proof(&self.cfg.rcon_password, p.nonce, seq, cmd)
+                && proof == rcon_proof(&self.cfg.rcon_password, p.nonce, seq, cmd)
         };
         if ok {
             if let Some(p) = self.pm(id) {
@@ -2258,7 +2252,7 @@ impl Game {
 
     /// Plays on a map given ready-made (tests use the small fixed yard, which never
     /// changes when the real maps do).
-    pub fn play_on(&mut self, map: toon_shared::map::Map, mode: Mode) {
+    pub fn play_on(&mut self, map: Map, mode: Mode) {
         self.world = World::from_map(&map);
         self.wreck = toon_shared::destruct::Wreck::new(&map);
         self.nav = Nav::build(&map, &self.world);
@@ -2614,7 +2608,7 @@ impl Game {
             }
         }
         for id in fell {
-            self.kill(id, None, toon_shared::weapons::Cause::Fall, false);
+            self.kill(id, None, Cause::Fall, false);
         }
         for id in auto_spawn {
             if self.can_spawn(id) {
@@ -2625,8 +2619,7 @@ impl Game {
         self.update_grenades(dt);
         self.update_fires();
         let now = self.time;
-        self.smokes
-            .retain(|s| ((now - s.2) as f32) < toon_shared::consts::SMOKE_TIME);
+        self.smokes.retain(|s| ((now - s.2) as f32) < SMOKE_TIME);
         self.update_blasts();
         self.update_helis(dt);
         self.update_vehicles(dt);
@@ -2817,7 +2810,7 @@ impl Game {
         }
         // footsteps: someone walking or running near enough is heard (and shown where)
         let speed = vec2(t.body.vel.x, t.body.vel.z).length();
-        if t.body.stance == toon_shared::physics::Stance::Stand && speed > 1.5 {
+        if t.body.stance == Stance::Stand && speed > 1.5 {
             let hear = if speed > 6.0 { 34.0 } else { 22.0 };
             if viewer.body.pos.distance(t.body.pos) < hear {
                 return false;
