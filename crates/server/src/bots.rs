@@ -7,7 +7,8 @@ use toon_shared::physics::{MoveInput, Stance};
 use toon_shared::protocol::{flags, MatchState};
 use toon_shared::ray::smoke_blocks;
 use toon_shared::rng::Rng;
-use toon_shared::weapons::WeaponClass;
+use toon_shared::tuning::WeaponStats;
+use toon_shared::weapons::{WeaponClass, WeaponId};
 use toon_shared::{look_dir, wrap_angle, yaw_basis, yaw_of, Mode, Team};
 
 pub const BOT_NAMES: [&str; 20] = [
@@ -325,6 +326,51 @@ impl Bot {
     }
 }
 
+/// What a bot knows about itself at the start of its tick (read once, used by every
+/// phase of `update_bot`).
+struct BotView {
+    time: f64,
+    team: Team,
+    skydiving: bool,
+    eye: Vec3,
+    pos: Vec3,
+    yaw: f32,
+    pitch: f32,
+    weapon: WeaponId,
+    class: WeaponClass,
+    def: WeaponStats,
+    mag: u16,
+    reserve: u16,
+    reloading: bool,
+    grenades: u8,
+    smokes: u8,
+    team_now: Team,
+    vel: Vec3,
+    hp: f32,
+    protected_me: bool,
+    skill: f32,
+    sk: SkillProfile,
+    walk_speed: f32,
+    ballistic: Ballistics,
+    sight: f32,
+    clouds: Vec<(Vec3, f32)>,
+}
+
+/// The target as a bot sees it: id, chest, eye, position, velocity, on the ground.
+type Seen = (u8, Vec3, Vec3, Vec3, Vec3, bool);
+
+/// What a bot decided this tick, for its movement.
+#[derive(Clone, Copy)]
+struct BotPlan {
+    target: Option<Seen>,
+    goal: Option<Vec3>,
+    urgent: bool,
+    fighting: bool,
+    use_key: bool,
+    ads: bool,
+    dist_to_target: f32,
+}
+
 impl Game {
     pub fn update_bot(&mut self, id: u8, dt: f32) {
         let time = self.time;
@@ -345,13 +391,78 @@ impl Game {
             }
         }
 
+        let v = self.bot_view(id, &bot);
+        let (mut yaw, mut pitch) = (v.yaw, v.pitch);
+        self.bot_perceive(id, &mut bot, &v);
+        let target = self.bot_target(&mut bot, &v);
+        let (aim_err_angle, dist_to_target) =
+            Self::bot_aim(&mut bot, &v, target, dt, &mut yaw, &mut pitch);
+
+        let BotView { team, pos, .. } = v;
+        // ---- goal selection
+        let (goal, mut use_key, urgent) = self.bot_goal(id, &mut bot, team, pos);
+        if target.is_none() {
+            bot.was_ads = false;
+        }
+        let fighting =
+            target.is_some() && !(use_key && self.p(id).map(|p| p.progress > 0.5).unwrap_or(false));
+        if fighting {
+            use_key = false;
+        }
+
+        let (ads, fire_dirs) = self.bot_shoot(
+            id,
+            &mut bot,
+            &v,
+            target,
+            aim_err_angle,
+            dist_to_target,
+            &mut yaw,
+            &mut pitch,
+        );
+        self.bot_sab_smoke(id, &v);
+        let inp = self.bot_move(
+            id,
+            &mut bot,
+            &v,
+            BotPlan {
+                target,
+                goal,
+                urgent,
+                fighting,
+                use_key,
+                ads,
+                dist_to_target,
+            },
+            dt,
+            &mut yaw,
+            &mut pitch,
+        );
+        self.bot_apply(id, bot, &v, &inp, (yaw, pitch), use_key, fire_dirs, dt);
+        self.bot_pick_gun(id, &v, target, dist_to_target);
+        let BotView {
+            mag,
+            reserve,
+            reloading,
+            ref def,
+            ..
+        } = v;
+        let need_reload = mag == 0 || (target.is_none() && (mag as f32) < def.mag as f32 * 0.4);
+        if need_reload && reserve > 0 && !reloading {
+            self.start_reload(id);
+        }
+    }
+
+    /// What the bot knows about itself at the start of its tick.
+    fn bot_view(&self, id: u8, bot: &Bot) -> BotView {
+        let time = self.time;
         let me = self.p(id).unwrap();
         let team = me.team;
         let skydiving = me.body.chute != toon_shared::physics::Chute::None;
         let eye = me.eye();
         let pos = me.body.pos;
-        let mut yaw = me.yaw;
-        let mut pitch = me.pitch;
+        let yaw = me.yaw;
+        let pitch = me.pitch;
         let weapon = me.weapon().id;
         let class = weapon.def().class;
         let def = self.tuning.weapon(weapon).clone();
@@ -384,8 +495,48 @@ impl Game {
         } else {
             sight
         };
-
         let clouds = self.smoke_clouds();
+        BotView {
+            time,
+            team,
+            skydiving,
+            eye,
+            pos,
+            yaw,
+            pitch,
+            weapon,
+            class,
+            def,
+            mag,
+            reserve,
+            reloading,
+            grenades,
+            smokes,
+            team_now,
+            vel,
+            hp,
+            protected_me,
+            skill,
+            sk,
+            walk_speed,
+            ballistic,
+            sight,
+            clouds,
+        }
+    }
+
+    /// Perception: enemies are noticed gradually, only inside the field of view.
+    fn bot_perceive(&mut self, id: u8, bot: &mut Bot, v: &BotView) {
+        let BotView {
+            time,
+            team,
+            eye,
+            yaw,
+            sk,
+            sight,
+            ref clouds,
+            ..
+        } = *v;
         // ---- perception: enemies are noticed gradually, only inside the field of view
         if time - bot.last_percept >= 0.1 {
             let pdt = (time - bot.last_percept).min(0.5) as f32;
@@ -393,18 +544,13 @@ impl Game {
             let fwd = look_dir(yaw, 0.0);
             let mut best: Option<(u8, f32)> = None;
             let mut heard: Option<(Vec3, f32)> = None;
-            let my_squad = self.p(id).map_or(0, |p| p.squad);
+            let me = self.p(id);
             let blind = bot.blind_until;
             if time < blind {
                 bot.target = None;
             }
-            let solo = self.mode.solo();
             for o in self.players.iter().flatten() {
-                let friend = if solo {
-                    my_squad != 0 && o.squad == my_squad
-                } else {
-                    o.team == team
-                };
+                let friend = me.is_some_and(|me| self.allied(me, o));
                 if !o.alive || o.id == id || friend || !o.team.is_playing() {
                     continue;
                 }
@@ -421,8 +567,8 @@ impl Game {
                 let in_view = d < sight && (facing > sk.fov_cos || d < 2.5) && time >= blind;
                 let los = in_view
                     && ((self.world.line_of_sight(eye, o.eye())
-                        && !smoke_blocks(eye, o.eye(), &clouds))
-                        || (self.world.line_of_sight(eye, c) && !smoke_blocks(eye, c, &clouds)));
+                        && !smoke_blocks(eye, o.eye(), clouds))
+                        || (self.world.line_of_sight(eye, c) && !smoke_blocks(eye, c, clouds)));
                 // sounds outside the view make the bot turn around
                 let moving = vec2(o.body.vel.x, o.body.vel.z).length() > 2.0
                     && o.body.stance == Stance::Stand;
@@ -495,6 +641,11 @@ impl Game {
                 None => bot.target = None,
             }
         }
+    }
+
+    /// The target as the bot sees it (where it was a moment ago).
+    fn bot_target(&self, bot: &mut Bot, v: &BotView) -> Option<Seen> {
+        let BotView { time, sk, .. } = *v;
         // (a person sees where the target was a moment ago, not where it is now)
         let lag_t = time - sk.track_lag as f64;
         let target = bot
@@ -524,7 +675,27 @@ impl Game {
         if let Some((_, _, _, tp, _, _)) = target {
             bot.last_seen = Some((tp, time));
         }
+        target
+    }
 
+    /// Aiming; returns how far the aim is off the point it wants (rad) and the distance.
+    fn bot_aim(
+        bot: &mut Bot,
+        v: &BotView,
+        target: Option<Seen>,
+        dt: f32,
+        yaw_io: &mut f32,
+        pitch_io: &mut f32,
+    ) -> (f32, f32) {
+        let BotView {
+            time,
+            eye,
+            skill,
+            sk,
+            ballistic,
+            ..
+        } = *v;
+        let (mut yaw, mut pitch) = (*yaw_io, *pitch_io);
         // ---- aiming: the initial error settles into a permanent wobble; moving targets are tracked late
         bot.wobble_phase += dt;
         let w = bot.wobble_phase;
@@ -601,18 +772,39 @@ impl Game {
                 yaw = wrap_angle(yaw + dy.clamp(-turn, turn));
             }
         }
+        (*yaw_io, *pitch_io) = (yaw, pitch);
+        (aim_err_angle, dist_to_target)
+    }
 
-        // ---- goal selection
-        let (goal, mut use_key, urgent) = self.bot_goal(id, &mut bot, team, pos);
-        if target.is_none() {
-            bot.was_ads = false;
-        }
-        let fighting =
-            target.is_some() && !(use_key && self.p(id).map(|p| p.progress > 0.5).unwrap_or(false));
-        if fighting {
-            use_key = false;
-        }
-
+    /// Shooting and grenades; returns whether it aims down the sights and the shot, if any.
+    fn bot_shoot(
+        &mut self,
+        id: u8,
+        bot: &mut Bot,
+        v: &BotView,
+        target: Option<Seen>,
+        aim_err_angle: f32,
+        dist_to_target: f32,
+        yaw_io: &mut f32,
+        pitch_io: &mut f32,
+    ) -> (bool, Option<Vec<Vec3>>) {
+        let BotView {
+            time,
+            eye,
+            class,
+            ref def,
+            mag,
+            reloading,
+            grenades,
+            vel,
+            protected_me,
+            skill,
+            sk,
+            walk_speed,
+            ballistic,
+            ..
+        } = *v;
+        let (mut yaw, mut pitch) = (*yaw_io, *pitch_io);
         // ---- shooting (with real spread and recoil, like players)
         let mut ads = false;
         let mut fire_dirs: Option<Vec<Vec3>> = None;
@@ -719,7 +911,20 @@ impl Game {
                 }
             }
         }
+        (*yaw_io, *pitch_io) = (yaw, pitch);
+        (ads, fire_dirs)
+    }
 
+    /// Sabotage: the bomb carrier smokes the last stretch to the enemy site.
+    fn bot_sab_smoke(&mut self, id: u8, v: &BotView) {
+        let BotView {
+            eye,
+            pos,
+            smokes,
+            team_now,
+            protected_me,
+            ..
+        } = *v;
         // the bomb carrier covers the last stretch to the enemy site with smoke
         if self.mode == Mode::Sab && self.sab.carrier == Some(id) && smokes > 0 && !protected_me {
             let site = self.map.sites[team_now.enemy().index()];
@@ -732,7 +937,40 @@ impl Game {
                 self.throw_grenade(id, eye, dir, 0.0, true);
             }
         }
+    }
 
+    /// Movement: where it walks, how it stands, and where it looks while not aiming.
+    fn bot_move(
+        &mut self,
+        id: u8,
+        bot: &mut Bot,
+        v: &BotView,
+        plan: BotPlan,
+        dt: f32,
+        yaw_io: &mut f32,
+        pitch_io: &mut f32,
+    ) -> MoveInput {
+        let BotView {
+            time,
+            team,
+            skydiving,
+            pos,
+            class,
+            ref def,
+            reloading,
+            hp,
+            ..
+        } = *v;
+        let (mut yaw, mut pitch) = (*yaw_io, *pitch_io);
+        let BotPlan {
+            target,
+            goal,
+            urgent,
+            fighting,
+            use_key,
+            ads,
+            dist_to_target,
+        } = plan;
         // ---- movement
         let mut move_dir = Vec3::ZERO;
         let mut sprint = false;
@@ -972,14 +1210,31 @@ impl Game {
             sprint_mult: def.sprint_mult,
             weight: def.weight,
         };
+        (*yaw_io, *pitch_io) = (yaw, pitch);
+        inp
+    }
 
+    /// Moves the bot, sets its flags and fires the shot it decided on.
+    fn bot_apply(
+        &mut self,
+        id: u8,
+        bot: Box<Bot>,
+        v: &BotView,
+        inp: &MoveInput,
+        (yaw, pitch): (f32, f32),
+        use_key: bool,
+        fire_dirs: Option<Vec<Vec3>>,
+        dt: f32,
+    ) {
+        let BotView { weapon, .. } = *v;
+        let (ads, sprint) = (inp.ads, inp.sprint);
         // apply
         let world = &self.world;
         let mt = &self.tuning.movement;
         let p = self.players[id as usize].as_mut().unwrap();
         p.yaw = yaw;
         p.pitch = pitch.clamp(-1.4, 1.4);
-        p.body.step(world, &inp, mt, dt);
+        p.body.step(world, inp, mt, dt);
         let mut fl = 0;
         if p.body.on_ground {
             fl |= flags::ON_GROUND;
@@ -1000,8 +1255,14 @@ impl Game {
             let eye = self.p(id).unwrap().eye();
             self.fire(id, weapon, eye, &dirs);
         }
-        // the right gun for the distance: the closest-reaching one that still reaches,
-        // the longest-reaching otherwise; and never an empty one
+    }
+
+    /// The right gun for the distance: the closest-reaching one that still reaches, the
+    /// longest-reaching otherwise; and never an empty one.
+    fn bot_pick_gun(&mut self, id: u8, v: &BotView, target: Option<Seen>, dist_to_target: f32) {
+        let BotView {
+            time, reloading, ..
+        } = *v;
         let next_switch = self
             .p(id)
             .and_then(|p| p.bot.as_ref())
@@ -1038,10 +1299,6 @@ impl Game {
                 }
             }
         }
-        let need_reload = mag == 0 || (target.is_none() && (mag as f32) < def.mag as f32 * 0.4);
-        if need_reload && reserve > 0 && !reloading {
-            self.start_reload(id);
-        }
     }
 
     /// Where the bot wants to go, whether to hold "use", and whether the objective is urgent
@@ -1049,7 +1306,7 @@ impl Game {
     fn bot_goal(
         &mut self,
         id: u8,
-        bot: &mut crate::bots::Bot,
+        bot: &mut Bot,
         team: Team,
         pos: Vec3,
     ) -> (Option<Vec3>, bool, bool) {
@@ -1189,7 +1446,7 @@ impl Game {
     /// The spot an anchor or a sniper holds (a new one every half minute or so): a long
     /// view towards the enemy side, something low in front to duck behind, and for a
     /// sniper, height. Holders spread out over different spots.
-    fn bot_hold(&mut self, bot: &mut crate::bots::Bot, team: Team, _pos: Vec3) -> Option<Vec3> {
+    fn bot_hold(&mut self, bot: &mut Bot, team: Team, _pos: Vec3) -> Option<Vec3> {
         let time = self.time;
         if bot.hold.is_none_or(|h| time > h.until) {
             let home = self.map.spawns[team.index()].first()?.pos;
@@ -1247,7 +1504,7 @@ impl Game {
         bot.hold.map(|h| h.spot)
     }
 
-    fn guard_point(&mut self, bot: &mut crate::bots::Bot, around: Vec3, r: f32) -> Vec3 {
+    fn guard_point(&mut self, bot: &mut Bot, around: Vec3, r: f32) -> Vec3 {
         let time = self.time;
         let ok = bot
             .roam_goal

@@ -161,6 +161,10 @@ pub struct ServerConfig {
     /// The admin's player list shows each address's country, asked of ip-api.com (the
     /// players' addresses go to that service; false keeps them here).
     pub geoip: bool,
+    /// The dice's seed: the same seed plays the same match (screenshots, tests). None (the
+    /// default, left out of server.json) seeds them from the clock.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
     /// Seconds between matches: the final kill's replay, then the best players and the
     /// match's best moments (5..90).
     pub postmatch_time: f32,
@@ -226,6 +230,7 @@ impl Default for ServerConfig {
             require_same_version: true,
             data_dir: "data".into(),
             geoip: true,
+            seed: None,
             public: None,
             master: toon_shared::consts::MASTER_DEFAULT.into(),
             tuning: tuning_json(&Tuning::default()),

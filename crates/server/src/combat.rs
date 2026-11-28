@@ -263,7 +263,7 @@ impl Game {
             let nocked = (p.last_shot + def.reload_time as f64).max(p.switch_end);
             let since = (time - nocked) as f32 + slack as f32;
             let d = if draw.is_finite() { draw } else { 0.0 };
-            toon_shared::weapons::WeaponId::draw_power(d.min(since / draw_time))
+            WeaponId::draw_power(d.min(since / draw_time))
         } else {
             (1.0, 1.0)
         };
@@ -1099,7 +1099,7 @@ impl Game {
             p.grenades -= 1;
         }
         // the team modes: what the loadout carries instead of a frag or a smoke
-        let kind = if self.mode == toon_shared::Mode::Br {
+        let kind = if self.mode == Mode::Br {
             0
         } else if smoke {
             match p.loadout.tactical {
@@ -1445,7 +1445,9 @@ impl Game {
                 let c = o.chest();
                 let to = c - eye;
                 let d = to.length();
-                if d > MELEE_RANGE + 0.5
+                // (a body with a broken position is nobody to stab)
+                if !d.is_finite()
+                    || d > MELEE_RANGE + 0.5
                     || to.normalize().dot(fwd) < 0.55
                     || !self.world.line_of_sight(eye, c)
                 {
@@ -1453,7 +1455,7 @@ impl Game {
                 }
                 Some((o.id, d))
             })
-            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            .min_by(|a, b| a.1.total_cmp(&b.1));
         self.outbox.push((Dest::All, S2C::Melee { id }, false));
         if let Some((v, _)) = target {
             self.damage(v, Some(id), MELEE_DAMAGE, Cause::Knife, false, eye);
@@ -1617,18 +1619,13 @@ impl Game {
             if time >= h.next_target {
                 h.next_target = time + 0.5;
                 let eye = h.pos - vec3(0.0, 1.5, 0.0);
-                h.target = self
-                    .players
-                    .iter()
-                    .flatten()
-                    .filter(|p| p.alive && p.team != h.team && p.team.is_playing())
+                h.target = crate::game::live_enemies(&self.players, h.team)
                     .filter(|p| self.world.line_of_sight(eye, p.chest()))
                     .min_by(|a, b| {
                         a.body
                             .pos
                             .distance(h.pos)
-                            .partial_cmp(&b.body.pos.distance(h.pos))
-                            .unwrap()
+                            .total_cmp(&b.body.pos.distance(h.pos))
                     })
                     .map(|p| p.id);
             }

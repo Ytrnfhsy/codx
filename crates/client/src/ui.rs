@@ -350,7 +350,7 @@ impl<'a> Ui<'a> {
             s = it.as_str();
         }
         self.text(s, x + 8.0, y + 25.0, 20, TEXT);
-        if focused && (get_time() * 2.0).fract() < 0.5 {
+        if focused && (crate::clock::now() * 2.0).fract() < 0.5 {
             let cx = x + 10.0 + self.width(s, 20, false);
             draw_line(cx, y + 7.0, cx, y + h - 7.0, 2.0, ACCENT);
         }

@@ -637,8 +637,8 @@ pub fn works(b: &mut MapBuilder, l: Lot) {
         (Side::MaxZ, wide_door(x0 + 6.0)),
         (Side::MinX, door((z0 + z1) / 2.0)),
         (Side::MaxX, door(z0 + 4.0)),
-        (Side::MinZ, crate::map::window(x0 + 4.0)),
-        (Side::MinZ, crate::map::window(x1 - 4.0)),
+        (Side::MinZ, window(x0 + 4.0)),
+        (Side::MinZ, window(x1 - 4.0)),
     ];
     b.building(x0, z0, x1, z1, 0.0, h, &ops, wall, Some(pal::ROOF_GREY));
     // saw-tooth skylights
@@ -836,7 +836,7 @@ pub fn harbour(
         let ops = [
             (Side::MaxZ, wide_door((x0 + x1) / 2.0)),
             (Side::MinZ, door(x0 + 3.0)),
-            (Side::MinX, crate::map::window((z0 + z1) / 2.0)),
+            (Side::MinX, window((z0 + z1) / 2.0)),
         ];
         b.building(x0, z0, x1, z1, 0.0, 5.5, &ops, c, Some(pal::ROOF_GREY));
         b.block(

@@ -77,6 +77,30 @@ pub const SAB_SITE_RADIUS: f32 = 2.6;
 pub const SAB_DEFUSE_RADIUS: f32 = 2.2;
 pub const SAB_EXPLOSION_RADIUS: f32 = 12.0;
 
+/// What a client may do over time, each a budget that refills (the server's checks on
+/// what clients say and ask for):
+/// how far a player may move ahead of the server's clock (m)…
+pub const MOVE_BUDGET_MAX: f32 = 3.0;
+/// …chat lines (at most this many at once, refilling this many a second)…
+pub const CHAT_BUDGET_MAX: f32 = 5.0;
+pub const CHAT_PER_SEC: f32 = 0.5;
+/// …and inventory actions (battle royale).
+pub const ITEM_BUDGET_MAX: f32 = 12.0;
+pub const ITEM_PER_SEC: f32 = 6.0;
+
+/// Ticks of position history kept for rewinding hits (40 at 30 Hz: 1.3 s).
+pub const HISTORY_TICKS: usize = 40;
+
+/// Below this height a body has fallen out of the world.
+pub const FALL_OUT_Y: f32 = -15.0;
+
+/// Footsteps give a standing player away to enemies this close (m), running faster than
+/// `FOOTSTEPS_RUN_SPEED` or walking faster than `FOOTSTEPS_WALK_SPEED` (m/s).
+pub const FOOTSTEPS_RUN_HEARD: f32 = 34.0;
+pub const FOOTSTEPS_WALK_HEARD: f32 = 22.0;
+pub const FOOTSTEPS_RUN_SPEED: f32 = 6.0;
+pub const FOOTSTEPS_WALK_SPEED: f32 = 1.5;
+
 /// Points for score events.
 pub const SCORE_KILL: i32 = 10;
 pub const SCORE_HEADSHOT_BONUS: i32 = 5;

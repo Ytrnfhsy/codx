@@ -133,7 +133,7 @@ impl Game {
             p.body.pos = at;
             p.body.vel = vel * 0.5;
             p.body.stance = toon_shared::physics::Stance::Stand;
-            p.move_budget = 3.0;
+            p.move_budget = toon_shared::consts::MOVE_BUDGET_MAX;
         }
         self.send(
             id,

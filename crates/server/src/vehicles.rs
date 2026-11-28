@@ -404,39 +404,25 @@ impl Game {
         let gun = pos + vec3(0.0, NRK_GUN_Y, 0.0);
         if time >= self.vehicles[i].next_think {
             self.vehicles[i].next_think = time + 0.4;
-            let target = self
-                .players
-                .iter()
-                .flatten()
-                .filter(|p| p.alive && p.team != team && p.team.is_playing())
+            let target = crate::game::live_enemies(&self.players, team)
                 .filter(|p| p.chest().distance(gun) < 45.0)
                 .filter(|p| {
                     self.world.line_of_sight(gun, p.chest())
                         && !smoke_blocks(gun, p.chest(), &clouds)
                 })
-                .min_by(|a, b| {
-                    a.chest()
-                        .distance(gun)
-                        .partial_cmp(&b.chest().distance(gun))
-                        .unwrap()
-                })
+                .min_by(|a, b| a.chest().distance(gun).total_cmp(&b.chest().distance(gun)))
                 .map(|p| p.id);
             self.vehicles[i].target = target;
             // somewhere to go: the nearest enemy we know of, or anywhere on the map
             let v = &self.vehicles[i];
             let stuck = v.stuck_since.0.distance(pos) < 0.5 && time - v.stuck_since.1 > 2.5;
             if (v.path.is_empty() || stuck) && target.is_none() {
-                let goal = self
-                    .players
-                    .iter()
-                    .flatten()
-                    .filter(|p| p.alive && p.team != team && p.team.is_playing())
+                let goal = crate::game::live_enemies(&self.players, team)
                     .min_by(|a, b| {
                         a.body
                             .pos
                             .distance(pos)
-                            .partial_cmp(&b.body.pos.distance(pos))
-                            .unwrap()
+                            .total_cmp(&b.body.pos.distance(pos))
                     })
                     .map(|p| p.body.pos)
                     .filter(|_| !stuck)

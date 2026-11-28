@@ -1,4 +1,6 @@
 //! UDP networking and the fixed-rate server loop.
+// Datagrams come from anyone: nothing here may panic on what they hold.
+#![warn(clippy::unwrap_used)]
 
 use crate::game::{Dest, Game};
 use crate::AdminMsg;
@@ -215,7 +217,10 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                             },
                         );
                     }
-                    let conn = conns.get_mut(&addr).unwrap();
+                    // (there just now, or made above)
+                    let Some(conn) = conns.get_mut(&addr) else {
+                        continue;
+                    };
                     let Some(msgs) = conn.chan.receive::<C2S>(data) else {
                         // junk from an unknown address takes no connection slot
                         if fresh {

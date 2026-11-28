@@ -423,7 +423,7 @@ impl MeshBuilder {
 
     /// Submits all chunks with `tex` bound as the shader's `Texture` (detail atlas).
     pub fn draw_tex(&self, tex: Option<&Texture2D>) {
-        let gl = unsafe { get_internal_gl() }.quad_gl;
+        let gl = quad_gl();
         gl.texture(tex);
         gl.draw_mode(DrawMode::Triangles);
         for c in &self.chunks {
@@ -890,14 +890,14 @@ struct SunCamera<'a> {
     target: &'a RenderTarget,
 }
 
-impl macroquad::camera::Camera for SunCamera<'_> {
+impl Camera for SunCamera<'_> {
     fn matrix(&self) -> Mat4 {
         self.matrix
     }
     fn depth_enabled(&self) -> bool {
         true
     }
-    fn render_pass(&self) -> Option<macroquad::texture::RenderPass> {
+    fn render_pass(&self) -> Option<RenderPass> {
         Some(self.target.render_pass.clone())
     }
     fn viewport(&self) -> Option<(i32, i32, i32, i32)> {
@@ -1054,7 +1054,7 @@ impl Materials {
             ),
         };
         // (time wraps so that it stays precise in the shaders)
-        let time = (get_time() % 3600.0) as f32;
+        let time = (crate::clock::now() % 3600.0) as f32;
         for m in [&self.world, &self.outline, &self.fx, &self.water] {
             m.set_texture("ShadowMap", tex.clone());
             m.set_uniform("SunMatrix", matrix);
@@ -1095,6 +1095,18 @@ pub fn trs(t: Vec3, yaw: f32, pitch: f32, roll: f32) -> Mat4 {
         * Mat4::from_rotation_y(yaw)
         * Mat4::from_rotation_x(pitch)
         * Mat4::from_rotation_z(roll)
+}
+
+/// macroquad's own drawing context (the batcher behind `draw_*`), for the few things its
+/// safe API does not cover (raw meshes with our pipelines, scissor, depth).
+///
+/// macroquad hands it out only through `get_internal_gl`, which is unsafe because the
+/// context is not thread-safe: the game draws from the main thread only, and no caller
+/// keeps the reference past the statement that uses it.
+#[allow(unsafe_code)]
+pub fn quad_gl() -> &'static mut QuadGl {
+    // SAFETY: called on the main thread inside macroquad's frame loop (see above)
+    unsafe { get_internal_gl() }.quad_gl
 }
 
 #[cfg(test)]

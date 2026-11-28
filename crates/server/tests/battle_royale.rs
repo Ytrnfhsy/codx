@@ -195,7 +195,7 @@ fn round_ends_when_the_last_real_player_is_out() {
         }
     }
     assert!(g.br.running && g.br_alive() > 3);
-    g.kill(me, None, toon_shared::weapons::Cause::Zone, false);
+    g.kill(me, None, Cause::Zone, false);
     g.tick(TICK_DT);
     assert_eq!(
         g.state,
@@ -270,7 +270,7 @@ fn inventory_pick_up_heal_and_drop() {
         g.pickups.push(toon_server::pickups::Pickup {
             id,
             w: toon_server::game::WState {
-                id: toon_shared::weapons::WeaponId::Fort17,
+                id: WeaponId::Fort17,
                 mag: 15,
                 reserve: 0,
             },
@@ -281,7 +281,7 @@ fn inventory_pick_up_heal_and_drop() {
         g.handle(me, C2S::PickUp(id));
         let p = g.p(me).unwrap();
         assert_eq!(p.empty, 0b10, "the pistol is in the first slot");
-        assert_eq!(p.weapons[0].id, toon_shared::weapons::WeaponId::Fort17);
+        assert_eq!(p.weapons[0].id, WeaponId::Fort17);
     }
 
     // put supplies at our feet: walking over them takes nothing, the use key does
@@ -328,7 +328,7 @@ fn inventory_pick_up_heal_and_drop() {
     {
         let p = g.pm(me).unwrap();
         p.weapons[1] = toon_server::game::WState {
-            id: toon_shared::weapons::WeaponId::Uar15,
+            id: WeaponId::Uar15,
             mag: 30,
             reserve: 0,
         };
@@ -381,7 +381,7 @@ fn inventory_pick_up_heal_and_drop() {
         me,
         None,
         50.0,
-        Cause::Weapon(toon_shared::weapons::WeaponId::Uar15),
+        Cause::Weapon(WeaponId::Uar15),
         false,
         ground,
     );
@@ -411,17 +411,14 @@ fn inventory_pick_up_heal_and_drop() {
     assert_eq!(p.empty, 0b10);
     assert_eq!(p.inv.sights, [1, 0]);
     assert_eq!(p.inv.spare_sights, [0, 0, 1, 0]);
-    assert!(g
-        .pickups
-        .iter()
-        .any(|pk| pk.w.id == toon_shared::weapons::WeaponId::Uar15));
+    assert!(g.pickups.iter().any(|pk| pk.w.id == WeaponId::Uar15));
     // the pistol can go too (back to bare hands), and be picked up again
     g.handle(me, C2S::Item(ItemAction::Drop(Item::Weapon(0), 1)));
     assert_eq!(g.p(me).unwrap().empty, 0b11);
     let pistol = g
         .pickups
         .iter()
-        .find(|pk| pk.w.id == toon_shared::weapons::WeaponId::Fort17 && pk.pos.distance(at) < 2.0)
+        .find(|pk| pk.w.id == WeaponId::Fort17 && pk.pos.distance(at) < 2.0)
         .map(|pk| pk.id)
         .expect("the pistol on the ground");
     g.handle(me, C2S::PickUp(pistol));
@@ -446,10 +443,7 @@ fn inventory_pick_up_heal_and_drop() {
     assert!(dropped.iter().any(|(k, _)| *k == LootKind::Armor(2)));
     assert!(dropped.contains(&(LootKind::Sight(1), 1)));
     assert!(dropped.contains(&(LootKind::Sight(3), 1)));
-    assert!(b
-        .guns
-        .iter()
-        .any(|g| g.id == toon_shared::weapons::WeaponId::Fort17));
+    assert!(b.guns.iter().any(|g| g.id == WeaponId::Fort17));
 
     // a passer-by: takes the sniper rounds, then everything else; the box goes once empty
     let other = g
@@ -469,7 +463,7 @@ fn inventory_pick_up_heal_and_drop() {
         p.inv.backpack = 3;
         // (not the pistol in the box: the same gun twice is not taken)
         p.weapons[1] = toon_server::game::WState {
-            id: toon_shared::weapons::WeaponId::Revolver,
+            id: WeaponId::Revolver,
             mag: 7,
             reserve: 0,
         };

@@ -212,7 +212,7 @@ pub fn main_lobby(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) -> Option<M
             ui.width(&tag, sz - 4, false)
         };
         let tw = nw + gw;
-        crate::ui::soft_rect(
+        soft_rect(
             p.x - tw / 2.0 - 10.0,
             p.y,
             tw + 20.0,
@@ -500,7 +500,7 @@ fn squad_panel(
         return;
     }
     for m in &v.members {
-        crate::ui::soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
+        soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
         let show = hovered(ui, x + 18.0, y, inner, 34.0) || clash.contains(&m.name.to_lowercase());
         let mut name = m.name.clone();
         if m.pid == v.leader && v.members.len() > 1 {
@@ -548,7 +548,7 @@ fn squad_panel(
         );
         y += 24.0;
         for (pid, name) in v.invites.iter().take(3) {
-            crate::ui::soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.1, 0.3, 0.1, 0.35));
+            soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.1, 0.3, 0.1, 0.35));
             let show =
                 hovered(ui, x + 18.0, y, inner, 34.0) || clash.contains(&name.to_lowercase());
             text_tagged(ui, name, pid, show, x + 28.0, y + 23.0, 14, TEXT);
@@ -584,7 +584,7 @@ fn squad_panel(
         if y + 34.0 > bottom {
             break;
         }
-        crate::ui::soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
+        soft_rect(x + 18.0, y, inner, 34.0, Color::new(0.0, 0.0, 0.0, 0.3));
         let show = hovered(ui, x + 18.0, y, inner, 34.0) || clash.contains(&name.to_lowercase());
         let label = if *size > 1 {
             tr!("{name} (загін {size})", "{name} (squad of {size})")
