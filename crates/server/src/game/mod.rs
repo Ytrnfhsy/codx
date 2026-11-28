@@ -73,6 +73,14 @@ pub enum Dest {
     One(u8),
 }
 
+/// The living players playing against `team`: what a gunship or a robot looks for.
+pub fn live_enemies(players: &[Option<Player>], team: Team) -> impl Iterator<Item = &Player> {
+    players
+        .iter()
+        .flatten()
+        .filter(move |p| p.alive && p.team != team && p.team.is_playing())
+}
+
 /// A number nobody can guess (from the system's randomness behind `RandomState`).
 pub fn random_u64() -> u64 {
     use std::hash::{BuildHasher, Hasher};

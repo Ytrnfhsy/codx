@@ -1619,11 +1619,7 @@ impl Game {
             if time >= h.next_target {
                 h.next_target = time + 0.5;
                 let eye = h.pos - vec3(0.0, 1.5, 0.0);
-                h.target = self
-                    .players
-                    .iter()
-                    .flatten()
-                    .filter(|p| p.alive && p.team != h.team && p.team.is_playing())
+                h.target = crate::game::live_enemies(&self.players, h.team)
                     .filter(|p| self.world.line_of_sight(eye, p.chest()))
                     .min_by(|a, b| {
                         a.body
