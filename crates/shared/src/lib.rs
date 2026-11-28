@@ -19,6 +19,7 @@ pub mod maps_site;
 pub mod maps_wreck;
 pub mod net;
 pub mod physics;
+pub mod prof;
 pub mod props;
 pub mod protocol;
 pub mod ray;
