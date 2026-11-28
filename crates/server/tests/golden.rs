@@ -9,6 +9,10 @@
 //!
 //! When a change is *meant* to change the game, run
 //! `GOLDEN_UPDATE=1 cargo test --release --test golden` and commit the new numbers.
+//!
+//! The numbers hold only where the maths library gives the same last bits (see
+//! `libm_fingerprint`): elsewhere, CI's machines for instance, the comparison is skipped
+//! and says so. On a refactor, take a snapshot on your machine before and compare after.
 
 use toon_server::config::ServerConfig;
 use toon_server::game::Game;
@@ -231,19 +235,65 @@ fn play(map: MapId, mode: Mode, seed: u64, bots: usize, human: bool, secs: f32) 
     h.0
 }
 
+/// What this machine's maths library makes of a few thousand sines, cosines,
+/// exponentials and powers. The system's sin, exp and friends may differ in the last bit
+/// from one processor to another (they pick their code by what the processor can do), and
+/// a match of bots amplifies that into a different game; so a snapshot is only compared on
+/// a machine whose maths agree with the one it was taken on.
+fn libm_fingerprint() -> String {
+    let mut h = Fnv::new();
+    for i in 0..4000 {
+        let x = (i as f32 - 2000.0) * 0.0173;
+        let y = (i as f32) * 0.0031 + 0.01;
+        for v in [
+            x.sin(),
+            x.cos(),
+            x.tan(),
+            (x * 0.05).exp(),
+            y.ln(),
+            y.powf(1.7),
+            y.atan2(x),
+            (x * 0.0005).asin(),
+            (x * 0.0005).acos(),
+            y.sqrt(),
+        ] {
+            h.bytes(&v.to_bits().to_le_bytes());
+        }
+        let d = x as f64;
+        for v in [d.sin(), d.cos(), (d * 0.05).exp()] {
+            h.bytes(&v.to_bits().to_le_bytes());
+        }
+    }
+    format!("{:016x}", h.0)
+}
+
 fn check(name: &str, got: u64) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/golden")
         .join(format!("{name}.txt"));
     let got = format!("{got:016x}");
+    let libm = libm_fingerprint();
     if std::env::var_os("GOLDEN_UPDATE").is_some() {
-        std::fs::write(&path, format!("{got}\n")).unwrap();
+        std::fs::write(&path, format!("{got}\nlibm {libm}\n")).unwrap();
         return;
     }
-    let want = std::fs::read_to_string(&path).unwrap_or_default();
+    let file = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut lines = file.lines();
+    let want = lines.next().unwrap_or_default().trim();
+    let want_libm = lines
+        .next()
+        .and_then(|l| l.strip_prefix("libm "))
+        .unwrap_or_default();
+    if want_libm != libm {
+        eprintln!(
+            "{name}: NOT COMPARED: this machine's maths library differs from the one the \
+             snapshot was taken with (libm {libm}, snapshot {want_libm}). Compare on that \
+             machine, or take a snapshot here first (GOLDEN_UPDATE=1) and compare after."
+        );
+        return;
+    }
     assert_eq!(
-        want.trim(),
-        got,
+        want, got,
         "{name}: the game played differently. If that is meant, run \
          `GOLDEN_UPDATE=1 cargo test --release --test golden` and commit tests/golden/"
     );

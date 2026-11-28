@@ -962,7 +962,7 @@ crates/
 
 * **Behaviour snapshots** guard refactors: `crates/server/tests/golden.rs` plays a team
   deathmatch and a battle royale with bots on a fixed seed and compares a hash of everything
-  that happened with `tests/golden/`; `synthesis_is_unchanged` does the same for every
+  that happened with `tests/golden/` (only where the system maths gives the same last bits as when the snapshot was taken: on another processor the comparison is skipped, and says so); `synthesis_is_unchanged` does the same for every
   synthesised sound; `tools/screens.sh` shoots the menu, the HUD, the scope, the Esc menu and
   the battle royale inventory on a fixed clock, and `tools/screens-diff.sh` compares two sets
   pixel by pixel. The code style is in [`STYLE.md`](STYLE.md) (in Ukrainian).

@@ -37,40 +37,68 @@ const SR: f32 = RATE as f32;
 mod tests {
     use super::*;
 
-    /// Every sound comes out of the synthesizer the same as when the numbers in
-    /// `golden/synth.txt` were taken (a refactor must not change a sample). When a sound
+    /// Every sound comes out of the synthesizer as it did when `golden/synth.txt` was
+    /// written: its length exactly, its loudness (RMS of the whole and of each quarter) and
+    /// its peak to within 1e-4. (Not bit for bit: the system's sin/exp differ in the last
+    /// bit from one processor to another, and the filters carry that along.) When a sound
     /// is meant to change, run `GOLDEN_UPDATE=1 cargo test --release -p toon_client
     /// synthesis_is_unchanged` and commit the file.
     #[test]
     fn synthesis_is_unchanged() {
-        // FNV-1a over the samples' bits: the same on every machine
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         let mut s = Synth { rng: Rng::new(11) };
+        let mut lines = Vec::new();
         for k in all() {
             for i in 0..variants(k) {
-                for frame in s.make(k, i) {
-                    for x in frame {
-                        for b in x.to_bits().to_le_bytes() {
-                            h ^= b as u64;
-                            h = h.wrapping_mul(0x0100_0000_01b3);
-                        }
-                    }
-                }
+                let b = s.make(k, i);
+                let rms = |part: &[[f32; 2]]| {
+                    let e: f64 = part
+                        .iter()
+                        .map(|f| (f[0] as f64).powi(2) + (f[1] as f64).powi(2))
+                        .sum();
+                    (e / (2 * part.len()).max(1) as f64).sqrt()
+                };
+                let peak = b
+                    .iter()
+                    .map(|f| f[0].abs().max(f[1].abs()) as f64)
+                    .fold(0.0, f64::max);
+                let q = b.len() / 4;
+                let quarters: Vec<String> = (0..4)
+                    .map(|j| {
+                        let end = if j == 3 { b.len() } else { (j + 1) * q };
+                        format!("{:.9}", rms(&b[j * q..end]))
+                    })
+                    .collect();
+                lines.push(format!(
+                    "{k:?} {i} {} {:.9} {:.9} {}",
+                    b.len(),
+                    rms(&b),
+                    peak,
+                    quarters.join(" ")
+                ));
             }
         }
-        let got = format!("{h:016x}");
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("golden/synth.txt");
         if std::env::var_os("GOLDEN_UPDATE").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(&path, format!("{got}\n")).unwrap();
+            std::fs::write(&path, lines.join("\n") + "\n").unwrap();
             return;
         }
         let want = std::fs::read_to_string(&path).unwrap_or_default();
-        assert_eq!(
-            want.trim(),
-            got,
-            "a synthesized sound changed (see the comment above)"
-        );
+        let want: Vec<&str> = want.lines().collect();
+        assert_eq!(want.len(), lines.len(), "a different number of sounds");
+        for (w, g) in want.iter().zip(&lines) {
+            let (w, g): (Vec<&str>, Vec<&str>) = (w.split(' ').collect(), g.split(' ').collect());
+            assert_eq!(w[..3], g[..3], "a sound's name, variant or length changed");
+            for (a, b) in w[3..].iter().zip(&g[3..]) {
+                let (a, b): (f64, f64) = (a.parse().unwrap(), b.parse().unwrap());
+                assert!(
+                    (a - b).abs() <= 1e-4 * a.abs().max(b.abs()) + 1e-7,
+                    "{} {}: {a} became {b} (see the comment above)",
+                    g[0],
+                    g[1]
+                );
+            }
+        }
     }
 
     #[test]
