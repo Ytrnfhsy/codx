@@ -398,7 +398,7 @@ impl MeshBuilder {
         }
         let mut remap = vec![u16::MAX; verts.len()];
         self.chunks.push(Chunk::default());
-        for tri in idx.chunks_exact(3) {
+        for tri in idx.as_chunks::<3>().0 {
             let last = self.chunks.last().unwrap();
             if last.verts.len() + 3 > CHUNK_VERTS || last.idx.len() + 3 > CHUNK_INDICES {
                 self.chunks.push(Chunk::default());
