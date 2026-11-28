@@ -238,6 +238,9 @@ pub struct Game {
     pub public: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Players to disconnect (id, reason) — handled by the network layer.
     pub kicked: Vec<(u8, String)>,
+    /// (Benchmarks) bots count as players who watch: what they may see and the loot near
+    /// them are worked out for them too, as for a server full of people.
+    pub everyone_watches: bool,
     pub next_housekeeping: f64,
     pub match_started: bool,
     /// Route searches bots may still make this tick.
@@ -336,6 +339,7 @@ impl Game {
             registry,
             public: Default::default(),
             kicked: Vec::new(),
+            everyone_watches: false,
             next_housekeeping: 0.0,
             match_started: false,
             path_budget: 0,

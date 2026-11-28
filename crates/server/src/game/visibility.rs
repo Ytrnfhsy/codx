@@ -82,7 +82,7 @@ impl Game {
         let now = self.time;
         let mut seen: Vec<(u8, u8)> = Vec::new();
         for v in self.players.iter().flatten() {
-            if v.is_bot() || !v.team.is_playing() {
+            if v.is_bot() && !self.everyone_watches || !v.team.is_playing() {
                 continue;
             }
             // watching somebody after death: through their eyes
