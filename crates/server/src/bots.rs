@@ -544,18 +544,13 @@ impl Game {
             let fwd = look_dir(yaw, 0.0);
             let mut best: Option<(u8, f32)> = None;
             let mut heard: Option<(Vec3, f32)> = None;
-            let my_squad = self.p(id).map_or(0, |p| p.squad);
+            let me = self.p(id);
             let blind = bot.blind_until;
             if time < blind {
                 bot.target = None;
             }
-            let solo = self.mode.solo();
             for o in self.players.iter().flatten() {
-                let friend = if solo {
-                    my_squad != 0 && o.squad == my_squad
-                } else {
-                    o.team == team
-                };
+                let friend = me.is_some_and(|me| self.allied(me, o));
                 if !o.alive || o.id == id || friend || !o.team.is_playing() {
                     continue;
                 }
