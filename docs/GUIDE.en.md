@@ -943,15 +943,29 @@ crates/
             maps (generated from boxes), movement physics (AABB + a grid), raycasts and
             hitboxes, the protocol, the reliable UDP channel
   server/   the dedicated server (a library + the toon-server binary):
-            game.rs (state, the match, spawns, movement checks, snapshots, visibility),
+            game/ (the Game state; player, connect, teams, spawn, handle — client messages,
+            movement — position checks, match_flow, tick, visibility, snapshot),
             combat.rs (shooting, lag compensation, grenades, the knife, killstreaks, the
-            helicopter), sab.rs (Sabotage), br.rs (battle royale), bots.rs + nav.rs (bots, A*),
-            admin.rs (commands, bans), registry.rs (player history), master.rs (the public
-            list), http.rs + web/ (the admin panel), netserver.rs (the UDP loop)
-  client/   the game toon-warfare: game.rs (movement prediction, guns, interpolation), render.rs,
-            models.rs (cartoon models), mesh.rs (toon shading, outlines, fog), hud.rs,
-            menu.rs, audio.rs (synthesised sounds), effects.rs, ruins.rs (pieces falling)
+            helicopter), sab.rs (Sabotage), br/ (battle royale: round, plane, zone,
+            airdrop, loot, inventory, downed, spectate, bot_goal), bots.rs + nav.rs (bots,
+            step by step: perception, target, aim, shooting, movement; A*), admin.rs
+            (commands, bans), registry.rs (player history), master.rs (the public list),
+            http.rs + web/ (the admin panel), netserver.rs (the UDP loop)
+  client/   the game toon-warfare: main.rs (the main loop and the screens: menu, connecting,
+            game), args.rs (the command line), clock.rs (the clock; --fixed-clock for
+            screenshots), game/ (net, snapshot — interpolation, input — the frame step by
+            step, weapons, interact, ping, replay, spectate, modes), render.rs, models.rs,
+            mesh.rs (toon shading), hud/ (scope, minimap, killfeed, scoreboard, markers,
+            br_*, weapon_panel, chat, icons, overlay), menu.rs, audio/ (sfx, synth, spatial,
+            bank, mixer), effects.rs, ruins.rs (pieces falling)
 ```
+
+* **Behaviour snapshots** guard refactors: `crates/server/tests/golden.rs` plays a team
+  deathmatch and a battle royale with bots on a fixed seed and compares a hash of everything
+  that happened with `tests/golden/`; `synthesis_is_unchanged` does the same for every
+  synthesised sound; `tools/screens.sh` shoots the menu, the HUD, the scope, the Esc menu and
+  the battle royale inventory on a fixed clock, and `tools/screens-diff.sh` compares two sets
+  pixel by pixel. The code style is in [`STYLE.md`](STYLE.md) (in Ukrainian).
 
 * **Destruction** — `shared/destruct.rs`: a blast cuts cubes out of the map's boxes, pieces
   left unsupported fall into a heap, posts and trees topple, tall narrow things (cranes,

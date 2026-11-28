@@ -888,14 +888,28 @@ crates/
   shared/   спільна логіка: константи, tuning.rs (параметри руху і зброї), зброя й набори, карти (генерація боксів),
             фізика руху (AABB + сітка), рейкасти й хітбокси, протокол, надійний UDP-канал
   server/   виділений сервер (бібліотека + бінарник toon-server):
-            game.rs (стан, матч, спавни, валідація руху, снапшоти), combat.rs (стрільба,
-            лаг-компенсація, гранати, ніж, кілстріки, гелікоптер), sab.rs (Саботаж),
-            bots.rs + nav.rs (боти, A*), admin.rs (команди, бани), http.rs + web/ (адмінка),
-            netserver.rs (UDP-цикл)
-  client/   гра toon-warfare: game.rs (передбачення руху, зброя, інтерполяція), render.rs,
-            models.rs (мультяшні моделі), mesh.rs (toon-шейдинг, контури, туман), hud.rs,
-            menu.rs, audio.rs (синтезовані звуки), effects.rs, ruins.rs (уламки, що падають)
+            game/ (стан Game; player, connect, teams, spawn, handle — повідомлення клієнтів,
+            movement — перевірка руху, match_flow, tick, visibility, snapshot),
+            combat.rs (стрільба, лаг-компенсація, гранати, ніж, кілстріки, гелікоптер),
+            sab.rs (Саботаж), br/ (королівська битва: round, plane, zone, airdrop, loot,
+            inventory, downed, spectate, bot_goal), bots.rs + nav.rs (боти по кроках:
+            сприйняття, ціль, приціл, стрільба, рух; A*), admin.rs (команди, бани),
+            registry.rs, master.rs, http.rs + web/ (адмінка), netserver.rs (UDP-цикл)
+  client/   гра toon-warfare: main.rs (головний цикл і екрани: меню, під'єднання, гра),
+            args.rs (командний рядок), clock.rs (годинник; --fixed-clock для знімків),
+            game/ (net, snapshot — інтерполяція, input — кадр по кроках, weapons, interact,
+            ping, replay, spectate, modes), render.rs, models.rs, mesh.rs (toon-шейдинг),
+            hud/ (scope, minimap, killfeed, scoreboard, markers, br_*, weapon_panel, chat,
+            icons, overlay), menu.rs, audio/ (sfx, synth, spatial, bank, mixer), effects.rs,
+            ruins.rs (уламки, що падають)
 ```
+
+* **Зліпки поведінки** страхують рефакторинг: `crates/server/tests/golden.rs` грає
+  командний бій і королівську битву з ботами на фіксованому зерні й порівнює хеш усього, що
+  відбулося, з `tests/golden/`; `synthesis_is_unchanged` так само стежить за кожним
+  синтезованим звуком; `tools/screens.sh` знімає меню, HUD, приціл, Esc-меню й BR-інвентар на
+  фіксованому годиннику, а `tools/screens-diff.sh` порівнює два набори попіксельно. Стиль
+  коду — у [`STYLE.md`](STYLE.md).
 
 * **Руйнування** — `shared/destruct.rs`: вибух вирізає з боксів карти куби, шматки без опори
   падають купою, стовпи й дерева валяться, високе й вузьке (крани, вежі) падає цілим, рельєф отримує вирву. Код детермінований, тож
