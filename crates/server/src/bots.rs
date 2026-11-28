@@ -4,6 +4,7 @@ use crate::game::Game;
 use glam::{vec2, vec3, Vec2, Vec3};
 use toon_shared::ballistics::{lead, Ballistics};
 use toon_shared::physics::{MoveInput, Stance};
+use toon_shared::prof;
 use toon_shared::protocol::{flags, MatchState};
 use toon_shared::ray::smoke_blocks;
 use toon_shared::rng::Rng;
@@ -393,14 +394,20 @@ impl Game {
 
         let v = self.bot_view(id, &bot);
         let (mut yaw, mut pitch) = (v.yaw, v.pitch);
-        self.bot_perceive(id, &mut bot, &v);
+        {
+            let _p = prof::scope("  bots: perception");
+            self.bot_perceive(id, &mut bot, &v);
+        }
         let target = self.bot_target(&mut bot, &v);
         let (aim_err_angle, dist_to_target) =
             Self::bot_aim(&mut bot, &v, target, dt, &mut yaw, &mut pitch);
 
         let BotView { team, pos, .. } = v;
         // ---- goal selection
-        let (goal, mut use_key, urgent) = self.bot_goal(id, &mut bot, team, pos);
+        let (goal, mut use_key, urgent) = {
+            let _p = prof::scope("  bots: goals");
+            self.bot_goal(id, &mut bot, team, pos)
+        };
         if target.is_none() {
             bot.was_ads = false;
         }
@@ -1086,7 +1093,12 @@ impl Game {
                 bot.path_goal = Some(g);
                 bot.repath_at =
                     time + 2.5 + (flat_d as f64 / 60.0).min(5.0) + self.rng.range(0.0, 1.5) as f64;
-                match self.nav.path(pos, g) {
+                let path = {
+                    let _p = prof::scope("  bots: route search");
+                    prof::value("bot route searches", 1.0);
+                    self.nav.path(pos, g)
+                };
+                match path {
                     Some(p) => bot.path = p,
                     None => {
                         // no way there: rest a moment and pick somewhere else to go
