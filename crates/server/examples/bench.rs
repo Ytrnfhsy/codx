@@ -130,6 +130,11 @@ fn run(s: &Scene) {
                         Dest::Team(team) => g.p(id).is_some_and(|p| p.team == team),
                     };
                     if to {
+                        let n = toon_shared::net::encode(&msg).len() as f64 / ids.len() as f64;
+                        match msg {
+                            S2C::Ents { .. } => prof::value("  of which loot near (B/tick)", n),
+                            _ => prof::value("  of which other messages (B/tick)", n),
+                        }
                         let c = down[id as usize].as_mut().unwrap();
                         if reliable {
                             c.send_reliable(&msg);
@@ -144,6 +149,10 @@ fn run(s: &Scene) {
             let _p = prof::scope("net: snapshots");
             for &id in &ids {
                 let snap = g.snapshot_for(id);
+                prof::value(
+                    "  of which snapshots (B/tick)",
+                    toon_shared::net::encode(&snap).len() as f64 / ids.len() as f64,
+                );
                 down[id as usize]
                     .as_mut()
                     .unwrap()
