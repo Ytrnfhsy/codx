@@ -136,3 +136,68 @@ impl Game {
             .any(|e| points.iter().any(|p| world.line_of_sight(*e, *p)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use toon_shared::map::{MapBox, Mat};
+
+    /// An empty yard with one wall 3 m high across x = 0 (z from -5 to 5).
+    fn yard_with_wall() -> World {
+        let mut m = maps::test_yard();
+        m.boxes = vec![MapBox {
+            min: vec3(-0.2, 0.0, -5.0),
+            max: vec3(0.2, 3.0, 5.0),
+            color: [200, 200, 200],
+            solid: true,
+            visible: true,
+            mat: Mat::Solid,
+            shade: 0,
+        }];
+        World::from_map(&m)
+    }
+
+    fn player_at(pos: Vec3, stance: Stance) -> Player {
+        let mut p = Player::new(1, "T".into(), None, 0.0);
+        p.body.pos = pos;
+        p.body.stance = stance;
+        p
+    }
+
+    #[test]
+    fn a_wall_hides_who_stands_behind_it() {
+        let w = yard_with_wall();
+        let eye = vec3(-10.0, 1.6, 0.0);
+        let behind = player_at(vec3(2.0, 0.0, 0.0), Stance::Stand);
+        assert!(!Game::can_see(&w, [eye, eye], &behind));
+        // out from behind its end: seen
+        let beside = player_at(vec3(2.0, 0.0, 8.0), Stance::Stand);
+        assert!(Game::can_see(&w, [eye, eye], &beside));
+    }
+
+    #[test]
+    fn seen_by_a_side_or_the_head_alone() {
+        let w = yard_with_wall();
+        let eye = vec3(-10.0, 1.6, 0.0);
+        // the head, the chest and the feet are behind the wall's end, one side is not
+        let edge = player_at(vec3(2.0, 0.0, 5.8), Stance::Stand);
+        let head = edge.body.pos + vec3(0.0, 2.0, 0.0);
+        assert!(!w.line_of_sight(eye, head));
+        assert!(Game::can_see(&w, [eye, eye], &edge));
+        // a viewer high above the wall sees over it
+        let high = vec3(-10.0, 9.0, 0.0);
+        let behind = player_at(vec3(2.0, 0.0, 0.0), Stance::Stand);
+        assert!(Game::can_see(&w, [high, high], &behind));
+    }
+
+    #[test]
+    fn where_the_eyes_will_be_counts() {
+        let w = yard_with_wall();
+        // about to step out from behind the wall's end
+        let now = vec3(-1.0, 1.6, 4.0);
+        let soon = vec3(-1.0, 1.6, 9.0);
+        let t = player_at(vec3(2.0, 0.0, 0.0), Stance::Crouch);
+        assert!(!Game::can_see(&w, [now, now], &t));
+        assert!(Game::can_see(&w, [now, soon], &t));
+    }
+}

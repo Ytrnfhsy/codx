@@ -68,13 +68,17 @@ pub(crate) struct Args {
 }
 
 pub(crate) fn parse_args() -> Args {
+    parse(std::env::args().skip(1).collect())
+}
+
+/// The switches in `v` (without the program's name).
+fn parse(v: Vec<String>) -> Args {
     let mut a = Args {
         shot_after: 6.0,
         width: 1280,
         height: 720,
         ..Default::default()
     };
-    let v: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < v.len() {
         let next = v.get(i + 1).cloned();
@@ -217,4 +221,46 @@ pub(crate) fn parse_args() -> Args {
         i += 1;
     }
     a
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(s: &str) -> Args {
+        parse(s.split_whitespace().map(String::from).collect())
+    }
+
+    #[test]
+    fn defaults_without_switches() {
+        let a = args("");
+        assert!(!a.host && a.connect.is_none() && !a.fixed_clock);
+        assert_eq!((a.width, a.height, a.shot_after), (1280, 720, 6.0));
+    }
+
+    #[test]
+    fn hosting_and_screenshots() {
+        let a = args(
+            "--host --map island --mode br --bots 12 --seed 7 --fixed-clock \
+             --screenshot out.png --screenshot-after 9 --size 800x600 --open-inventory",
+        );
+        assert!(a.host && a.fixed_clock && a.open_inventory);
+        assert_eq!(a.map.as_deref(), Some("island"));
+        assert_eq!(a.mode.as_deref(), Some("br"));
+        assert_eq!((a.bots, a.seed), (Some(12), Some(7)));
+        assert_eq!(a.shot.as_deref(), Some("out.png"));
+        assert_eq!((a.shot_after, a.width, a.height), (9.0, 800, 600));
+    }
+
+    #[test]
+    fn points_and_values_follow_their_switch() {
+        let a = args("--spec-at -560,45,-560 --connect 1.2.3.4:27015 --gun awm --pitch -0.3");
+        assert_eq!(a.spec_at, Some(vec3(-560.0, 45.0, -560.0)));
+        assert_eq!(a.connect.as_deref(), Some("1.2.3.4:27015"));
+        assert_eq!(a.gun.as_deref(), Some("awm"));
+        assert_eq!(a.pitch, Some(-0.3));
+        // (a value glued on with `=` is not understood: the switch is skipped)
+        let b = args("--spec-at=1,2,3 --seed nope");
+        assert_eq!((b.spec_at, b.seed), (None, None));
+    }
 }

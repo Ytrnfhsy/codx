@@ -864,3 +864,18 @@ fn pick_label(p: Pick) -> String {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Countdowns round up: 0:00 only once the time is over.
+    #[test]
+    fn countdowns_read_like_clocks() {
+        assert_eq!(fmt_time(0.0), "0:00");
+        assert_eq!(fmt_time(0.2), "0:01");
+        assert_eq!(fmt_time(59.5), "1:00");
+        assert_eq!(fmt_time(605.0), "10:05");
+        assert_eq!(fmt_time(-3.0), "0:00");
+    }
+}
