@@ -68,6 +68,9 @@ impl Default for HostSettings {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// (Measurements) set for this run only: nothing is written back (`--video`).
+    #[serde(skip)]
+    pub read_only: bool,
     /// A number this installation made up once: servers keep our records under it.
     #[serde(default)]
     pub player_key: u64,
@@ -152,6 +155,7 @@ impl Settings {
     fn defaults(lang: toon_shared::lang::Lang) -> Self {
         use toon_shared::lang::t;
         Settings {
+            read_only: false,
             player_key: 0,
             party_token: String::new(),
             play_mode: "br".into(),
@@ -230,6 +234,9 @@ impl Settings {
     }
 
     pub fn save(&self) {
+        if self.read_only {
+            return;
+        }
         let p = path();
         if let Some(d) = p.parent() {
             let _ = std::fs::create_dir_all(d);
@@ -309,6 +316,17 @@ pub enum Preset {
 
 impl Preset {
     pub const ALL: [Preset; 4] = [Preset::Low, Preset::Medium, Preset::High, Preset::Ultra];
+
+    /// `low`, `medium`, `high` or `ultra` (the command line's `--video`).
+    pub fn parse(s: &str) -> Option<Preset> {
+        match s {
+            "low" => Some(Preset::Low),
+            "medium" => Some(Preset::Medium),
+            "high" => Some(Preset::High),
+            "ultra" => Some(Preset::Ultra),
+            _ => None,
+        }
+    }
 
     pub fn name(self) -> &'static str {
         use toon_shared::lang::t;

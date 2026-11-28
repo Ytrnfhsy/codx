@@ -20,6 +20,7 @@ mod models;
 mod netclient;
 mod party;
 mod pilot;
+mod profile;
 mod ragdoll;
 mod render;
 mod ruins;
@@ -194,6 +195,11 @@ async fn amain(args: Args) {
     let mut fps_window = (Instant::now(), 0u32);
     let mut worst_frame = 0.0f32;
     let mut fullscreen_now = app.settings.fullscreen;
+    let mut profiling = app.args.profile.map(|secs| {
+        let game = app.args.host || app.args.connect.is_some();
+        profile::ProfileRun::new(secs, app.args.profile_out.clone(), game)
+    });
+    let mut last_shown = Instant::now();
     loop {
         apply_settings(&mut app.settings, &app.audio, &mut fullscreen_now);
         let input = read_input(&mut app);
@@ -215,7 +221,10 @@ async fn amain(args: Args) {
             );
         }
         let flow = match &mut screen {
-            Screen::Menu => menu_frame(&mut app, &input).await,
+            Screen::Menu => {
+                let _p = toon_shared::prof::scope("menu");
+                menu_frame(&mut app, &input).await
+            }
             Screen::Connecting {
                 net,
                 address,
@@ -253,7 +262,11 @@ async fn amain(args: Args) {
         let _ = Mode::Tdm;
         // FPS cap when vsync is off: wait until a full frame period has passed since the
         // previous frame began (this includes the time spent presenting it)
-        if !VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed) && settings.fps_limit > 0 {
+        // (not while measuring: the cap's wait is not work)
+        if !VSYNC_AT_START.load(std::sync::atomic::Ordering::Relaxed)
+            && settings.fps_limit > 0
+            && profiling.is_none()
+        {
             let target = std::time::Duration::from_secs_f64(1.0 / settings.fps_limit as f64);
             let elapsed = frame_start.elapsed();
             if elapsed < target {
@@ -269,6 +282,17 @@ async fn amain(args: Args) {
         frame_start = Instant::now();
         next_frame().await;
         clock::frame_done();
+        if let Some(p) = &mut profiling {
+            let present = frame_start.elapsed().as_secs_f64() * 1000.0;
+            let frame = last_shown.elapsed().as_secs_f64() * 1000.0;
+            if p.frame(matches!(screen, Screen::Game(_)), present, frame, settings) {
+                if let Screen::Game(g) = &mut screen {
+                    g.disconnect();
+                }
+                break;
+            }
+        }
+        last_shown = Instant::now();
         if args.log_fps {
             fps_window.1 += 1;
             worst_frame = worst_frame.max(clock::frame_time());
@@ -306,6 +330,11 @@ async fn load(args: Args) -> App {
     }
     if let Some(r) = args.render_scale {
         settings.render_scale = r;
+    }
+    // (measurements: the preset for this run only; the saved settings stay as they are)
+    if let Some(p) = args.video.as_deref().and_then(settings::Preset::parse) {
+        settings.apply_preset(p);
+        settings.read_only = true;
     }
     let audio = audio::Audio::load(settings.volume, !args.no_sound).await;
     let backdrop = {
@@ -758,11 +787,20 @@ async fn connecting_frame(
 /// A frame of the game: keys, the mouse, the test automation, the update, the world
 /// and the HUD.
 async fn game_frame(app: &mut App, input: &FrameInput, g: &mut GameClient) -> Flow {
-    let chars_for_ui = game_keys(g, input, &mut app.settings);
-    grab_mouse(app, g);
-    automate(app, g);
-    g.update(input.dt, &app.settings, Some(&app.audio));
+    use toon_shared::prof::scope;
+    let chars_for_ui = {
+        let _p = scope("input");
+        let c = game_keys(g, input, &mut app.settings);
+        grab_mouse(app, g);
+        automate(app, g);
+        c
+    };
+    {
+        let _p = scope("update");
+        g.update(input.dt, &app.settings, Some(&app.audio));
+    }
     let (view, tags) = render_game(app, g);
+    let _p = scope("hud");
     draw_game_hud(app, input, g, &chars_for_ui, &view, &tags)
 }
 
@@ -974,6 +1012,9 @@ fn automate(app: &mut App, g: &mut GameClient) {
             g.overlay = Overlay::Inventory;
         }
     }
+    if args.br_jump && !g.alive && g.br.as_ref().is_some_and(|b| b.in_plane) {
+        g.net.send(C2S::BrJump);
+    }
     if args.open_menu && clock::now() - start > 5.0 {
         g.overlay = Overlay::Pause;
     }
@@ -1067,9 +1108,16 @@ fn render_game(app: &mut App, g: &mut GameClient) -> (render::View, Vec<render::
         g.reel_texture = None;
         let target = low_res.as_ref().map(|l| l.0.clone());
         let view = render::make_view(g, settings, target.clone());
-        let tags = render::render_world(g, mats, settings, &view);
-        render::render_viewmodel(g, mats, settings, target.clone());
+        let tags = {
+            let _p = toon_shared::prof::scope("world");
+            render::render_world(g, mats, settings, &view)
+        };
+        {
+            let _p = toon_shared::prof::scope("viewmodel");
+            render::render_viewmodel(g, mats, settings, target.clone());
+        }
         set_default_camera();
+        let _post = toon_shared::prof::scope("screen pass (grade, FXAA, bloom)");
         if let Some(rt) = &target {
             clear_background(BLACK);
             if settings.color_grade || settings.fxaa || settings.bloom {
@@ -1116,6 +1164,7 @@ fn render_game(app: &mut App, g: &mut GameClient) -> (render::View, Vec<render::
     };
     // the battle royale lobby: the players on their podiums over the island
     if g.in_br_lobby() {
+        let _p = toon_shared::prof::scope("lobby podiums");
         render::draw_lobby_scene(
             mats,
             &g.lobby_cast(settings.skin),

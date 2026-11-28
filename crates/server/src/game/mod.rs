@@ -22,6 +22,7 @@ use toon_shared::consts::*;
 use toon_shared::lang::{pick, t, Lang, Text};
 use toon_shared::map::{Map, MapId, Spawn};
 use toon_shared::physics::{body_box, Body, Stance, World};
+use toon_shared::prof;
 use toon_shared::protocol::*;
 use toon_shared::rng::Rng;
 use toon_shared::weapons::{Cause, Killstreak, Loadout, WeaponId, DEFAULT_CLASSES};
@@ -237,6 +238,9 @@ pub struct Game {
     pub public: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Players to disconnect (id, reason) — handled by the network layer.
     pub kicked: Vec<(u8, String)>,
+    /// (Benchmarks) bots count as players who watch: what they may see and the loot near
+    /// them are worked out for them too, as for a server full of people.
+    pub everyone_watches: bool,
     pub next_housekeeping: f64,
     pub match_started: bool,
     /// Route searches bots may still make this tick.
@@ -335,6 +339,7 @@ impl Game {
             registry,
             public: Default::default(),
             kicked: Vec::new(),
+            everyone_watches: false,
             next_housekeeping: 0.0,
             match_started: false,
             path_budget: 0,

@@ -85,8 +85,44 @@ pub const HELP: &str = "Команди:
                                botskill (0..1 або easy/normal/hard/veteran), spawnprotect (секунди),
                                postmatch (5..90 с між матчами: підсумки й кращі моменти),
                                bleedtime, revivetime (с), revivehp — поранені в королівській битві
+  profile on|off|reset       — заміри тіку: час кожної системи, трафік, пам'ять
+  profile                    — звіт (p50/p99/max за весь час із profile on)
   save                       — зберегти налаштування у файл
   help                       — ця довідка";
+
+/// `profile on|off|reset`, or the report so far. (The numbers are the server loop's own:
+/// it runs this command too.)
+fn profile(arg: Option<&str>) -> String {
+    use toon_shared::prof;
+    match arg {
+        Some("on") => {
+            prof::enable();
+            prof::reset();
+            "Заміри почато: profile — звіт".into()
+        }
+        Some("off") => {
+            prof::disable();
+            "Заміри зупинено (звіт лишився: profile)".into()
+        }
+        Some("reset") => {
+            prof::reset();
+            "Заміри почато наново".into()
+        }
+        Some(other) => format!("Невідомо: {other} (on, off, reset)"),
+        None => {
+            let (ticks, lines) = prof::lines();
+            if ticks == 0 {
+                return "Немає замірів: спершу profile on".into();
+            }
+            let mem = prof::resident_mb().map_or("—".into(), |m| format!("{m:.0} МБ"));
+            format!(
+                "Тіків: {ticks} ({:.0} с), пам'ять процесу: {mem}\n{}",
+                ticks as f64 * toon_shared::consts::TICK_DT as f64,
+                prof::table(&lines)
+            )
+        }
+    }
+}
 
 fn find_player(g: &Game, who: &str) -> Option<u8> {
     if let Ok(id) = who.trim_start_matches('#').parse::<u8>() {
@@ -163,6 +199,7 @@ pub fn exec(g: &mut Game, line: &str) -> String {
         "" => String::new(),
         "help" | "?" => HELP.into(),
         "status" | "players" => status(g),
+        "profile" => profile(args.next()),
         "say" => {
             if rest.is_empty() {
                 return "Використання: say <текст>".into();

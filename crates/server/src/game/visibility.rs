@@ -71,18 +71,20 @@ impl Game {
         true
     }
 
-    /// Ten times a second: for every real player, which of the enemies they could hide
-    /// from them are in sight. A line from their eyes (and where their eyes will be in a
+    /// Ten times a second for every real player (a third of them each tick): which of the
+    /// enemies they could hide from them are in sight. A line from their eyes (and where their eyes will be in a
     /// moment) to the enemy's head, body, feet, sides or where they are heading, none of it
     /// through a wall, a floor or the ground. Bots read the world directly and need none.
     pub(super) fn update_visibility(&mut self) {
-        if !self.tick.is_multiple_of(3) {
-            return;
-        }
         let now = self.time;
         let mut seen: Vec<(u8, u8)> = Vec::new();
         for v in self.players.iter().flatten() {
-            if v.is_bot() || !v.team.is_playing() {
+            if v.is_bot() && !self.everyone_watches || !v.team.is_playing() {
+                continue;
+            }
+            // a third of the players each tick, each in turn (the work spread out, not
+            // all of it on every third tick)
+            if !(self.tick + v.id as u32).is_multiple_of(3) {
                 continue;
             }
             // watching somebody after death: through their eyes

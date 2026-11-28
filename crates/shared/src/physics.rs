@@ -406,14 +406,22 @@ impl World {
         (stop, normal, pierced)
     }
 
-    /// True if nothing blocks the segment a → b.
+    /// True if nothing blocks the segment a → b. (What `raycast` would say, sooner: once a
+    /// box is in the way the ground behind it does not matter, and marching along the
+    /// ground is the costly part.)
     pub fn line_of_sight(&self, a: Vec3, b: Vec3) -> bool {
         let d = b - a;
         let len = d.length();
         if len < 1e-4 {
             return true;
         }
-        self.raycast(a, d / len, len).is_none()
+        let d = d / len;
+        if self.box_ray(a, d, len).is_some() {
+            return false;
+        }
+        self.terrain
+            .as_ref()
+            .is_none_or(|t| t.raycast(a, d, len).is_none())
     }
 
     /// Pushes a sphere out of every box it overlaps (smallest-penetration axis).

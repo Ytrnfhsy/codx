@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use toon_shared::consts::*;
 use toon_shared::net::Channel;
+use toon_shared::prof;
 use toon_shared::protocol::{C2S, S2C};
 
 /// A silent client is dropped after this long (its game waits as long for us).
@@ -26,6 +27,8 @@ struct Conn {
     closing: Option<f64>,
     /// Language announced before `Hello`.
     lang: toon_shared::lang::Lang,
+    /// Bytes sent and received up to the last tick (the profiler counts each tick's).
+    counted: (u64, u64),
 }
 
 pub fn info_json(g: &Game) -> serde_json::Value {
@@ -191,6 +194,7 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
         let now = start.elapsed().as_secs_f64();
 
         // ---- receive
+        let receive = prof::scope("net: receive");
         loop {
             match socket.recv_from(&mut buf) {
                 Ok((n, addr)) => {
@@ -209,6 +213,7 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                         conns.insert(
                             addr,
                             Conn {
+                                counted: (0, 0),
                                 chan: Channel::new(),
                                 lang: Default::default(),
                                 id: None,
@@ -345,6 +350,8 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
             }
         }
 
+        drop(receive);
+
         // ---- simulate
         game.tick(TICK_DT);
 
@@ -359,6 +366,7 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
         }
 
         // ---- route messages
+        let route = prof::scope("net: messages");
         let outbox = std::mem::take(&mut game.outbox);
         for (dest, msg, reliable) in &outbox {
             for c in conns.values_mut() {
@@ -377,6 +385,8 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                 }
             }
         }
+        drop(route);
+        let snapshots = prof::scope("net: snapshots");
         for c in conns.values_mut() {
             if let Some(id) = c.id {
                 if game.p(id).is_some() {
@@ -385,7 +395,9 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                 }
             }
         }
+        drop(snapshots);
         game.shots.clear();
+        let send = prof::scope("net: send");
         for (addr, c) in conns.iter_mut() {
             let pkt = c.chan.build_packet(now);
             let _ = socket.send_to(&pkt, addr);
@@ -393,6 +405,22 @@ pub fn run(socket: UdpSocket, mut game: Game, admin_rx: Receiver<AdminMsg>, stop
                 let _ = socket.send_to(&more, addr);
             }
         }
+        drop(send);
+        if prof::enabled() {
+            let mut players = 0;
+            for c in conns.values_mut() {
+                let (sent, recv) = (c.chan.bytes_sent, c.chan.bytes_recv);
+                prof::value(
+                    "net down, all clients (B/tick)",
+                    (sent - c.counted.0) as f64,
+                );
+                prof::value("net up, all clients (B/tick)", (recv - c.counted.1) as f64);
+                c.counted = (sent, recv);
+                players += c.id.is_some() as u32;
+            }
+            prof::value("clients", players as f64);
+        }
+        prof::frame_end();
 
         // ---- timeouts / closing
         let mut dead = Vec::new();

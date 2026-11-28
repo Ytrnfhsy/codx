@@ -29,10 +29,18 @@ pub(crate) struct Args {
     pub(crate) open_inventory: bool,
     /// (screenshots) the Esc menu open
     pub(crate) open_menu: bool,
+    /// (measurements) out of the battle royale's plane as soon as it flies
+    pub(crate) br_jump: bool,
     /// (screenshots) every frame lasts exactly 1/30 s, so that runs come out the same
     pub(crate) fixed_clock: bool,
     /// (screenshots, tests) the hosted server's dice seed
     pub(crate) seed: Option<u64>,
+    /// (Measurements) after a 5 s warm-up, measure this many seconds, write the report
+    /// (`profile_out`) and quit.
+    pub(crate) profile: Option<f32>,
+    pub(crate) profile_out: Option<String>,
+    /// (Measurements) a video preset for this run only: low, medium, high, ultra.
+    pub(crate) video: Option<String>,
     /// (smoke tests) hold the trigger down once alive
     pub(crate) hold_fire: bool,
     /// (smoke tests) hold the trigger for a second, then let go (a bow's shot)
@@ -126,7 +134,20 @@ fn parse(v: Vec<String>) -> Args {
             "--open-controls" => a.open_controls = true,
             "--open-inventory" => a.open_inventory = true,
             "--open-menu" => a.open_menu = true,
+            "--br-jump" => a.br_jump = true,
             "--fixed-clock" => a.fixed_clock = true,
+            "--profile" => {
+                a.profile = next.and_then(|s| s.parse().ok());
+                i += 1;
+            }
+            "--profile-out" => {
+                a.profile_out = next;
+                i += 1;
+            }
+            "--video" => {
+                a.video = next;
+                i += 1;
+            }
             "--seed" => {
                 a.seed = next.and_then(|s| s.parse().ok());
                 i += 1;

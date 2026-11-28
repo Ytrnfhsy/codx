@@ -1,6 +1,7 @@
 //! The frame's update: input, movement prediction, actions.
 
 use super::*;
+use toon_shared::prof;
 
 impl GameClient {
     /// Per-frame update. `input_enabled` is false while menus are open.
@@ -14,9 +15,15 @@ impl GameClient {
             self.me.hp
         };
         self.swing_doors(dt);
-        self.poll_net(audio);
-        self.update_replays(dt, audio);
-        self.age_things(dt);
+        {
+            let _p = prof::scope("  update: net messages");
+            self.poll_net(audio);
+        }
+        {
+            let _p = prof::scope("  update: replays, ragdolls");
+            self.update_replays(dt, audio);
+            self.age_things(dt);
+        }
 
         let playing_input =
             self.overlay == Overlay::None && self.chat_input.is_none() && !self.big_map;
@@ -34,7 +41,11 @@ impl GameClient {
         let def = self.ws().clone();
         let scoped_weapon = self.weapon().def().scoped;
         if self.alive {
-            self.update_movement(dt, can_act, &def, scoped_weapon, audio);
+            {
+                let _p = prof::scope("  update: movement");
+                self.update_movement(dt, can_act, &def, scoped_weapon, audio);
+            }
+            let _p = prof::scope("  update: weapons, actions");
             let shielded = self.update_weapons(dt, can_act, &def, audio);
             self.update_actions(can_act, shielded);
         } else {
@@ -44,11 +55,18 @@ impl GameClient {
 
         // ---- remotes interpolation
         let live_audio = if self.killcam.is_some() { None } else { audio };
-        self.update_remotes(dt, live_audio);
+        {
+            let _p = prof::scope("  update: other players");
+            self.update_remotes(dt, live_audio);
+        }
 
         self.update_timers(dt);
-        self.rain_splashes(dt, settings);
-        self.update_effects(dt, audio);
+        {
+            let _p = prof::scope("  update: effects");
+            self.rain_splashes(dt, settings);
+            self.update_effects(dt, audio);
+        }
+        let _p = prof::scope("  update: sound");
         self.update_ambient_sound(audio);
     }
 
