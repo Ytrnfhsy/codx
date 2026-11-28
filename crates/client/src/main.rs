@@ -143,787 +143,93 @@ fn draw_backdrop(b: &Backdrop, mats: &mesh::Materials) {
     );
 }
 
+/// What one frame read from the keyboard and the mouse.
+struct FrameInput {
+    dt: f32,
+    /// Typed text (and pasted).
+    chars: Vec<char>,
+    backspace: bool,
+    enter: bool,
+    mx: f32,
+    my: f32,
+}
+
+/// What a screen wants once its frame is drawn.
+enum Flow {
+    Stay,
+    Go(Screen),
+    Quit,
+}
+
+/// What the screens share from frame to frame.
+struct App {
+    args: Args,
+    fonts: ui::Fonts,
+    mats: mesh::Materials,
+    settings: Settings,
+    audio: audio::Audio,
+    backdrop: Backdrop,
+    menu: MenuState,
+    server: Option<toon_server::ServerHandle>,
+    focus: Option<u32>,
+    grabbed: bool,
+    fps: f32,
+    /// A held Backspace keeps deleting (after a short pause, like any text box).
+    backspace_next: f64,
+    start: f64,
+    auto_done: bool,
+    auto_switch: bool,
+    alive_at: Option<f64>,
+    exec_once: Option<String>,
+    low_res: Option<(RenderTarget, i32)>,
+    reel_rt: Option<RenderTarget>,
+    prev_mouse: Vec2,
+}
+
+/// The game's main loop: one frame of the current screen, then the frame is shown.
 async fn amain(args: Args) {
-    let fonts = ui::Fonts::load();
-    let mats = mesh::Materials::new();
-    let mut settings = Settings::load();
-    binds::use_binds(&settings.binds);
-    match args.lang.as_deref() {
-        Some("en") => settings.lang = toon_shared::lang::Lang::En,
-        Some("uk") => settings.lang = toon_shared::lang::Lang::Uk,
-        _ => {}
-    }
-    toon_shared::lang::set(settings.lang);
-    if let Some(n) = &args.name {
-        settings.name = n.clone();
-    }
-    if let Some(r) = args.render_scale {
-        settings.render_scale = r;
-    }
-    let audio = audio::Audio::load(settings.volume, !args.no_sound).await;
-    let backdrop = {
-        let map = toon_shared::maps::build(MapId::Market);
-        Backdrop {
-            mesh: game::build_map_mesh(&map),
-            sky: game::build_sky(&map),
-            map,
-        }
-    };
-    let mut menu = MenuState::new(!args.no_update);
-    let mut screen = Screen::Menu;
-    let mut server: Option<toon_server::ServerHandle> = None;
-    let mut focus: Option<u32> = None;
-    let mut grabbed = false;
-    let mut fps = 60.0f32;
-    // a held Backspace keeps deleting (after a short pause, like any text box)
-    let mut backspace_next = 0.0f64;
-    let start = clock::now();
-    let mut auto_done = false;
-    let mut auto_switch = false;
-    let mut alive_at: Option<f64> = None;
-    let mut exec_once = args.exec.clone();
-    let mut low_res: Option<(RenderTarget, i32)> = None;
-    let mut reel_rt: Option<RenderTarget> = None;
+    let mut app = load(args).await;
+    let mut screen = first_screen(&mut app);
     let mut frame_start = Instant::now();
     let mut fps_window = (Instant::now(), 0u32);
     let mut worst_frame = 0.0f32;
-    let mut prev_mouse = Vec2::ZERO;
-    prevent_quit();
-
-    let host = |settings: &Settings, args: &Args| -> Result<toon_server::ServerHandle, String> {
-        let hs = &settings.host;
-        let mut cfg = toon_server::config::ServerConfig::default();
-        cfg.name = hs.name.clone();
-        cfg.port = hs.port;
-        cfg.bots = hs.bots;
-        cfg.br.bots = hs.br_bots;
-        cfg.br.max_players = hs.br_max_players;
-        cfg.br.squad = hs.br_squad.clamp(1, 4);
-        cfg.br.weather = args.weather.clone().unwrap_or(hs.br_weather.clone());
-        cfg.bot_skill = hs.bot_skill;
-        cfg.postmatch_time = hs.postmatch.clamp(5.0, 90.0);
-        cfg.rcon_password = args.rcon.clone().unwrap_or(hs.rcon.clone());
-        cfg.password = hs.password.clone();
-        cfg.max_players = hs.max_players;
-        cfg.min_players = 1;
-        cfg.seed = args.seed;
-        if let Some(n) = args.score_limit {
-            cfg.tdm.score_limit = n.max(1);
-        }
-        // (the island and the battle royale only go together)
-        let entry = toon_server::config::RotationEntry {
-            map: args.map.clone().unwrap_or(hs.map.clone()),
-            mode: args.mode.clone().unwrap_or(hs.mode.clone()),
-        };
-        let (map, mode) = entry.resolve();
-        let (map, mode) = (map.short().to_string(), mode.short().to_string());
-        // --bots: for the mode we start with
-        if let Some(n) = args.bots {
-            if Mode::parse(&mode) == Some(Mode::Br) {
-                cfg.br.bots = n;
-                cfg.br.max_players = cfg.br.max_players.max(n);
-            } else {
-                cfg.bots = n;
-                cfg.max_players = cfg.max_players.max(n);
-            }
-        }
-        if Mode::parse(&mode) == Some(Mode::Br) {
-            // a battle royale server plays round after round of it
-            cfg.rotation = vec![toon_server::config::RotationEntry { map, mode }];
-        } else {
-            cfg.rotation.retain(|r| !(r.map == map && r.mode == mode));
-            cfg.rotation
-                .insert(0, toon_server::config::RotationEntry { map, mode });
-        }
-        toon_server::start(cfg, None)
-    };
-
-    if args.host {
-        match host(&settings, &args) {
-            Ok(h) => {
-                let port = h.port;
-                server = Some(h);
-                match NetClient::connect(
-                    &format!("127.0.0.1:{port}"),
-                    &settings.name,
-                    &settings.host.password,
-                ) {
-                    Ok(net) => {
-                        screen = Screen::Connecting {
-                            net,
-                            address: format!("127.0.0.1:{port}"),
-                            since: Instant::now(),
-                        }
-                    }
-                    Err(e) => menu.error = Some(e),
-                }
-            }
-            Err(e) => menu.error = Some(e),
-        }
-    } else if let Some(addr) = &args.connect {
-        match NetClient::connect(addr, &settings.name, &settings.password) {
-            Ok(net) => {
-                screen = Screen::Connecting {
-                    net,
-                    address: addr.clone(),
-                    since: Instant::now(),
-                }
-            }
-            Err(e) => menu.error = Some(e),
-        }
-    }
-
-    let mut fullscreen_now = settings.fullscreen;
+    let mut fullscreen_now = app.settings.fullscreen;
     loop {
-        // full screen / window switches at once (F11 too)
-        if is_key_pressed(KeyCode::F11) {
-            settings.fullscreen = !settings.fullscreen;
-            settings.save();
-        }
-        if settings.fullscreen != fullscreen_now {
-            fullscreen_now = settings.fullscreen;
-            set_fullscreen(fullscreen_now);
-        }
-        // the volume slider works at once, in the menu and in a game
-        if (audio.volume() - settings.volume).abs() > 1e-4 {
-            audio.set_volume(settings.volume);
-        }
-        // the chosen language for everything this frame draws and says
-        toon_shared::lang::set(settings.lang);
-        let dt = clock::frame_time().min(0.1);
-        fps = fps * 0.95 + (1.0 / dt.max(1e-4)) * 0.05;
-        // typed text, and Ctrl+V (Cmd+V, Shift+Insert) pastes the clipboard. With Ctrl
-        // held, the letters are shortcuts, not text (but AltGr, which is Ctrl+Alt on
-        // Windows, still types)
-        // (held, or pressed this very frame: a quick shortcut can go down and up between
-        // two frames)
-        let held = |k: KeyCode| is_key_down(k) || is_key_pressed(k);
-        let ctrl = held(KeyCode::LeftControl)
-            || held(KeyCode::RightControl)
-            || held(KeyCode::LeftSuper)
-            || held(KeyCode::RightSuper);
-        let alt = held(KeyCode::LeftAlt) || held(KeyCode::RightAlt);
-        let shift = held(KeyCode::LeftShift) || held(KeyCode::RightShift);
-        let mut chars = Vec::new();
-        while let Some(c) = get_char_pressed() {
-            if !(ctrl && !alt) {
-                chars.push(c);
-            }
-        }
-        if (ctrl && !alt && is_key_pressed(KeyCode::V))
-            || (shift && is_key_pressed(KeyCode::Insert))
-        {
-            if let Some(clip) = miniquad::window::clipboard_get() {
-                chars.extend(
-                    clip.chars()
-                        .map(|c| if c.is_whitespace() { ' ' } else { c })
-                        .filter(|c| !c.is_control())
-                        .take(200),
-                );
-            }
-        }
-        let now_t = clock::now();
-        let backspace = if is_key_pressed(KeyCode::Backspace) {
-            backspace_next = now_t + 0.45;
-            true
-        } else if is_key_down(KeyCode::Backspace) && now_t >= backspace_next {
-            backspace_next = now_t + 0.035;
-            true
-        } else {
-            false
-        };
-        let enter = is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter);
-        let (mx, my) = mouse_position();
+        apply_settings(&mut app.settings, &app.audio, &mut fullscreen_now);
+        let input = read_input(&mut app);
 
         if is_quit_requested() {
             if let Screen::Game(g) = &mut screen {
                 g.disconnect();
             }
-            settings.save();
+            app.settings.save();
             break;
         }
 
-        let mut next: Option<Screen> = None;
         // the main lobby's squad hears whether we are playing just now
-        if let Some(p) = &menu.party {
+        if let Some(p) = &app.menu.party {
             p.set_me(
-                &settings.name,
-                settings.skin,
+                &app.settings.name,
+                app.settings.skin,
                 matches!(screen, Screen::Game(_)),
             );
         }
-        match &mut screen {
-            Screen::Menu if args.model_gallery => {
-                render::draw_model_gallery(&mats);
-            }
-            Screen::Menu => {
-                if grabbed {
-                    set_cursor_grab(false);
-                    show_mouse(true);
-                    grabbed = false;
-                }
-                draw_backdrop(&backdrop, &mats);
-                if menu.page == menu::Page::Lobby {
-                    render::draw_lobby_scene(
-                        &mats,
-                        &lobby::cast(&menu, &settings),
-                        clock::now() as f32,
-                        menu.turn,
-                        menu.zoom,
-                    );
-                }
-                let mut ui = ui::Ui {
-                    fonts: &fonts,
-                    mouse: vec2(mx, my),
-                    clicked: is_mouse_button_pressed(MouseButton::Left),
-                    down: is_mouse_button_down(MouseButton::Left),
-                    focus: &mut focus,
-                    chars: &chars,
-                    backspace,
-                    enter,
-                    hot: false,
-                };
-                let running = server.as_ref().filter(|s| s.is_running()).map(|s| s.port);
-                match menu::draw_menu(&mut ui, &mut menu, &mut settings, running) {
-                    Some(MenuAction::Matched { address }) => {
-                        menu.error = None;
-                        netclient::MATCHED.store(true, std::sync::atomic::Ordering::Relaxed);
-                        settings.save();
-                        match NetClient::connect(&address, &settings.name, "") {
-                            Ok(net) => {
-                                next = Some(Screen::Connecting {
-                                    net,
-                                    address,
-                                    since: Instant::now(),
-                                })
-                            }
-                            Err(e) => menu.error = Some(e),
-                        }
-                    }
-                    Some(MenuAction::Connect { address }) => {
-                        menu.error = None;
-                        settings.save();
-                        // (by hand: on our own)
-                        netclient::PARTY_TAG.store(0, std::sync::atomic::Ordering::Relaxed);
-                        netclient::MATCHED.store(false, std::sync::atomic::Ordering::Relaxed);
-                        match NetClient::connect(&address, &settings.name, &settings.password) {
-                            Ok(net) => {
-                                next = Some(Screen::Connecting {
-                                    net,
-                                    address,
-                                    since: Instant::now(),
-                                })
-                            }
-                            Err(e) => menu.error = Some(e),
-                        }
-                    }
-                    Some(MenuAction::Host) => {
-                        settings.save();
-                        netclient::PARTY_TAG.store(0, std::sync::atomic::Ordering::Relaxed);
-                        netclient::MATCHED.store(false, std::sync::atomic::Ordering::Relaxed);
-                        if let Some(mut s) = server.take() {
-                            s.shutdown();
-                        }
-                        match host(&settings, &args) {
-                            Ok(h) => {
-                                let port = h.port;
-                                // back from the game, the main page shows the server's status
-                                menu.page = menu::Page::Main;
-                                menu.host_info = Some(
-                                    (if h.http_port.is_some() {
-                                        tr!(
-                                            "адмінка: http://localhost:{port}/admin",
-                                            "admin: http://localhost:{port}/admin"
-                                        )
-                                    } else {
-                                        String::new()
-                                    })
-                                    .to_string(),
-                                );
-                                server = Some(h);
-                                let addr = format!("127.0.0.1:{port}");
-                                match NetClient::connect(
-                                    &addr,
-                                    &settings.name,
-                                    &settings.host.password,
-                                ) {
-                                    Ok(net) => {
-                                        next = Some(Screen::Connecting {
-                                            net,
-                                            address: addr,
-                                            since: Instant::now(),
-                                        })
-                                    }
-                                    Err(e) => menu.error = Some(e),
-                                }
-                            }
-                            Err(e) => menu.error = Some(e),
-                        }
-                    }
-                    Some(MenuAction::StopServer) => {
-                        if let Some(mut s) = server.take() {
-                            s.shutdown();
-                        }
-                        menu.host_info = None;
-                    }
-                    Some(MenuAction::Quit) => {
-                        settings.save();
-                        break;
-                    }
-                    None => {}
-                }
-            }
+        let flow = match &mut screen {
+            Screen::Menu => menu_frame(&mut app, &input).await,
             Screen::Connecting {
                 net,
                 address,
                 since,
-            } => {
-                draw_backdrop(&backdrop, &mats);
-                let ui = ui::Ui {
-                    fonts: &fonts,
-                    mouse: vec2(mx, my),
-                    clicked: false,
-                    down: false,
-                    focus: &mut focus,
-                    chars: &[],
-                    backspace: false,
-                    enter: false,
-                    hot: false,
-                };
-                let dots = ".".repeat(((clock::now() * 3.0) as usize) % 4);
-                ui.centered(
-                    &tr!(
-                        "Під'єднання до {address}{dots}",
-                        "Connecting to {address}{dots}"
-                    ),
-                    screen_width() / 2.0,
-                    screen_height() / 2.0,
-                    28,
-                    ui::ACCENT,
-                );
-                ui.centered(
-                    t("Esc — скасувати", "Esc — cancel"),
-                    screen_width() / 2.0,
-                    screen_height() / 2.0 + 36.0,
-                    16,
-                    ui::MUTED,
-                );
-                net.maybe_flush(0.1);
-                let msgs = net.poll();
-                let mut welcome = None;
-                let mut rest = Vec::new();
-                for m in msgs {
-                    match m {
-                        S2C::Welcome {
-                            id,
-                            server_name,
-                            motd,
-                            map,
-                            mode,
-                            settings: gs,
-                            nonce,
-                        } if welcome.is_none() => {
-                            welcome = Some(Welcome {
-                                nonce,
-                                id,
-                                server_name,
-                                motd,
-                                map,
-                                mode,
-                                settings: gs,
-                            });
-                        }
-                        S2C::Reject(r) => {
-                            menu.error = Some(r);
-                            next = Some(Screen::Menu);
-                        }
-                        other => rest.push(other),
-                    }
-                }
-                if let Some(w) = welcome {
-                    settings.remember_server(address);
-                    settings.save();
-                    let net = std::mem::replace(
-                        net,
-                        NetClient::connect("127.0.0.1:1", "", "").expect("dummy socket"),
-                    );
-                    let mut g = GameClient::new(net, w, &settings, rest);
-                    if let Some((y, p)) = args.look {
-                        g.yaw = y;
-                        g.pitch = p;
-                    }
-                    if let Some(p) = args.spec_pos {
-                        g.spec_pos = p;
-                    }
-                    next = Some(Screen::Game(Box::new(g)));
-                } else if since.elapsed().as_secs_f32() > 8.0 {
-                    menu.error = Some(tr!(
-                        "Сервер {address} не відповідає. Перевір адресу і чи відкрито UDP-порт.",
-                        "Server {address} does not answer. Check the address and that the UDP port is open."
-                    ));
-                    next = Some(Screen::Menu);
-                } else if is_key_pressed(KeyCode::Escape) {
-                    next = Some(Screen::Menu);
-                }
-            }
-            Screen::Game(g) => {
-                // ---- keyboard routing
-                let mut chars_for_ui: Vec<char> = Vec::new();
-                if let Some((text, team)) = g.chat_input.as_mut() {
-                    for c in &chars {
-                        if !c.is_control() && text.chars().count() < 120 {
-                            text.push(*c);
-                        }
-                    }
-                    if backspace {
-                        text.pop();
-                    }
-                    if enter {
-                        let (t, team) = (text.clone(), *team);
-                        g.chat_input = None;
-                        g.send_chat(t, team);
-                    } else if is_key_pressed(KeyCode::Escape) {
-                        g.chat_input = None;
-                    }
-                } else if g.overlay == Overlay::None {
-                    use binds::Action;
-                    if binds::pressed(Action::ChatAll) {
-                        g.chat_input = Some((String::new(), false));
-                    } else if binds::pressed(Action::ChatTeam) {
-                        g.chat_input = Some((String::new(), true));
-                    } else if is_key_pressed(KeyCode::Escape) && g.big_map {
-                        g.big_map = false;
-                    } else if is_key_pressed(KeyCode::Escape) {
-                        // Esc first skips a killcam (like a click), then opens the pause menu
-                        if !g.skip_killcam() {
-                            g.overlay = Overlay::Pause;
-                        }
-                    } else if binds::pressed(Action::Class) && g.team.is_playing() {
-                        if g.mode == Mode::Br {
-                            // no classes in the battle royale: the key opens the map
-                            g.big_map = !g.big_map;
-                        } else {
-                            g.overlay = Overlay::Class;
-                        }
-                    }
-                } else {
-                    chars_for_ui = chars.clone();
-                    // (while the Controls page waits for a key, Esc only cancels that)
-                    if is_key_pressed(KeyCode::Escape) && !binds::capturing() {
-                        g.pick = None;
-                        g.pick_col = None;
-                        g.overlay = match g.overlay {
-                            Overlay::Settings | Overlay::Leaders | Overlay::Achievements => {
-                                g.menu_back()
-                            }
-                            Overlay::Video => {
-                                settings.save();
-                                Overlay::Settings
-                            }
-                            Overlay::Controls => {
-                                g.binds_editor.close();
-                                Overlay::Settings
-                            }
-                            // before a class is chosen, Esc must still lead somewhere: the
-                            // pause menu (settings, disconnect) instead of doing nothing
-                            Overlay::Team | Overlay::Class if !g.has_class => Overlay::Pause,
-                            Overlay::Pause => g.after_pause(),
-                            _ => Overlay::None,
-                        };
-                    }
-                }
-
-                // ---- cursor grab
-                // (the big map wants the cursor too: a click puts a marker on it)
-                let want_grab = g.overlay == Overlay::None
-                    && g.chat_input.is_none()
-                    && !g.big_map
-                    && !g.in_br_lobby();
-                if want_grab != grabbed {
-                    set_cursor_grab(want_grab);
-                    show_mouse(!want_grab);
-                    grabbed = want_grab;
-                }
-                let md = mouse_delta_position();
-                let pixel = vec2(-md.x * screen_width() * 0.5, -md.y * screen_height() * 0.5);
-                let pixel = if grabbed {
-                    pixel.clamp(Vec2::splat(-400.0), Vec2::splat(400.0))
-                } else {
-                    Vec2::ZERO
-                };
-                // a mouse reporting at 125-1000 Hz and frames drawn at another rate give
-                // some frames no movement and others a double step; averaging two frames
-                // evens that out without changing how far the view turns
-                g.mouse_delta = if settings.mouse_smoothing {
-                    (pixel + prev_mouse) * 0.5
-                } else {
-                    pixel
-                };
-                prev_mouse = pixel;
-
-                // ---- test automation (screenshots / smoke tests)
-                if args.auto && !auto_done && clock::now() - start > 1.0 {
-                    let team = match args.team.as_deref() {
-                        Some("axis") => Some(Team::Axis),
-                        Some("allies") => Some(Team::Allies),
-                        Some("spec") => Some(Team::Spectator),
-                        _ => None,
-                    };
-                    g.join_team(team);
-                    let classes = settings.classes();
-                    let c = args.class.unwrap_or(0).min(classes.len() - 1);
-                    let mut l = classes[c].1;
-                    let gun = args
-                        .gun
-                        .as_deref()
-                        .and_then(|k| toon_shared::weapons::WeaponId::all().find(|w| w.key() == k));
-                    if let Some(w) = gun {
-                        if w.def().class.is_sidearm() {
-                            l.secondary = w;
-                            auto_switch = true;
-                        } else {
-                            l.primary = w;
-                        }
-                    }
-                    g.net.send(C2S::SetLoadout(l));
-                    g.has_class = true;
-                    g.overlay = Overlay::None;
-                    // (screenshots and smoke tests do not wait for a click on «Ready»)
-                    g.net.send(C2S::Ready(true));
-                    auto_done = true;
-                }
-
-                // (a sidearm asked for by --gun: take it in hand once alive)
-                if auto_switch && g.alive && clock::now() - start > 4.0 {
-                    g.switch_to(1);
-                    auto_switch = false;
-                }
-                let held = clock::now() - start;
-                if g.alive
-                    && !g.is_protected()
-                    && g.state == toon_shared::protocol::MatchState::Playing
-                    && alive_at.is_none()
-                {
-                    alive_at = Some(clock::now());
-                }
-                // (a tap: drawn for a second, from a while after spawning)
-                let since_alive = alive_at.map_or(0.0, |a| clock::now() - a);
-                g.hold_ads = args.ads && g.alive && held > 5.0;
-                g.hold_fire = g.alive
-                    && (args.hold_fire && held > 5.0
-                        || args.tap_fire
-                            && alive_at.is_some()
-                            && (0.3..1.5).contains(&since_alive));
-                if let Some(p) = args.pitch.filter(|_| g.alive) {
-                    g.pitch = p;
-                }
-                if let Some(p) = args.spec_at.filter(|_| !g.alive) {
-                    g.spec_pos = p;
-                }
-                if let Some(at) = args.look_at {
-                    let d = (at - g.camera().0).normalize_or_zero();
-                    g.yaw = toon_shared::yaw_of(d);
-                    g.pitch = d.y.clamp(-1.0, 1.0).asin();
-                }
-                if (g.alive || args.spec_at.is_some()) && clock::now() - start > 6.0 {
-                    if let Some(cmd) = exec_once.take() {
-                        g.rcon_pass = args.rcon.clone().unwrap_or_default();
-                        for c in cmd.split(';').map(str::trim).filter(|c| !c.is_empty()) {
-                            g.send_chat(format!("/rcon {c}"), false);
-                        }
-                    }
-                }
-                if args.open_loadout && g.alive && clock::now() - start > 5.0 {
-                    g.overlay = Overlay::Class;
-                }
-                if args.open_controls && g.alive && clock::now() - start > 5.0 {
-                    g.overlay = Overlay::Controls;
-                }
-                if args.open_inventory && clock::now() - start > 4.0 {
-                    // (out of the plane first: the inventory is for the living)
-                    if !g.alive {
-                        g.net.send(C2S::BrJump);
-                    } else if g.br.is_some() {
-                        g.overlay = Overlay::Inventory;
-                    }
-                }
-                if args.open_menu && clock::now() - start > 5.0 {
-                    g.overlay = Overlay::Pause;
-                }
-                g.update(dt, &settings, Some(&audio));
-                // the 3D world goes into its own target: a 32-bit depth buffer whatever the
-                // window got from the system (16 bits on some setups make far walls
-                // flicker and stripe), optional smoothing, and a lower resolution for weak
-                // GPUs
-                let scale = settings.render_scale.clamp(0.4, 1.0);
-                let (tw, th) = (
-                    (screen_width() * scale).max(64.0) as u32,
-                    (screen_height() * scale).max(64.0) as u32,
-                );
-                let samples = if settings.msaa { 4 } else { 1 };
-                if low_res
-                    .as_ref()
-                    .map(|(t, s): &(RenderTarget, i32)| {
-                        (t.texture.width() as u32, t.texture.height() as u32, *s)
-                            != (tw, th, samples)
-                    })
-                    .unwrap_or(true)
-                {
-                    let rt = render_target_ex(
-                        tw,
-                        th,
-                        RenderTargetParams {
-                            sample_count: samples,
-                            depth: true,
-                        },
-                    );
-                    rt.texture.set_filter(if scale < 0.99 {
-                        FilterMode::Linear
-                    } else {
-                        FilterMode::Nearest
-                    });
-                    low_res = Some((rt, samples));
-                }
-                // between matches the world is seen only in the results screen's window,
-                // through the eyes of whoever made the moment
-                let summary = g.summary_active();
-                let (view, tags) = if summary {
-                    let (rw, rh) = summary::reel_size();
-                    if reel_rt.as_ref().is_none_or(|t: &RenderTarget| {
-                        (t.texture.width() as u32, t.texture.height() as u32) != (rw, rh)
-                    }) {
-                        let rt = render_target_ex(
-                            rw,
-                            rh,
-                            RenderTargetParams {
-                                sample_count: 1,
-                                depth: true,
-                            },
-                        );
-                        rt.texture.set_filter(FilterMode::Linear);
-                        reel_rt = Some(rt);
-                    }
-                    let rt = reel_rt.clone();
-                    let view = render::make_view(g, &settings, rt.clone());
-                    let tags = if g.killcam.is_some() {
-                        let tags = render::render_world(g, &mats, &settings, &view);
-                        render::render_viewmodel(g, &mats, &settings, rt.clone());
-                        tags
-                    } else {
-                        Vec::new()
-                    };
-                    set_default_camera();
-                    clear_background(Color::new(0.06, 0.07, 0.11, 1.0));
-                    g.reel_texture = rt.as_ref().map(|t| t.texture.clone());
-                    // a still of each moment, at its moment, for the small windows
-                    if let (Some(k), Some(t)) = (&g.killcam, &rt) {
-                        let n = g.highlights.clips.len();
-                        if n > 0 && k.pt >= k.t_kill {
-                            let clip = &mut g.highlights.clips[g.reel % n];
-                            if clip.thumb.is_none() {
-                                clip.thumb =
-                                    Some(Texture2D::from_image(&t.texture.get_texture_data()));
-                            }
-                        }
-                    }
-                    (view, tags)
-                } else {
-                    g.reel_texture = None;
-                    let target = low_res.as_ref().map(|l| l.0.clone());
-                    let view = render::make_view(g, &settings, target.clone());
-                    let tags = render::render_world(g, &mats, &settings, &view);
-                    render::render_viewmodel(g, &mats, &settings, target.clone());
-                    set_default_camera();
-                    if let Some(rt) = &target {
-                        clear_background(BLACK);
-                        if settings.color_grade || settings.fxaa || settings.bloom {
-                            // evenings are warmer, rain and fog flatter
-                            use toon_shared::weather::Weather;
-                            let grade = if !settings.color_grade {
-                                vec4(0.0, 1.0, 0.0, 0.0)
-                            } else {
-                                match g.weather {
-                                    Weather::Clear => vec4(0.3, 1.14, 0.5, 0.03),
-                                    Weather::Evening => vec4(0.35, 1.18, 0.6, 0.05),
-                                    Weather::Overcast => vec4(0.22, 1.04, 0.5, 0.01),
-                                    Weather::Rain => vec4(0.25, 0.96, 0.7, -0.01),
-                                    Weather::Fog => vec4(0.15, 0.94, 0.45, 0.0),
-                                    Weather::Night => vec4(0.3, 0.9, 0.9, -0.03),
-                                }
-                            };
-                            mats.post.set_uniform("Grade", grade);
-                            mats.post.set_uniform(
-                                "Fx",
-                                vec4(
-                                    1.0 / rt.texture.width(),
-                                    1.0 / rt.texture.height(),
-                                    settings.fxaa as u8 as f32,
-                                    if settings.bloom { 1.0 } else { 0.0 },
-                                ),
-                            );
-                            gl_use_material(&mats.post);
-                        }
-                        draw_texture_ex(
-                            &rt.texture,
-                            0.0,
-                            0.0,
-                            WHITE,
-                            DrawTextureParams {
-                                dest_size: Some(vec2(screen_width(), screen_height())),
-                                flip_y: true,
-                                ..Default::default()
-                            },
-                        );
-                        gl_use_default_material();
-                    }
-                    (view, tags)
-                };
-                // the battle royale lobby: the players on their podiums over the island
-                if g.in_br_lobby() {
-                    render::draw_lobby_scene(
-                        &mats,
-                        &g.lobby_cast(settings.skin),
-                        clock::now() as f32,
-                        g.lobby_turn,
-                        g.lobby_zoom,
-                    );
-                }
-                let mut ui = ui::Ui {
-                    fonts: &fonts,
-                    mouse: vec2(mx, my),
-                    clicked: is_mouse_button_pressed(MouseButton::Left),
-                    down: is_mouse_button_down(MouseButton::Left),
-                    focus: &mut focus,
-                    chars: &chars_for_ui,
-                    backspace,
-                    enter,
-                    hot: false,
-                };
-                g.skin_preview = None;
-                // (--no-hud: clean pictures of the world once the game is on)
-                let action = if args.no_hud && (g.alive || args.spec_at.is_some()) {
-                    None
-                } else {
-                    g.draw_hud(&mut ui, &view, &tags, &mut settings, fps)
-                };
-                if let Some(rect) = g.skin_preview {
-                    render::draw_skin_preview(&mats, settings.skin, rect, clock::now() as f32);
-                }
-                if let Some((rect, team, weapon)) = g.mvp_preview.filter(|_| g.summary_active()) {
-                    render::draw_soldier_preview(&mats, 0, team, weapon, rect, clock::now() as f32);
-                }
-                if let Some(hud::HudAction::Leave) = action {
-                    g.disconnect();
-                    menu.page = menu::Page::Lobby;
-                    next = Some(Screen::Menu);
-                }
-                if let Some(reason) = g.leave.take() {
-                    menu.error = Some(reason);
-                    menu.page = menu::Page::Lobby;
-                    next = Some(Screen::Menu);
-                }
-            }
-        }
+            } => connecting_frame(&mut app, &input, net, address, *since).await,
+            Screen::Game(g) => game_frame(&mut app, &input, g).await,
+        };
+        let next = match flow {
+            Flow::Stay => None,
+            Flow::Go(s) => Some(s),
+            Flow::Quit => break,
+        };
+        let start = app.start;
+        let App { args, settings, .. } = &mut app;
 
         // screenshot for automated testing
         if let Some(path) = &args.shot {
@@ -978,7 +284,910 @@ async fn amain(args: Args) {
             }
         }
     }
-    if let Some(mut s) = server.take() {
+    if let Some(mut s) = app.server.take() {
         s.shutdown();
     }
+}
+
+/// Fonts, materials, settings, sounds and the menu's backdrop.
+async fn load(args: Args) -> App {
+    let fonts = ui::Fonts::load();
+    let mats = mesh::Materials::new();
+    let mut settings = Settings::load();
+    binds::use_binds(&settings.binds);
+    match args.lang.as_deref() {
+        Some("en") => settings.lang = toon_shared::lang::Lang::En,
+        Some("uk") => settings.lang = toon_shared::lang::Lang::Uk,
+        _ => {}
+    }
+    toon_shared::lang::set(settings.lang);
+    if let Some(n) = &args.name {
+        settings.name = n.clone();
+    }
+    if let Some(r) = args.render_scale {
+        settings.render_scale = r;
+    }
+    let audio = audio::Audio::load(settings.volume, !args.no_sound).await;
+    let backdrop = {
+        let map = toon_shared::maps::build(MapId::Market);
+        Backdrop {
+            mesh: game::build_map_mesh(&map),
+            sky: game::build_sky(&map),
+            map,
+        }
+    };
+    let menu = MenuState::new(!args.no_update);
+    App {
+        start: clock::now(),
+        fonts,
+        mats,
+        settings,
+        audio,
+        backdrop,
+        menu,
+        server: None,
+        focus: None,
+        grabbed: false,
+        fps: 60.0,
+        backspace_next: 0.0,
+        auto_done: false,
+        auto_switch: false,
+        alive_at: None,
+        exec_once: args.exec.clone(),
+        low_res: None,
+        reel_rt: None,
+        prev_mouse: Vec2::ZERO,
+        args,
+    }
+}
+
+/// Starts a server on this computer (with bots) for the menu's «Host» or --host.
+fn host(settings: &Settings, args: &Args) -> Result<toon_server::ServerHandle, String> {
+    let hs = &settings.host;
+    let mut cfg = toon_server::config::ServerConfig::default();
+    cfg.name = hs.name.clone();
+    cfg.port = hs.port;
+    cfg.bots = hs.bots;
+    cfg.br.bots = hs.br_bots;
+    cfg.br.max_players = hs.br_max_players;
+    cfg.br.squad = hs.br_squad.clamp(1, 4);
+    cfg.br.weather = args.weather.clone().unwrap_or(hs.br_weather.clone());
+    cfg.bot_skill = hs.bot_skill;
+    cfg.postmatch_time = hs.postmatch.clamp(5.0, 90.0);
+    cfg.rcon_password = args.rcon.clone().unwrap_or(hs.rcon.clone());
+    cfg.password = hs.password.clone();
+    cfg.max_players = hs.max_players;
+    cfg.min_players = 1;
+    cfg.seed = args.seed;
+    if let Some(n) = args.score_limit {
+        cfg.tdm.score_limit = n.max(1);
+    }
+    // (the island and the battle royale only go together)
+    let entry = toon_server::config::RotationEntry {
+        map: args.map.clone().unwrap_or(hs.map.clone()),
+        mode: args.mode.clone().unwrap_or(hs.mode.clone()),
+    };
+    let (map, mode) = entry.resolve();
+    let (map, mode) = (map.short().to_string(), mode.short().to_string());
+    // --bots: for the mode we start with
+    if let Some(n) = args.bots {
+        if Mode::parse(&mode) == Some(Mode::Br) {
+            cfg.br.bots = n;
+            cfg.br.max_players = cfg.br.max_players.max(n);
+        } else {
+            cfg.bots = n;
+            cfg.max_players = cfg.max_players.max(n);
+        }
+    }
+    if Mode::parse(&mode) == Some(Mode::Br) {
+        // a battle royale server plays round after round of it
+        cfg.rotation = vec![toon_server::config::RotationEntry { map, mode }];
+    } else {
+        cfg.rotation.retain(|r| !(r.map == map && r.mode == mode));
+        cfg.rotation
+            .insert(0, toon_server::config::RotationEntry { map, mode });
+    }
+    toon_server::start(cfg, None)
+}
+
+/// Where the game starts: hosting (--host), connecting (--connect) or the menu.
+fn first_screen(app: &mut App) -> Screen {
+    if app.args.host {
+        match host(&app.settings, &app.args) {
+            Ok(h) => {
+                let port = h.port;
+                app.server = Some(h);
+                match NetClient::connect(
+                    &format!("127.0.0.1:{port}"),
+                    &app.settings.name,
+                    &app.settings.host.password,
+                ) {
+                    Ok(net) => {
+                        return Screen::Connecting {
+                            net,
+                            address: format!("127.0.0.1:{port}"),
+                            since: Instant::now(),
+                        };
+                    }
+                    Err(e) => app.menu.error = Some(e),
+                }
+            }
+            Err(e) => app.menu.error = Some(e),
+        }
+    } else if let Some(addr) = &app.args.connect {
+        match NetClient::connect(addr, &app.settings.name, &app.settings.password) {
+            Ok(net) => {
+                return Screen::Connecting {
+                    net,
+                    address: addr.clone(),
+                    since: Instant::now(),
+                };
+            }
+            Err(e) => app.menu.error = Some(e),
+        }
+    }
+    Screen::Menu
+}
+
+/// Full screen, the volume and the language follow the settings at once.
+fn apply_settings(settings: &mut Settings, audio: &audio::Audio, fullscreen_now: &mut bool) {
+    // full screen / window switches at once (F11 too)
+    if is_key_pressed(KeyCode::F11) {
+        settings.fullscreen = !settings.fullscreen;
+        settings.save();
+    }
+    if settings.fullscreen != *fullscreen_now {
+        *fullscreen_now = settings.fullscreen;
+        set_fullscreen(*fullscreen_now);
+    }
+    // the volume slider works at once, in the menu and in a game
+    if (audio.volume() - settings.volume).abs() > 1e-4 {
+        audio.set_volume(settings.volume);
+    }
+    // the chosen language for everything this frame draws and says
+    toon_shared::lang::set(settings.lang);
+}
+
+/// The frame's time step (and the FPS shown), typed text, Backspace, Enter, the mouse.
+fn read_input(app: &mut App) -> FrameInput {
+    let dt = clock::frame_time().min(0.1);
+    app.fps = app.fps * 0.95 + (1.0 / dt.max(1e-4)) * 0.05;
+    // typed text, and Ctrl+V (Cmd+V, Shift+Insert) pastes the clipboard. With Ctrl
+    // held, the letters are shortcuts, not text (but AltGr, which is Ctrl+Alt on
+    // Windows, still types)
+    // (held, or pressed this very frame: a quick shortcut can go down and up between
+    // two frames)
+    let held = |k: KeyCode| is_key_down(k) || is_key_pressed(k);
+    let ctrl = held(KeyCode::LeftControl)
+        || held(KeyCode::RightControl)
+        || held(KeyCode::LeftSuper)
+        || held(KeyCode::RightSuper);
+    let alt = held(KeyCode::LeftAlt) || held(KeyCode::RightAlt);
+    let shift = held(KeyCode::LeftShift) || held(KeyCode::RightShift);
+    let mut chars = Vec::new();
+    while let Some(c) = get_char_pressed() {
+        if !(ctrl && !alt) {
+            chars.push(c);
+        }
+    }
+    if (ctrl && !alt && is_key_pressed(KeyCode::V)) || (shift && is_key_pressed(KeyCode::Insert)) {
+        if let Some(clip) = miniquad::window::clipboard_get() {
+            chars.extend(
+                clip.chars()
+                    .map(|c| if c.is_whitespace() { ' ' } else { c })
+                    .filter(|c| !c.is_control())
+                    .take(200),
+            );
+        }
+    }
+    let now_t = clock::now();
+    let backspace = if is_key_pressed(KeyCode::Backspace) {
+        app.backspace_next = now_t + 0.45;
+        true
+    } else if is_key_down(KeyCode::Backspace) && now_t >= app.backspace_next {
+        app.backspace_next = now_t + 0.035;
+        true
+    } else {
+        false
+    };
+    let enter = is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter);
+    let (mx, my) = mouse_position();
+    FrameInput {
+        dt,
+        chars,
+        backspace,
+        enter,
+        mx,
+        my,
+    }
+}
+
+/// The main menu (and its lobby).
+async fn menu_frame(app: &mut App, input: &FrameInput) -> Flow {
+    let App {
+        args,
+        fonts,
+        mats,
+        settings,
+        backdrop,
+        menu,
+        server,
+        focus,
+        grabbed,
+        ..
+    } = app;
+    let FrameInput {
+        ref chars,
+        backspace,
+        enter,
+        mx,
+        my,
+        ..
+    } = *input;
+    let mut next: Option<Screen> = None;
+    if args.model_gallery {
+        render::draw_model_gallery(mats);
+        return Flow::Stay;
+    }
+    {
+        if *grabbed {
+            set_cursor_grab(false);
+            show_mouse(true);
+            *grabbed = false;
+        }
+        draw_backdrop(backdrop, mats);
+        if menu.page == menu::Page::Lobby {
+            render::draw_lobby_scene(
+                mats,
+                &lobby::cast(menu, settings),
+                clock::now() as f32,
+                menu.turn,
+                menu.zoom,
+            );
+        }
+        let mut ui = ui::Ui {
+            fonts,
+            mouse: vec2(mx, my),
+            clicked: is_mouse_button_pressed(MouseButton::Left),
+            down: is_mouse_button_down(MouseButton::Left),
+            focus,
+            chars,
+            backspace,
+            enter,
+            hot: false,
+        };
+        let running = server.as_ref().filter(|s| s.is_running()).map(|s| s.port);
+        match menu::draw_menu(&mut ui, menu, settings, running) {
+            Some(MenuAction::Matched { address }) => {
+                menu.error = None;
+                netclient::MATCHED.store(true, std::sync::atomic::Ordering::Relaxed);
+                settings.save();
+                match NetClient::connect(&address, &settings.name, "") {
+                    Ok(net) => {
+                        next = Some(Screen::Connecting {
+                            net,
+                            address,
+                            since: Instant::now(),
+                        })
+                    }
+                    Err(e) => menu.error = Some(e),
+                }
+            }
+            Some(MenuAction::Connect { address }) => {
+                menu.error = None;
+                settings.save();
+                // (by hand: on our own)
+                netclient::PARTY_TAG.store(0, std::sync::atomic::Ordering::Relaxed);
+                netclient::MATCHED.store(false, std::sync::atomic::Ordering::Relaxed);
+                match NetClient::connect(&address, &settings.name, &settings.password) {
+                    Ok(net) => {
+                        next = Some(Screen::Connecting {
+                            net,
+                            address,
+                            since: Instant::now(),
+                        })
+                    }
+                    Err(e) => menu.error = Some(e),
+                }
+            }
+            Some(MenuAction::Host) => {
+                settings.save();
+                netclient::PARTY_TAG.store(0, std::sync::atomic::Ordering::Relaxed);
+                netclient::MATCHED.store(false, std::sync::atomic::Ordering::Relaxed);
+                if let Some(mut s) = server.take() {
+                    s.shutdown();
+                }
+                match host(settings, args) {
+                    Ok(h) => {
+                        let port = h.port;
+                        // back from the game, the main page shows the server's status
+                        menu.page = menu::Page::Main;
+                        menu.host_info = Some(
+                            (if h.http_port.is_some() {
+                                tr!(
+                                    "адмінка: http://localhost:{port}/admin",
+                                    "admin: http://localhost:{port}/admin"
+                                )
+                            } else {
+                                String::new()
+                            })
+                            .to_string(),
+                        );
+                        *server = Some(h);
+                        let addr = format!("127.0.0.1:{port}");
+                        match NetClient::connect(&addr, &settings.name, &settings.host.password) {
+                            Ok(net) => {
+                                next = Some(Screen::Connecting {
+                                    net,
+                                    address: addr,
+                                    since: Instant::now(),
+                                })
+                            }
+                            Err(e) => menu.error = Some(e),
+                        }
+                    }
+                    Err(e) => menu.error = Some(e),
+                }
+            }
+            Some(MenuAction::StopServer) => {
+                if let Some(mut s) = server.take() {
+                    s.shutdown();
+                }
+                menu.host_info = None;
+            }
+            Some(MenuAction::Quit) => {
+                settings.save();
+                return Flow::Quit;
+            }
+            None => {}
+        }
+    }
+    next.map_or(Flow::Stay, Flow::Go)
+}
+
+/// Waiting for the server's welcome.
+async fn connecting_frame(
+    app: &mut App,
+    input: &FrameInput,
+    net: &mut NetClient,
+    address: &str,
+    since: Instant,
+) -> Flow {
+    let App {
+        args,
+        fonts,
+        mats,
+        settings,
+        backdrop,
+        menu,
+        focus,
+        ..
+    } = app;
+    let FrameInput { mx, my, .. } = *input;
+    let mut next: Option<Screen> = None;
+    draw_backdrop(backdrop, mats);
+    let ui = ui::Ui {
+        fonts,
+        mouse: vec2(mx, my),
+        clicked: false,
+        down: false,
+        focus,
+        chars: &[],
+        backspace: false,
+        enter: false,
+        hot: false,
+    };
+    let dots = ".".repeat(((clock::now() * 3.0) as usize) % 4);
+    ui.centered(
+        &tr!(
+            "Під'єднання до {address}{dots}",
+            "Connecting to {address}{dots}"
+        ),
+        screen_width() / 2.0,
+        screen_height() / 2.0,
+        28,
+        ui::ACCENT,
+    );
+    ui.centered(
+        t("Esc — скасувати", "Esc — cancel"),
+        screen_width() / 2.0,
+        screen_height() / 2.0 + 36.0,
+        16,
+        ui::MUTED,
+    );
+    net.maybe_flush(0.1);
+    let msgs = net.poll();
+    let mut welcome = None;
+    let mut rest = Vec::new();
+    for m in msgs {
+        match m {
+            S2C::Welcome {
+                id,
+                server_name,
+                motd,
+                map,
+                mode,
+                settings: gs,
+                nonce,
+            } if welcome.is_none() => {
+                welcome = Some(Welcome {
+                    nonce,
+                    id,
+                    server_name,
+                    motd,
+                    map,
+                    mode,
+                    settings: gs,
+                });
+            }
+            S2C::Reject(r) => {
+                menu.error = Some(r);
+                next = Some(Screen::Menu);
+            }
+            other => rest.push(other),
+        }
+    }
+    if let Some(w) = welcome {
+        settings.remember_server(address);
+        settings.save();
+        let net = std::mem::replace(
+            net,
+            NetClient::connect("127.0.0.1:1", "", "").expect("dummy socket"),
+        );
+        let mut g = GameClient::new(net, w, settings, rest);
+        if let Some((y, p)) = args.look {
+            g.yaw = y;
+            g.pitch = p;
+        }
+        if let Some(p) = args.spec_pos {
+            g.spec_pos = p;
+        }
+        next = Some(Screen::Game(Box::new(g)));
+    } else if since.elapsed().as_secs_f32() > 8.0 {
+        menu.error = Some(tr!(
+            "Сервер {address} не відповідає. Перевір адресу і чи відкрито UDP-порт.",
+            "Server {address} does not answer. Check the address and that the UDP port is open."
+        ));
+        next = Some(Screen::Menu);
+    } else if is_key_pressed(KeyCode::Escape) {
+        next = Some(Screen::Menu);
+    }
+    next.map_or(Flow::Stay, Flow::Go)
+}
+
+/// A frame of the game: keys, the mouse, the test automation, the update, the world
+/// and the HUD.
+async fn game_frame(app: &mut App, input: &FrameInput, g: &mut GameClient) -> Flow {
+    let chars_for_ui = game_keys(g, input, &mut app.settings);
+    grab_mouse(app, g);
+    automate(app, g);
+    g.update(input.dt, &app.settings, Some(&app.audio));
+    let (view, tags) = render_game(app, g);
+    draw_game_hud(app, input, g, &chars_for_ui, &view, &tags)
+}
+
+/// Keys that go to the chat or move between pages; returns the text for the page's
+/// text boxes.
+fn game_keys(g: &mut GameClient, input: &FrameInput, settings: &mut Settings) -> Vec<char> {
+    let FrameInput {
+        ref chars,
+        backspace,
+        enter,
+        ..
+    } = *input;
+    // ---- keyboard routing
+    let mut chars_for_ui: Vec<char> = Vec::new();
+    if let Some((text, team)) = g.chat_input.as_mut() {
+        for c in chars {
+            if !c.is_control() && text.chars().count() < 120 {
+                text.push(*c);
+            }
+        }
+        if backspace {
+            text.pop();
+        }
+        if enter {
+            let (t, team) = (text.clone(), *team);
+            g.chat_input = None;
+            g.send_chat(t, team);
+        } else if is_key_pressed(KeyCode::Escape) {
+            g.chat_input = None;
+        }
+    } else if g.overlay == Overlay::None {
+        use binds::Action;
+        if binds::pressed(Action::ChatAll) {
+            g.chat_input = Some((String::new(), false));
+        } else if binds::pressed(Action::ChatTeam) {
+            g.chat_input = Some((String::new(), true));
+        } else if is_key_pressed(KeyCode::Escape) && g.big_map {
+            g.big_map = false;
+        } else if is_key_pressed(KeyCode::Escape) {
+            // Esc first skips a killcam (like a click), then opens the pause menu
+            if !g.skip_killcam() {
+                g.overlay = Overlay::Pause;
+            }
+        } else if binds::pressed(Action::Class) && g.team.is_playing() {
+            if g.mode == Mode::Br {
+                // no classes in the battle royale: the key opens the map
+                g.big_map = !g.big_map;
+            } else {
+                g.overlay = Overlay::Class;
+            }
+        }
+    } else {
+        chars_for_ui = chars.clone();
+        // (while the Controls page waits for a key, Esc only cancels that)
+        if is_key_pressed(KeyCode::Escape) && !binds::capturing() {
+            g.pick = None;
+            g.pick_col = None;
+            g.overlay = match g.overlay {
+                Overlay::Settings | Overlay::Leaders | Overlay::Achievements => g.menu_back(),
+                Overlay::Video => {
+                    settings.save();
+                    Overlay::Settings
+                }
+                Overlay::Controls => {
+                    g.binds_editor.close();
+                    Overlay::Settings
+                }
+                // before a class is chosen, Esc must still lead somewhere: the
+                // pause menu (settings, disconnect) instead of doing nothing
+                Overlay::Team | Overlay::Class if !g.has_class => Overlay::Pause,
+                Overlay::Pause => g.after_pause(),
+                _ => Overlay::None,
+            };
+        }
+    }
+    chars_for_ui
+}
+
+/// The cursor is held by the game while nothing else wants it; the mouse turns the view.
+fn grab_mouse(app: &mut App, g: &mut GameClient) {
+    let App {
+        settings,
+        grabbed,
+        prev_mouse,
+        ..
+    } = app;
+    // ---- cursor grab
+    // (the big map wants the cursor too: a click puts a marker on it)
+    let want_grab =
+        g.overlay == Overlay::None && g.chat_input.is_none() && !g.big_map && !g.in_br_lobby();
+    if want_grab != *grabbed {
+        set_cursor_grab(want_grab);
+        show_mouse(!want_grab);
+        *grabbed = want_grab;
+    }
+    let md = mouse_delta_position();
+    let pixel = vec2(-md.x * screen_width() * 0.5, -md.y * screen_height() * 0.5);
+    let pixel = if *grabbed {
+        pixel.clamp(Vec2::splat(-400.0), Vec2::splat(400.0))
+    } else {
+        Vec2::ZERO
+    };
+    // a mouse reporting at 125-1000 Hz and frames drawn at another rate give
+    // some frames no movement and others a double step; averaging two frames
+    // evens that out without changing how far the view turns
+    g.mouse_delta = if settings.mouse_smoothing {
+        (pixel + *prev_mouse) * 0.5
+    } else {
+        pixel
+    };
+    *prev_mouse = pixel;
+}
+
+/// Screenshots and smoke tests: joining, the gun, holding the trigger or the sights,
+/// where to look, admin commands, pages to open.
+fn automate(app: &mut App, g: &mut GameClient) {
+    let App {
+        args,
+        settings,
+        start,
+        auto_done,
+        auto_switch,
+        alive_at,
+        exec_once,
+        ..
+    } = app;
+    let start = *start;
+    // ---- test automation (screenshots / smoke tests)
+    if args.auto && !*auto_done && clock::now() - start > 1.0 {
+        let team = match args.team.as_deref() {
+            Some("axis") => Some(Team::Axis),
+            Some("allies") => Some(Team::Allies),
+            Some("spec") => Some(Team::Spectator),
+            _ => None,
+        };
+        g.join_team(team);
+        let classes = settings.classes();
+        let c = args.class.unwrap_or(0).min(classes.len() - 1);
+        let mut l = classes[c].1;
+        let gun = args
+            .gun
+            .as_deref()
+            .and_then(|k| toon_shared::weapons::WeaponId::all().find(|w| w.key() == k));
+        if let Some(w) = gun {
+            if w.def().class.is_sidearm() {
+                l.secondary = w;
+                *auto_switch = true;
+            } else {
+                l.primary = w;
+            }
+        }
+        g.net.send(C2S::SetLoadout(l));
+        g.has_class = true;
+        g.overlay = Overlay::None;
+        // (screenshots and smoke tests do not wait for a click on «Ready»)
+        g.net.send(C2S::Ready(true));
+        *auto_done = true;
+    }
+
+    // (a sidearm asked for by --gun: take it in hand once alive)
+    if *auto_switch && g.alive && clock::now() - start > 4.0 {
+        g.switch_to(1);
+        *auto_switch = false;
+    }
+    let held = clock::now() - start;
+    if g.alive
+        && !g.is_protected()
+        && g.state == toon_shared::protocol::MatchState::Playing
+        && alive_at.is_none()
+    {
+        *alive_at = Some(clock::now());
+    }
+    // (a tap: drawn for a second, from a while after spawning)
+    let since_alive = alive_at.map_or(0.0, |a| clock::now() - a);
+    g.hold_ads = args.ads && g.alive && held > 5.0;
+    g.hold_fire = g.alive
+        && (args.hold_fire && held > 5.0
+            || args.tap_fire && alive_at.is_some() && (0.3..1.5).contains(&since_alive));
+    if let Some(p) = args.pitch.filter(|_| g.alive) {
+        g.pitch = p;
+    }
+    if let Some(p) = args.spec_at.filter(|_| !g.alive) {
+        g.spec_pos = p;
+    }
+    if let Some(at) = args.look_at {
+        let d = (at - g.camera().0).normalize_or_zero();
+        g.yaw = toon_shared::yaw_of(d);
+        g.pitch = d.y.clamp(-1.0, 1.0).asin();
+    }
+    if (g.alive || args.spec_at.is_some()) && clock::now() - start > 6.0 {
+        if let Some(cmd) = exec_once.take() {
+            g.rcon_pass = args.rcon.clone().unwrap_or_default();
+            for c in cmd.split(';').map(str::trim).filter(|c| !c.is_empty()) {
+                g.send_chat(format!("/rcon {c}"), false);
+            }
+        }
+    }
+    if args.open_loadout && g.alive && clock::now() - start > 5.0 {
+        g.overlay = Overlay::Class;
+    }
+    if args.open_controls && g.alive && clock::now() - start > 5.0 {
+        g.overlay = Overlay::Controls;
+    }
+    if args.open_inventory && clock::now() - start > 4.0 {
+        // (out of the plane first: the inventory is for the living)
+        if !g.alive {
+            g.net.send(C2S::BrJump);
+        } else if g.br.is_some() {
+            g.overlay = Overlay::Inventory;
+        }
+    }
+    if args.open_menu && clock::now() - start > 5.0 {
+        g.overlay = Overlay::Pause;
+    }
+}
+
+/// The world (into its own render target), or the results screen's reel; then the
+/// battle royale lobby's podiums.
+fn render_game(app: &mut App, g: &mut GameClient) -> (render::View, Vec<render::NameTag>) {
+    let App {
+        mats,
+        settings,
+        low_res,
+        reel_rt,
+        ..
+    } = app;
+    // the 3D world goes into its own target: a 32-bit depth buffer whatever the
+    // window got from the system (16 bits on some setups make far walls
+    // flicker and stripe), optional smoothing, and a lower resolution for weak
+    // GPUs
+    let scale = settings.render_scale.clamp(0.4, 1.0);
+    let (tw, th) = (
+        (screen_width() * scale).max(64.0) as u32,
+        (screen_height() * scale).max(64.0) as u32,
+    );
+    let samples = if settings.msaa { 4 } else { 1 };
+    if low_res
+        .as_ref()
+        .map(|(t, s): &(RenderTarget, i32)| {
+            (t.texture.width() as u32, t.texture.height() as u32, *s) != (tw, th, samples)
+        })
+        .unwrap_or(true)
+    {
+        let rt = render_target_ex(
+            tw,
+            th,
+            RenderTargetParams {
+                sample_count: samples,
+                depth: true,
+            },
+        );
+        rt.texture.set_filter(if scale < 0.99 {
+            FilterMode::Linear
+        } else {
+            FilterMode::Nearest
+        });
+        *low_res = Some((rt, samples));
+    }
+    // between matches the world is seen only in the results screen's window,
+    // through the eyes of whoever made the moment
+    let summary = g.summary_active();
+    let (view, tags) = if summary {
+        let (rw, rh) = summary::reel_size();
+        if reel_rt.as_ref().is_none_or(|t: &RenderTarget| {
+            (t.texture.width() as u32, t.texture.height() as u32) != (rw, rh)
+        }) {
+            let rt = render_target_ex(
+                rw,
+                rh,
+                RenderTargetParams {
+                    sample_count: 1,
+                    depth: true,
+                },
+            );
+            rt.texture.set_filter(FilterMode::Linear);
+            *reel_rt = Some(rt);
+        }
+        let rt = reel_rt.clone();
+        let view = render::make_view(g, settings, rt.clone());
+        let tags = if g.killcam.is_some() {
+            let tags = render::render_world(g, mats, settings, &view);
+            render::render_viewmodel(g, mats, settings, rt.clone());
+            tags
+        } else {
+            Vec::new()
+        };
+        set_default_camera();
+        clear_background(Color::new(0.06, 0.07, 0.11, 1.0));
+        g.reel_texture = rt.as_ref().map(|t| t.texture.clone());
+        // a still of each moment, at its moment, for the small windows
+        if let (Some(k), Some(t)) = (&g.killcam, &rt) {
+            let n = g.highlights.clips.len();
+            if n > 0 && k.pt >= k.t_kill {
+                let clip = &mut g.highlights.clips[g.reel % n];
+                if clip.thumb.is_none() {
+                    clip.thumb = Some(Texture2D::from_image(&t.texture.get_texture_data()));
+                }
+            }
+        }
+        (view, tags)
+    } else {
+        g.reel_texture = None;
+        let target = low_res.as_ref().map(|l| l.0.clone());
+        let view = render::make_view(g, settings, target.clone());
+        let tags = render::render_world(g, mats, settings, &view);
+        render::render_viewmodel(g, mats, settings, target.clone());
+        set_default_camera();
+        if let Some(rt) = &target {
+            clear_background(BLACK);
+            if settings.color_grade || settings.fxaa || settings.bloom {
+                // evenings are warmer, rain and fog flatter
+                use toon_shared::weather::Weather;
+                let grade = if !settings.color_grade {
+                    vec4(0.0, 1.0, 0.0, 0.0)
+                } else {
+                    match g.weather {
+                        Weather::Clear => vec4(0.3, 1.14, 0.5, 0.03),
+                        Weather::Evening => vec4(0.35, 1.18, 0.6, 0.05),
+                        Weather::Overcast => vec4(0.22, 1.04, 0.5, 0.01),
+                        Weather::Rain => vec4(0.25, 0.96, 0.7, -0.01),
+                        Weather::Fog => vec4(0.15, 0.94, 0.45, 0.0),
+                        Weather::Night => vec4(0.3, 0.9, 0.9, -0.03),
+                    }
+                };
+                mats.post.set_uniform("Grade", grade);
+                mats.post.set_uniform(
+                    "Fx",
+                    vec4(
+                        1.0 / rt.texture.width(),
+                        1.0 / rt.texture.height(),
+                        settings.fxaa as u8 as f32,
+                        if settings.bloom { 1.0 } else { 0.0 },
+                    ),
+                );
+                gl_use_material(&mats.post);
+            }
+            draw_texture_ex(
+                &rt.texture,
+                0.0,
+                0.0,
+                WHITE,
+                DrawTextureParams {
+                    dest_size: Some(vec2(screen_width(), screen_height())),
+                    flip_y: true,
+                    ..Default::default()
+                },
+            );
+            gl_use_default_material();
+        }
+        (view, tags)
+    };
+    // the battle royale lobby: the players on their podiums over the island
+    if g.in_br_lobby() {
+        render::draw_lobby_scene(
+            mats,
+            &g.lobby_cast(settings.skin),
+            clock::now() as f32,
+            g.lobby_turn,
+            g.lobby_zoom,
+        );
+    }
+    (view, tags)
+}
+
+/// The HUD and the pages over the game; leaving goes back to the menu.
+fn draw_game_hud(
+    app: &mut App,
+    input: &FrameInput,
+    g: &mut GameClient,
+    chars_for_ui: &[char],
+    view: &render::View,
+    tags: &[render::NameTag],
+) -> Flow {
+    let App {
+        args,
+        fonts,
+        mats,
+        settings,
+        menu,
+        focus,
+        fps,
+        ..
+    } = app;
+    let fps = *fps;
+    let FrameInput {
+        backspace,
+        enter,
+        mx,
+        my,
+        ..
+    } = *input;
+    let mut next: Option<Screen> = None;
+    let mut ui = ui::Ui {
+        fonts,
+        mouse: vec2(mx, my),
+        clicked: is_mouse_button_pressed(MouseButton::Left),
+        down: is_mouse_button_down(MouseButton::Left),
+        focus,
+        chars: chars_for_ui,
+        backspace,
+        enter,
+        hot: false,
+    };
+    g.skin_preview = None;
+    // (--no-hud: clean pictures of the world once the game is on)
+    let action = if args.no_hud && (g.alive || args.spec_at.is_some()) {
+        None
+    } else {
+        g.draw_hud(&mut ui, view, tags, settings, fps)
+    };
+    if let Some(rect) = g.skin_preview {
+        render::draw_skin_preview(mats, settings.skin, rect, clock::now() as f32);
+    }
+    if let Some((rect, team, weapon)) = g.mvp_preview.filter(|_| g.summary_active()) {
+        render::draw_soldier_preview(mats, 0, team, weapon, rect, clock::now() as f32);
+    }
+    if let Some(hud::HudAction::Leave) = action {
+        g.disconnect();
+        menu.page = menu::Page::Lobby;
+        next = Some(Screen::Menu);
+    }
+    if let Some(reason) = g.leave.take() {
+        menu.error = Some(reason);
+        menu.page = menu::Page::Lobby;
+        next = Some(Screen::Menu);
+    }
+    next.map_or(Flow::Stay, Flow::Go)
 }
