@@ -6,23 +6,39 @@ impl Game {
     // ---------------------------------------------------------------- tick
 
     pub fn tick(&mut self, dt: f32) {
+        let _tick = prof::scope("tick");
         self.time += dt as f64;
         self.tick = self.tick.wrapping_add(1);
         self.registry.tick(self.time);
         self.path_budget = PATHS_PER_TICK;
-        self.update_state(dt);
-        self.update_visibility();
+        {
+            let _p = prof::scope("match, mode (br: zone, loot, drops)");
+            self.update_state(dt);
+        }
+        {
+            let _p = prof::scope("visibility");
+            self.update_visibility();
+        }
         self.update_pings();
-        self.update_bullets();
-        self.update_pickups();
+        {
+            let _p = prof::scope("bullets");
+            self.update_bullets();
+        }
+        {
+            let _p = prof::scope("pickups");
+            self.update_pickups();
+        }
 
         // bots
+        let bots = prof::scope("bots");
         for id in self.ids() {
             if self.p(id).map(|p| p.is_bot()).unwrap_or(false) {
                 self.update_bot(id, dt);
             }
         }
+        drop(bots);
 
+        let players = prof::scope("players (budgets, reloads, history)");
         let time = self.time;
         let mut fell = Vec::new();
         let mut auto_spawn = Vec::new();
@@ -86,18 +102,36 @@ impl Game {
             }
         }
 
-        self.update_grenades(dt);
-        self.update_fires();
-        let now = self.time;
-        self.smokes.retain(|s| ((now - s.2) as f32) < SMOKE_TIME);
-        self.update_blasts();
-        self.update_helis(dt);
-        self.update_vehicles(dt);
-        self.update_cars(dt);
-        self.bots_open_doors();
-        self.sync_lying();
+        drop(players);
+
+        {
+            let _p = prof::scope("grenades, fires, smoke, blasts");
+            self.update_grenades(dt);
+            self.update_fires();
+            let now = self.time;
+            self.smokes.retain(|s| ((now - s.2) as f32) < SMOKE_TIME);
+            self.update_blasts();
+        }
+        {
+            let _p = prof::scope("killstreak vehicles, helis");
+            self.update_helis(dt);
+            self.update_vehicles(dt);
+        }
+        {
+            let _p = prof::scope("cars");
+            self.update_cars(dt);
+        }
+        {
+            let _p = prof::scope("bot doors");
+            self.bots_open_doors();
+        }
+        {
+            let _p = prof::scope("lying near (loot sync)");
+            self.sync_lying();
+        }
 
         if self.time >= self.next_housekeeping {
+            let _p = prof::scope("housekeeping (bots, scoreboard)");
             self.next_housekeeping = self.time + 1.0;
             self.manage_bots();
             let rows = self.scoreboard();

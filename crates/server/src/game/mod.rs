@@ -22,6 +22,7 @@ use toon_shared::consts::*;
 use toon_shared::lang::{pick, t, Lang, Text};
 use toon_shared::map::{Map, MapId, Spawn};
 use toon_shared::physics::{body_box, Body, Stance, World};
+use toon_shared::prof;
 use toon_shared::protocol::*;
 use toon_shared::rng::Rng;
 use toon_shared::weapons::{Cause, Killstreak, Loadout, WeaponId, DEFAULT_CLASSES};

@@ -47,6 +47,11 @@ pub fn enable() {
     ON.store(true, Ordering::Relaxed);
 }
 
+/// Stops measuring (what was measured stays for the report).
+pub fn disable() {
+    ON.store(false, Ordering::Relaxed);
+}
+
 pub fn enabled() -> bool {
     ON.load(Ordering::Relaxed)
 }
