@@ -58,8 +58,12 @@ impl Game {
         }
         // footsteps: someone walking or running near enough is heard (and shown where)
         let speed = vec2(t.body.vel.x, t.body.vel.z).length();
-        if t.body.stance == Stance::Stand && speed > 1.5 {
-            let hear = if speed > 6.0 { 34.0 } else { 22.0 };
+        if t.body.stance == Stance::Stand && speed > FOOTSTEPS_WALK_SPEED {
+            let hear = if speed > FOOTSTEPS_RUN_SPEED {
+                FOOTSTEPS_RUN_HEARD
+            } else {
+                FOOTSTEPS_WALK_HEARD
+            };
             if viewer.body.pos.distance(t.body.pos) < hear {
                 return false;
             }

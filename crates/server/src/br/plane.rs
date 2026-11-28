@@ -165,7 +165,7 @@ impl Game {
         p.life = p.life.wrapping_add(1);
         p.protected_until = 0.0;
         p.history.clear();
-        p.move_budget = 3.0;
+        p.move_budget = toon_shared::consts::MOVE_BUDGET_MAX;
         p.last_damage = -100.0;
         p.progress = 0.0;
         let life = p.life;

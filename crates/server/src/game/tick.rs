@@ -36,9 +36,9 @@ impl Game {
             } else {
                 max_speed
             };
-            p.move_budget = (p.move_budget + speed * dt).min(3.0);
-            p.chat_budget = (p.chat_budget + dt * 0.5).min(5.0);
-            p.item_budget = (p.item_budget + dt * 6.0).min(12.0);
+            p.move_budget = (p.move_budget + speed * dt).min(MOVE_BUDGET_MAX);
+            p.chat_budget = (p.chat_budget + dt * CHAT_PER_SEC).min(CHAT_BUDGET_MAX);
+            p.item_budget = (p.item_budget + dt * ITEM_PER_SEC).min(ITEM_BUDGET_MAX);
             if !p.alive {
                 if p.team.is_playing() && p.has_loadout {
                     let wait = if p.is_bot() { 0.0 } else { 3.0 };
@@ -64,7 +64,7 @@ impl Game {
             if time - p.last_damage > REGEN_DELAY as f64 && p.hp < MAX_HEALTH && !br_round {
                 p.hp = (p.hp + REGEN_RATE * dt).min(MAX_HEALTH);
             }
-            if p.body.pos.y < -15.0 {
+            if p.body.pos.y < FALL_OUT_Y {
                 fell.push(p.id);
             }
             p.history.push_back(HistEntry {
@@ -73,7 +73,7 @@ impl Game {
                 yaw: p.yaw,
                 stance: p.body.stance,
             });
-            while p.history.len() > 40 {
+            while p.history.len() > HISTORY_TICKS {
                 p.history.pop_front();
             }
         }
